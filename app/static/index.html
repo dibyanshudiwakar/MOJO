@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ACE Modernization Accelerator</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/styles.css"></head><body>
+<div class="app">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo">
+        <div class="brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div>
+        <div class="brand-text">
+          <div class="brand-eyebrow">ACE</div>
+          <div class="brand-name">Modernization Accelerator</div>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-search"><div class="search-box"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" placeholder="Search jobs, agents…" aria-label="Search"></div></div>
+    <div class="sidebar-scroll" id="nav"></div>
+    <div class="sidebar-footer"><div class="env-badge"><span class="env-dot"></span>DEV · GLOBAL</div></div>
+  </nav>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="hamburger" id="hamburgerBtn" aria-label="Open menu"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+        <div class="breadcrumb"><span>ACE Modernization Accelerator</span><span class="breadcrumb-sep">›</span><span class="breadcrumb-current" id="title">COMMAND CENTER</span></div>
+      </div>
+      <div class="topbar-actions">
+        <button id="ghIndicator" type="button" class="ghchip" hidden></button>
+        <div class="notif-wrap"><button class="icon-btn" aria-label="Notifications"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></button><span class="notif-dot"></span></div>
+        <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><svg id="iconSun" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg><svg id="iconMoon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></button>
+        <button id="new" type="button" class="btn-primary" hidden><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> New Migration</button>
+        <div id="userChip" class="userchip" hidden><button id="userChipButton" type="button"><span class="avatar" id="userAvatar"></span><span class="usermeta"><b id="userName"></b><small id="userRole"></small></span></button><div class="usermenu" id="userMenu" hidden><p class="usermenuhead"><b id="menuName"></b><small id="menuEmail"></small></p><dl id="menuDetail"></dl><div class="usermenu-actions"><button type="button" id="menuGithub" class="usermenu-btn"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>GitHub connection</button><button type="button" id="menuSignOut" class="usermenu-btn danger"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign out</button></div></div></div>
+      </div>
+    </header>
+    <div class="page">
+      <div id="notice"></div>
+      <section id="metrics"></section>
+      <section id="view"></section>
+    </div>
+  </div>
+</div>
+<div id="panelBackdrop" class="panel-backdrop"></div>
+<div id="outputPanel" class="output-panel"></div>
+<dialog id="githubDialog"><h2>GitHub connection</h2><form id="githubForm"><p class="authhint">The factory reads migration sources over your GitHub account. The token is encrypted before storage; the server never returns a token it did not just receive from you, but this browser tab remembers what you enter here so you can review or change it without retyping it.</p><p class="authhint" id="githubCurrent"></p><label>GitHub URL<input name="url" type="url" required placeholder="https://github.com" spellcheck="false" autocomplete="off"></label><p class="authhint">Use <code>https://github.com</code> for cloud, or your GitHub Enterprise Server address.</p><label>Personal access token<span class="tokenfield"><input name="token" type="password" required minlength="8" spellcheck="false" autocomplete="off" placeholder="ghp_..."><button type="button" id="githubTokenToggle" aria-label="Show token"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span></label><p class="authhint">Needs <code>repo</code> scope to read migration sources.</p><p class="authhint bad" id="githubError"></p><div><button type="button" id="githubDisconnect" hidden>Disconnect</button><button type="button" id="githubCancel">Cancel</button><button id="githubSubmit">Save</button></div></form></dialog>
+<dialog id="agentDialog">
+  <h2 id="agentDialogTitle">Add agent</h2>
+  <p class="authhint dlg-sub">Changes here take effect on the running server immediately. A brand-new agent registers its governed contract only — it still needs a matching implementation before it can be dispatched.</p>
+  <form id="agentForm">
+    <div id="agentSummary" hidden class="dlg-agent-hdr"></div>
+    <div id="llmBindingSection" hidden class="dlg-sec dlg-sec-model">
+      <div class="llm-radio-group">
+        <label class="llm-radio-opt">
+          <input type="radio" name="llm_mode" value="DEFAULT" checked>
+          <span class="llm-radio-icon"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
+          <div class="llm-radio-body">
+            <span class="llm-radio-title">System Default</span>
+            <span class="llm-radio-sub">Use the platform-assigned model</span>
+          </div>
+          <span class="llm-radio-check"><svg width="10" height="8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 12 10"><polyline points="1 5 4.5 9 11 1"/></svg></span>
+        </label>
+        <label class="llm-radio-opt">
+          <input type="radio" name="llm_mode" value="AGENT_OVERRIDE">
+          <span class="llm-radio-icon"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <div class="llm-radio-body">
+            <span class="llm-radio-title">Agent Override</span>
+            <span class="llm-radio-sub">Route this agent to a specific model</span>
+          </div>
+          <span class="llm-radio-check"><svg width="10" height="8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 12 10"><polyline points="1 5 4.5 9 11 1"/></svg></span>
+        </label>
+      </div>
+      <div id="llmEffectivePreview" class="llm-effective-line"></div>
+      <div id="llmConfigureOverrideRow" hidden style="margin-top:6px;display:flex;justify-content:flex-end">
+        <button type="button" id="openOverrideDialogBtn" class="btn-configure-override">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M6.34 17.66A8 8 0 1 1 17.66 6.34 8 8 0 0 1 6.34 17.66"/></svg>
+          Configure Override
+          <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+      <div id="llmActionBar" hidden>
+        <button type="button" id="llmValidateBtn" hidden>Validate</button>
+        <button type="button" id="llmActivateBtn" hidden>Activate Draft</button>
+        <button type="button" id="llmRevertBtn" hidden>Revert to Default</button>
+        <span id="llmValidateResult"></span>
+      </div>
+    </div>
+    <details id="agentDetailsSection" class="dlg-sec dlg-collapsible" open>
+      <summary class="dlg-sec-summary">
+        <span class="dlg-sec-lbl">Agent Details</span>
+        <svg class="dlg-collapsible-chevron" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </summary>
+      <div class="formgrid">
+        <label>Agent ID<input name="agent_id" required pattern="[a-z0-9-]+" placeholder="my-new-agent"></label>
+        <label>Version<input name="version" required placeholder="1.0.0"></label>
+      </div>
+      <label>Display name<input name="display_name" required></label>
+      <label>Description<input name="description" required></label>
+      <label class="check"><input type="checkbox" name="enabled" checked>Enabled</label>
+    </details>
+    <details id="contractSection" class="dlg-sec dlg-collapsible" open>
+      <summary class="dlg-sec-summary">
+        <span class="dlg-sec-lbl">Contract</span>
+        <svg class="dlg-collapsible-chevron" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </summary>
+      <label>Required role<input name="required_role" required placeholder="RCA_ANALYST"></label>
+      <label>Status<select name="status"><option>APPROVED</option><option>DRAFT</option><option>RETIRED</option></select></label>
+      <label>Accepted inputs <small>(comma-separated)</small><input name="accepted_inputs" placeholder="semantic_model, evidence"></label>
+      <label>Produced outputs <small>(comma-separated)</small><input name="produced_outputs" placeholder="analysis_document"></label>
+      <label>Tool allow-list <small>(comma-separated)</small><input name="tool_allowlist" placeholder="evidence.write, clarification.create"></label>
+      <label>Dependencies <small>(comma-separated agent IDs)</small><input name="dependencies" placeholder="ace-analysis"></label>
+    </details>
+    <p class="authhint bad" id="agentError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="agentCancel">Cancel</button>
+      <button id="agentSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="overrideConfigDialog">
+  <div class="ocd-header">
+    <div>
+      <div class="ocd-title">Override Configuration</div>
+      <div class="ocd-sub" id="ocdAgentName"></div>
+    </div>
+    <button type="button" id="ocdCloseBtn" class="ocd-close" aria-label="Close">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="ocd-body">
+    <div class="alias-combo-field">
+      <label for="drwAliasInput">Model alias <small>(e.g. reasoning-large, coding)</small></label>
+      <div class="alias-combo" id="drwAliasCombo">
+        <input id="drwAliasInput" class="alias-combo-input" autocomplete="off" spellcheck="false" placeholder="reasoning-large" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-autocomplete="list" aria-controls="drwAliasComboList">
+        <div class="alias-combo-drop" id="drwAliasComboList" hidden role="listbox"></div>
+      </div>
+    </div>
+    <details id="drwAdvSettings">
+      <summary class="dlg-details-toggle"><svg width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Advanced Settings</summary>
+      <div class="adv-groups">
+        <div class="adv-group">
+          <div class="formgrid">
+            <label>Provider type<select id="drw_provider_type"><option value="litellm_alias">LiteLLM alias</option><option value="openai_compatible">OpenAI-compatible</option></select></label>
+            <label>Model ID <small>(optional)</small><input id="drw_model_id" placeholder="Qwen/Qwen3-32B"></label>
+          </div>
+          <label>Model revision <small>(checkpoint / digest)</small><input id="drw_model_revision" placeholder="sha256:abc123 or v1.0"></label>
+          <label>Reason for change <small>(audit log)</small><input id="drw_reason_for_change" placeholder="Switching to higher-capability model for ACE analysis"></label>
+          <label>Capabilities <small>(comma-sep)</small><input id="drw_capabilities" placeholder="chat,structured_output"></label>
+        </div>
+      </div>
+    </details>
+    <details id="drwCompliance">
+      <summary class="dlg-details-toggle"><svg width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Compliance</summary>
+      <div class="adv-groups">
+        <div class="adv-group">
+          <div class="formgrid">
+            <label>Licence ID<input id="drw_licence_id" placeholder="apache-2.0"></label>
+            <label>Data region<input id="drw_data_region" placeholder="us-east-1"></label>
+          </div>
+          <label>Data classification <small>(allowed)</small><input id="drw_data_classification_allowed" placeholder="INTERNAL,CONFIDENTIAL"></label>
+        </div>
+      </div>
+    </details>
+    <details id="drwLimits">
+      <summary class="dlg-details-toggle"><svg width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Limits</summary>
+      <div class="adv-groups">
+        <div class="adv-group">
+          <div class="formgrid">
+            <label>Context limit <small>(tokens)</small><input id="drw_context_limit" type="number" min="0" placeholder="131072"></label>
+            <label>Output limit <small>(tokens)</small><input id="drw_output_limit" type="number" min="0" placeholder="4096"></label>
+          </div>
+        </div>
+      </div>
+    </details>
+    <details id="llmHistorySection" hidden>
+      <summary class="dlg-details-toggle"><svg width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Change history</summary>
+      <div id="llmHistoryList" style="font-size:12px;margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
+    </details>
+    <p class="authhint bad" id="drwError" style="margin:0"></p>
+  </div>
+  <div class="ocd-footer">
+    <button type="button" id="ocdDoneBtn">Done</button>
+  </div>
+</dialog>
+<dialog id="modelDialog">
+  <h2 id="modelDialogTitle">Add model</h2>
+  <p class="authhint dlg-sub">Register a model alias for use in agent LLM bindings. The Name must match the alias exactly as it appears in the gateway.</p>
+  <form id="modelForm">
+    <label>Name / alias <small>(must match gateway alias exactly)</small><input name="name" required placeholder="reasoning-large" spellcheck="false" autocomplete="off"></label>
+    <div class="formgrid">
+      <label>Version <small>(optional)</small><input name="version" placeholder="1.0" spellcheck="false" autocomplete="off"></label>
+      <label>Status<select name="status"><option value="APPROVED">APPROVED</option><option value="DRAFT">DRAFT</option><option value="RETIRED">RETIRED</option></select></label>
+    </div>
+    <div class="formgrid">
+      <label>Provider profile <small>(optional)</small><input name="provider_profile" placeholder="azure-openai-eastus"></label>
+      <label>Region <small>(optional)</small><input name="region" placeholder="us-east-1"></label>
+    </div>
+    <label>Policy <small>(optional)</small><input name="policy" placeholder="enterprise-ai-policy-v2"></label>
+    <p class="authhint bad" id="modelError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="modelCancel">Cancel</button>
+      <button id="modelSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
+<script>try{const t=localStorage.getItem('theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script src="/static/app.js"></script></body></html>

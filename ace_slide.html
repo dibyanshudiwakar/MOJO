@@ -1,0 +1,422 @@
+<title>ACE Modernization Accelerator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap');
+
+/*
+  Light-first corporate design matching CVS Health PPT visual language.
+  Numbered vertical pipeline (left) + business outcomes column (right).
+  Factory step = reversed dark-navy hero block with gold accent.
+*/
+:root {
+  --bg:        #FFFFFF;
+  --surface:   #F2F7FB;
+  --border:    #C8D8E4;
+  --navy:      #0A3554;
+  --navy-mid:  #1B6F9A;
+  --fg:        #0A3554;
+  --fg-2:      #496070;
+  --gold:      #B8872A;
+  --gold-hi:   #C99420;
+  --violet:    #5B4BAA;
+  --green:     #146B4A;
+  --green-bg:  #EAF5F0;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #07111C;
+    --surface:   #0F1D2C;
+    --border:    rgba(255,255,255,0.11);
+    --navy:      #E2EEF8;
+    --navy-mid:  #5EB0DC;
+    --fg:        #E2EEF8;
+    --fg-2:      #8AAEC8;
+    --gold:      #C49A38;
+    --gold-hi:   #E0BC6A;
+    --violet:    #B8ACFF;
+    --green:     #34D399;
+    --green-bg:  rgba(52,211,153,0.10);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:        #07111C;
+  --surface:   #0F1D2C;
+  --border:    rgba(255,255,255,0.11);
+  --navy:      #E2EEF8;
+  --navy-mid:  #5EB0DC;
+  --fg:        #E2EEF8;
+  --fg-2:      #8AAEC8;
+  --gold:      #C49A38;
+  --gold-hi:   #E0BC6A;
+  --violet:    #B8ACFF;
+  --green:     #34D399;
+  --green-bg:  rgba(52,211,153,0.10);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Barlow', system-ui, sans-serif;
+  padding-inline: 32px;
+  padding-block: 36px;
+}
+
+.slide { max-width: 960px; margin-inline: auto; }
+
+/* ── Header ── */
+.slide-header {
+  margin-bottom: 26px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--border);
+}
+
+.eyebrow {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--navy-mid);
+  margin-bottom: 6px;
+}
+
+.slide-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(32px, 5.2vw, 52px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  color: var(--fg);
+  text-wrap: balance;
+}
+
+.slide-sub {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+/* ── Body grid ── */
+.slide-body {
+  display: grid;
+  grid-template-columns: 1fr 264px;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ── Pipeline ── */
+.pipeline { display: flex; flex-direction: column; }
+
+.pipe-row {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Step number circle + connector line */
+.step-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 32px;
+}
+
+.step-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #FFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.step-line {
+  width: 2px;
+  flex: 1;
+  background: var(--border);
+  min-height: 10px;
+  margin: 3px 0;
+}
+
+.pipe-row:last-child .step-line { display: none; }
+
+/* Content boxes */
+.pipe-box {
+  flex: 1;
+  padding: 13px 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 8px;
+}
+
+/* Source: slightly de-emphasised */
+.v-source { opacity: 0.78; }
+
+/* Factory — dark navy hero block */
+.v-brand {
+  background: var(--navy);
+  border-color: var(--navy);
+  border-left: 4px solid var(--gold);
+  padding: 18px 22px;
+}
+
+/* Factory step number: gold circle */
+.row-brand .step-num {
+  background: var(--gold);
+  color: var(--navy);
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+
+/* Other steps: left accent stripe */
+.v-agent  { border-left: 3px solid var(--navy-mid); }
+.v-gate   { border-left: 3px solid var(--gold); }
+.v-test   { border-left: 3px solid var(--violet); }
+.v-output { background: var(--green-bg); border-left: 3px solid var(--green); }
+
+/* Labels */
+.pipe-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.v-brand .pipe-label  { font-size: 22px; color: #FFFFFF; letter-spacing: 0.06em; }
+.v-source .pipe-label { color: var(--fg-2); }
+.v-output .pipe-label { color: var(--green); }
+
+.pipe-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+.v-brand .pipe-sub { color: rgba(255,255,255,0.68); }
+
+.pipe-note {
+  display: inline-block;
+  margin-top: 7px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+
+.note-blue   { background: rgba(27,111,154,0.10); color: var(--navy-mid); }
+.note-amber  { background: rgba(184,135,42,0.12); color: var(--gold-hi); }
+.note-violet { background: rgba(91,75,170,0.10);  color: var(--violet); }
+
+/* ── Outcomes ── */
+.outcomes-col { display: flex; flex-direction: column; gap: 10px; }
+
+.outcomes-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  margin-bottom: 2px;
+}
+
+.outcome {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 13px 15px;
+  background: var(--surface);
+}
+
+.o-blue   { border-left: 3px solid var(--navy-mid); }
+.o-amber  { border-left: 3px solid var(--gold); }
+.o-violet { border-left: 3px solid var(--violet); }
+.o-green  { border-left: 3px solid var(--green); }
+
+.outcome-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg);
+  margin-bottom: 5px;
+}
+
+.outcome-body {
+  font-size: 11.5px;
+  color: var(--fg-2);
+  line-height: 1.55;
+}
+
+/* ── Footer ── */
+.slide-footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.footer-line {
+  font-size: 12px;
+  color: var(--fg-2);
+  font-style: italic;
+  line-height: 1.55;
+}
+
+.footer-line strong {
+  color: var(--fg);
+  font-style: normal;
+}
+
+/* ── Responsive ── */
+@media (max-width: 660px) {
+  .slide-body { grid-template-columns: 1fr; }
+  .outcomes-col { display: grid; grid-template-columns: 1fr 1fr; }
+  .outcomes-label { grid-column: 1 / -1; }
+}
+
+@media (max-width: 420px) {
+  .outcomes-col { display: flex; flex-direction: column; }
+  body { padding-inline: 16px; }
+}
+</style>
+
+<div class="slide">
+
+  <header class="slide-header">
+    <p class="eyebrow">IBM ACE Modernisation</p>
+    <h1 class="slide-title">ACE Modernization Accelerator Enterprise</h1>
+    <p class="slide-sub">AI-powered migration from IBM ACE to Spring Boot — governed at every step, auditable by design, repeatable at portfolio scale.</p>
+  </header>
+
+  <div class="slide-body">
+
+    <div class="pipeline" aria-label="Migration pipeline flow">
+
+      <div class="pipe-row">
+        <div class="step-marker">
+          <div class="step-num">1</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-source">
+          <div class="pipe-label">Legacy Integration Services</div>
+          <div class="pipe-sub">Integration services · Business rules · Data flows · Service contracts</div>
+        </div>
+      </div>
+
+      <div class="pipe-row row-brand">
+        <div class="step-marker">
+          <div class="step-num">2</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-brand">
+          <div class="pipe-label">ACE Modernization Accelerator</div>
+          <div class="pipe-sub">End-to-end governed pipeline — every decision tracked, every approval immutable</div>
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="step-marker">
+          <div class="step-num">3</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-agent">
+          <div class="pipe-label">14 AI Agents</div>
+          <div class="pipe-sub">Analysis · Planning · Code generation · Testing · Remediation</div>
+          <span class="pipe-note note-blue">Schema-governed · Reusable capabilities</span>
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="step-marker">
+          <div class="step-num">4</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-gate">
+          <div class="pipe-label">6 Human Governance Gates</div>
+          <div class="pipe-sub">Named sign-off at each step · Role-enforced · Cannot be bypassed</div>
+          <span class="pipe-note note-amber">Governance pattern applicable enterprise-wide</span>
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="step-marker">
+          <div class="step-num">5</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-test">
+          <div class="pipe-label">Differential Testing</div>
+          <div class="pipe-sub">Behaviour verified before promotion — no variance reaches production unresolved</div>
+          <span class="pipe-note note-violet">Behavioural equivalence proven</span>
+        </div>
+      </div>
+
+      <div class="pipe-row">
+        <div class="step-marker">
+          <div class="step-num">6</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="pipe-box v-output">
+          <div class="pipe-label">Spring Boot Modernisation</div>
+          <div class="pipe-sub">Production-ready microservices · Complete evidence trail · Rollback-ready</div>
+        </div>
+      </div>
+
+    </div>
+
+    <aside class="outcomes-col" aria-label="Business outcomes">
+      <p class="outcomes-label">Business outcomes</p>
+
+      <div class="outcome o-blue">
+        <div class="outcome-name">Faster Modernisation</div>
+        <div class="outcome-body">AI replaces months of manual work. Consistent quality at portfolio scale.</div>
+      </div>
+
+      <div class="outcome o-amber">
+        <div class="outcome-name">Auditability</div>
+        <div class="outcome-body">Every decision and approval immutably recorded. Regulatory inspection-ready by design.</div>
+      </div>
+
+      <div class="outcome o-violet">
+        <div class="outcome-name">Provider Independence</div>
+        <div class="outcome-body">Swap AI providers without changing the pipeline or governance model.</div>
+      </div>
+
+      <div class="outcome o-green">
+        <div class="outcome-name">Repeatable at Scale</div>
+        <div class="outcome-body">One governed programme. Hundreds of services. No bespoke projects.</div>
+      </div>
+    </aside>
+
+  </div>
+
+  <footer class="slide-footer">
+    <p class="footer-line">
+      <strong>The only IBM ACE modernisation accelerator where governance is non-negotiable</strong> — no service reaches production without a complete, signed-off evidence package.
+    </p>
+  </footer>
+
+</div>

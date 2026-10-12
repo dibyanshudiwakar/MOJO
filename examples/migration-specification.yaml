@@ -1,0 +1,27 @@
+metadata:
+  service: OrderService
+  sourceCommit: abc123
+  analysisVersion: "1.0"
+  frameworkTemplateVersion: "1.0"
+source:
+  aceVersion: "12"
+  applications: [OrderApplication]
+  libraries: []
+  flows: []
+  nodes: []
+  esql: []
+  maps: []
+  schemas: []
+  policies: []
+interfaces: []
+behaviour: {routing: [], transformations: [], errorHandling: []}
+target: {springModules: [order-service], approvedDependencies: []}
+mappings: []
+tests: {inputSources: [], invariants: [], masks: [], tolerances: []}
+clarifications:
+  - status: OPEN
+    question: Which MQ policy applies?
+    owner: ACE-SME
+    impact: Blocks adapter mapping
+    evidenceReference: evidence://pending
+governance: {enabledGates: [G0, G1, G2, G3, G4, G5], iterationLimit: 5, stopConditions: [iteration-limit]}

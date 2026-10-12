@@ -1,0 +1,1751 @@
+<title>EAOF vs ACE Migration Factory</title>
+<style>
+/* ===== DESIGN TOKENS ===== */
+/* Layout: sticky sidebar (240px) + scrollable content; collapses to top nav at mobile */
+:root {
+  --bg:        #f5f7fa;
+  --surface:   #ffffff;
+  --surface2:  #f0f3f8;
+  --border:    #dde2ec;
+  --fg:        #1a2332;
+  --fg-muted:  #5a6a82;
+  --accent:    #1b5faa;
+  --accent-lt: #e8f0fb;
+  --green:     #166534;
+  --green-bg:  #dcfce7;
+  --amber:     #92400e;
+  --amber-bg:  #fef3c7;
+  --red:       #991b1b;
+  --red-bg:    #fee2e2;
+  --slate:     #374151;
+  --slate-bg:  #f1f5f9;
+  --cyan:      #0e7490;
+  --cyan-bg:   #e0f2fe;
+  --sidebar-w: 240px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:       #0d1117;
+    --surface:  #161b24;
+    --surface2: #1e2535;
+    --border:   #2a3347;
+    --fg:       #e2e8f5;
+    --fg-muted: #7a8aa8;
+    --accent:   #4a9ade;
+    --accent-lt:#1a2e4a;
+    --green:    #86efac;
+    --green-bg: #14532d;
+    --amber:    #fcd34d;
+    --amber-bg: #451a03;
+    --red:      #fca5a5;
+    --red-bg:   #450a0a;
+    --slate:    #94a3b8;
+    --slate-bg: #1e2535;
+    --cyan:     #67e8f9;
+    --cyan-bg:  #083344;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:       #0d1117;
+  --surface:  #161b24;
+  --surface2: #1e2535;
+  --border:   #2a3347;
+  --fg:       #e2e8f5;
+  --fg-muted: #7a8aa8;
+  --accent:   #4a9ade;
+  --accent-lt:#1a2e4a;
+  --green:    #86efac;
+  --green-bg: #14532d;
+  --amber:    #fcd34d;
+  --amber-bg: #451a03;
+  --red:      #fca5a5;
+  --red-bg:   #450a0a;
+  --slate:    #94a3b8;
+  --slate-bg: #1e2535;
+  --cyan:     #67e8f9;
+  --cyan-bg:  #083344;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* ===== FONTS ===== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ===== LAYOUT ===== */
+.layout {
+  display: flex;
+  min-height: 100%;
+}
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 32px 40px 80px;
+  max-width: 900px;
+}
+
+/* ===== SIDEBAR ===== */
+.sidebar-brand {
+  padding: 20px 16px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-brand .label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.sidebar-brand .title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+.sidebar-meta {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.7;
+}
+.sidebar-meta span { color: var(--fg); font-weight: 500; }
+.nav-section {
+  padding: 12px 0 4px;
+}
+.nav-section-label {
+  padding: 0 16px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.nav-item {
+  display: block;
+  padding: 6px 16px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .1s, color .1s;
+  border-left: 2px solid transparent;
+}
+.nav-item:hover { background: var(--surface2); color: var(--fg); }
+.nav-item.active { background: var(--accent-lt); color: var(--accent); border-left-color: var(--accent); }
+.nav-item .num {
+  display: inline-block;
+  width: 18px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-right: 2px;
+  opacity: .7;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* ===== HERO ===== */
+.hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 32px 36px;
+  margin-bottom: 40px;
+}
+.hero-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.hero h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--fg);
+  text-wrap: balance;
+  margin-bottom: 14px;
+}
+.hero p {
+  font-size: 14.5px;
+  color: var(--fg-muted);
+  max-width: 660px;
+  margin-bottom: 20px;
+}
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.meta-chip {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.meta-chip b { color: var(--fg); font-weight: 600; }
+
+/* ===== SECTION ===== */
+.section {
+  margin-bottom: 60px;
+  scroll-margin-top: 24px;
+}
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+}
+.section-num {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-lt);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.section h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--fg);
+  text-wrap: balance;
+}
+.section h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+  margin: 24px 0 10px;
+}
+.section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 18px 0 8px;
+}
+.section p { margin-bottom: 12px; color: var(--fg); }
+.section p:last-child { margin-bottom: 0; }
+.section ul, .section ol {
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+.section li { margin-bottom: 5px; }
+
+/* ===== CARDS ===== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.card-sm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+.card-sm .card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.card-sm .card-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.card-sm .card-desc {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+/* ===== TABLES ===== */
+.table-wrap { overflow-x: auto; margin-bottom: 20px; border-radius: 8px; border: 1px solid var(--border); }
+table { border-collapse: collapse; width: 100%; min-width: 520px; background: var(--surface); }
+th {
+  background: var(--surface2);
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface2); }
+
+/* ===== BADGES ===== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-green  { background: var(--green-bg);  color: var(--green); }
+.badge-amber  { background: var(--amber-bg);  color: var(--amber); }
+.badge-red    { background: var(--red-bg);    color: var(--red); }
+.badge-slate  { background: var(--slate-bg);  color: var(--slate); }
+.badge-cyan   { background: var(--cyan-bg);   color: var(--cyan); }
+.badge-accent { background: var(--accent-lt); color: var(--accent); }
+
+/* ===== PROGRESS ===== */
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.progress-label {
+  flex: 0 0 220px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.progress-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: var(--surface2);
+  border-radius: 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 8px;
+  transition: width .3s;
+}
+.progress-pct {
+  flex: 0 0 36px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bar-green  { background: #22c55e; }
+.bar-amber  { background: #f59e0b; }
+.bar-red    { background: #ef4444; }
+.bar-accent { background: var(--accent); }
+
+/* ===== CALLOUTS ===== */
+.callout {
+  border-left: 3px solid;
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13.5px;
+}
+.callout-info  { border-color: var(--accent); background: var(--accent-lt); }
+.callout-warn  { border-color: #f59e0b; background: var(--amber-bg); }
+.callout-ok    { border-color: #22c55e; background: var(--green-bg); }
+.callout-risk  { border-color: #ef4444; background: var(--red-bg); }
+.callout-title { font-weight: 700; margin-bottom: 4px; }
+
+/* ===== FLOW DIAGRAM ===== */
+.flow {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--fg-muted);
+  overflow-x: auto;
+  white-space: pre;
+}
+.flow .hl { color: var(--accent); font-weight: 600; }
+.flow .ok { color: var(--green); }
+.flow .warn { color: var(--amber); }
+.flow .miss { color: var(--red); }
+
+/* ===== MAPPING ARROW ===== */
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 32px 1fr;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+.mapping-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+.mapping-box .mbox-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--fg-muted);
+  margin-bottom: 3px;
+}
+.mapping-box .mbox-val { font-weight: 600; color: var(--fg); }
+.mapping-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 18px;
+  padding-top: 20px;
+}
+
+/* ===== EFFORT TABLE ===== */
+.effort-pill {
+  display: inline-block;
+  width: 52px;
+  text-align: center;
+  padding: 2px 0;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ep-low  { background: var(--green-bg);  color: var(--green); }
+.ep-med  { background: var(--amber-bg);  color: var(--amber); }
+.ep-high { background: var(--red-bg);    color: var(--red); }
+
+/* ===== ARCH COMPARISON ===== */
+.arch-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.arch-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.arch-box-header {
+  padding: 10px 16px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: .04em;
+}
+.arch-box-body {
+  padding: 14px 16px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.arch-layer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.arch-arrow {
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  margin: 2px 0;
+}
+.al-blue   { background: var(--accent-lt);  color: var(--accent); }
+.al-green  { background: var(--green-bg);   color: var(--green); }
+.al-amber  { background: var(--amber-bg);   color: var(--amber); }
+.al-slate  { background: var(--slate-bg);   color: var(--slate); }
+.al-cyan   { background: var(--cyan-bg);    color: var(--cyan); }
+.al-red    { background: var(--red-bg);     color: var(--red); }
+
+/* ===== OVERALL SCORE ===== */
+.score-ring-wrap {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.score-ring {
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+  position: relative;
+}
+.score-ring svg { transform: rotate(-90deg); }
+.score-ring .score-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+.score-ring .score-pct {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.score-ring .score-label {
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+/* ===== RECOMMENDATION ===== */
+.rec-banner {
+  background: linear-gradient(135deg, var(--accent-lt), var(--surface2));
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  padding: 24px 28px;
+  margin-bottom: 24px;
+}
+.rec-banner .rec-verdict {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -.01em;
+  margin-bottom: 6px;
+}
+.rec-banner .rec-desc { font-size: 14px; color: var(--fg); }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 760px) {
+  .layout { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .sidebar-brand, .sidebar-meta, .sidebar-footer { display: none; }
+  .nav-section { display: flex; padding: 8px 12px; gap: 4px; }
+  .nav-section-label { display: none; }
+  .nav-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; border-radius: 4px; }
+  .nav-item.active { border-bottom-color: var(--accent); }
+  .main { padding: 20px 16px 60px; }
+  .arch-compare { grid-template-columns: 1fr; }
+  .card-grid { grid-template-columns: 1fr 1fr; }
+  .score-ring-wrap { flex-direction: column; align-items: flex-start; }
+  .progress-label { flex: 0 0 160px; font-size: 12px; }
+  .mapping-row { grid-template-columns: 1fr 24px 1fr; }
+}
+@media (max-width: 420px) {
+  .card-grid { grid-template-columns: 1fr; }
+  .mapping-row { grid-template-columns: 1fr; }
+  .mapping-arrow { display: none; }
+}
+</style>
+
+<div class="layout">
+  <!-- ===== SIDEBAR ===== -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="label">Architecture Decision Document</div>
+      <div class="title">EAOF vs ACE Migration Factory</div>
+    </div>
+    <div class="sidebar-meta">
+      <div>Version: <span>1.0</span></div>
+      <div>Date: <span>2026-10-12</span></div>
+      <div>Status: <span>Proposed</span></div>
+      <div>Audience: <span>All</span></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Document</div>
+      <a class="nav-item active" href="#p1"><span class="num">01</span> Beginner Explanation</a>
+      <a class="nav-item" href="#p2"><span class="num">02</span> Current State Analysis</a>
+      <a class="nav-item" href="#p3"><span class="num">03</span> Maturity Assessment</a>
+      <a class="nav-item" href="#p4"><span class="num">04</span> Business Benefits</a>
+      <a class="nav-item" href="#p5"><span class="num">05</span> Agent Analysis</a>
+      <a class="nav-item" href="#p6"><span class="num">06</span> Skills Analysis</a>
+      <a class="nav-item" href="#p7"><span class="num">07</span> What Not to Adopt</a>
+      <a class="nav-item" href="#p8"><span class="num">08</span> Quick Wins</a>
+      <a class="nav-item" href="#p10"><span class="num">10</span> Target Architecture</a>
+      <a class="nav-item" href="#p11"><span class="num">11</span> Executive Summary</a>
+    </div>
+    <div class="sidebar-footer">ACE Migration Factory Enterprise</div>
+  </nav>
+
+  <!-- ===== MAIN ===== -->
+  <main class="main">
+
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-eyebrow">Architecture Decision Document</div>
+      <h1>EAOF Concepts Applied to ACE Migration Factory</h1>
+      <p>A comprehensive analysis of how Enterprise Agent Orchestration Framework principles compare to, complement, and could strengthen the existing ACE Migration Factory Enterprise platform.</p>
+      <div class="hero-meta">
+        <span class="meta-chip"><b>Status:</b> Proposed</span>
+        <span class="meta-chip"><b>ACE Version:</b> v7.3</span>
+        <span class="meta-chip"><b>EAOF:</b> MVP Spec v1.0</span>
+        <span class="meta-chip"><b>Overall Maturity:</b> ~72%</span>
+        <span class="meta-chip"><b>Recommendation:</b> Selective Adoption</span>
+      </div>
+    </div>
+
+    <!-- ===== PART 1 ===== -->
+    <section class="section" id="p1">
+      <div class="section-header">
+        <span class="section-num">Part 1</span>
+        <h2>Beginner Explanation</h2>
+      </div>
+
+      <h3>What is EAOF, in plain English?</h3>
+      <p>Imagine a large airport. The airport doesn't fly planes — it provides the <em>infrastructure</em> for any airline to operate: runways, gates, baggage systems, air traffic control. Any airline can use the airport. Each airline brings its own planes and routes.</p>
+      <p>EAOF is the airport. It provides the infrastructure for any AI-powered business workflow to operate. You can register AI workers (agents), connect them into workflows (pipelines), and swap out which AI "brain" (model provider) powers each worker — all without rebuilding the airport.</p>
+
+      <h3>What is ACE Migration Factory, in plain English?</h3>
+      <p>ACE Migration Factory is a <em>specific airline</em> that already operates on its own private runway. It has one job: take IBM ACE integration applications and migrate them to Spring Boot microservices. It does this job extremely well. It has 14 specialized workers, strict safety checks at 6 approval gates, an immutable paper trail, and proven governance.</p>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Key Insight</div>
+        EAOF is the generic blueprint for building any such factory. ACE Migration Factory is already a highly mature, domain-specific factory built on similar principles — but built independently rather than from EAOF.
+      </div>
+
+      <h3>What problem does EAOF solve that ACE doesn't?</h3>
+      <div class="card-grid">
+        <div class="card-sm">
+          <div class="card-label">Reusability</div>
+          <div class="card-desc">ACE agents are specialized for IBM ACE migration. EAOF agents can be reused across any pipeline or project in the organization.</div>
+        </div>
+        <div class="card-sm">
+          <div class="card-label">Visual Design</div>
+          <div class="card-desc">ACE pipelines are code-configured. EAOF provides a drag-and-drop visual pipeline designer that non-engineers can use.</div>
+        </div>
+        <div class="card-sm">
+          <div class="card-label">Schema Contracts</div>
+          <div class="card-desc">EAOF enforces typed input/output contracts between every node, making data flow explicit and validated at design time.</div>
+        </div>
+        <div class="card-sm">
+          <div class="card-label">Generic Composition</div>
+          <div class="card-desc">EAOF lets you compose agents into new workflows without changing the agents. ACE's pipeline is relatively fixed.</div>
+        </div>
+      </div>
+
+      <h3>What would happen if ACE ignored EAOF entirely?</h3>
+      <ul>
+        <li>ACE remains excellent at its one job but cannot easily be extended for other migration types or other AI workflows in the organization.</li>
+        <li>Each new AI initiative in the organization builds its own governance, its own agent contracts, its own pipeline engine — duplicating effort.</li>
+        <li>Other teams cannot reuse ACE's agents (Entity Extractor, RCA, Governance) even when those capabilities are needed elsewhere.</li>
+        <li>The organization ends up with many disconnected AI systems instead of a coherent enterprise capability platform.</li>
+        <li>ACE's technical decisions may paint it into corners that require expensive refactoring later.</li>
+      </ul>
+
+      <div class="callout callout-ok">
+        <div class="callout-title">Good News</div>
+        ACE Migration Factory already implements approximately 72% of the EAOF architecture. It didn't follow EAOF's spec, but it arrived at many of the same architectural conclusions independently — which validates both approaches.
+      </div>
+    </section>
+
+    <!-- ===== PART 2 ===== -->
+    <section class="section" id="p2">
+      <div class="section-header">
+        <span class="section-num">Part 2</span>
+        <h2>Current State Analysis</h2>
+      </div>
+
+      <h3>ACE Migration Factory Architecture</h3>
+      <div class="arch-compare">
+        <div class="arch-box">
+          <div class="arch-box-header">ACE Migration Factory (Today)</div>
+          <div class="arch-box-body">
+            <div class="arch-layer al-blue">React SPA (vanilla JS)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-blue">Python stdlib HTTP Server</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-green">14 Domain Agents (BaseAgent)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-amber">WorkflowOrchestrator (DAG)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-cyan">AI Registry + HttpProviderAdapter</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-slate">SQLite / PostgreSQL</div>
+          </div>
+        </div>
+        <div class="arch-box">
+          <div class="arch-box-header">EAOF MVP Spec</div>
+          <div class="arch-box-body">
+            <div class="arch-layer al-blue">React + TypeScript (React Flow)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-blue">FastAPI + Pydantic v2</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-green">Generic Node Registry (AGENT/API/TRANSFORM/PIPELINE)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-amber">Async DAG Executor</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-cyan">ModelProvider (OpenAI/Anthropic/Ollama)</div>
+            <div class="arch-arrow">↓</div>
+            <div class="arch-layer al-slate">PostgreSQL + Alembic</div>
+          </div>
+        </div>
+      </div>
+
+      <h3>Component Mapping: ACE → EAOF</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ACE Migration Factory Component</th><th>EAOF Equivalent</th><th>Match Quality</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>config/agent-catalogue.v1.json</code><br><small>Governed agent contracts</small></td>
+              <td>Agent Registry + Agent Contract</td>
+              <td><span class="badge badge-green">Strong</span></td>
+            </tr>
+            <tr>
+              <td><code>app/agents/base.py</code> — <code>BaseAgent</code>, <code>AgentResult</code><br><small>Agent base contract</small></td>
+              <td>Agent Contract (id, version, input_schema, output_schema)</td>
+              <td><span class="badge badge-amber">Partial</span></td>
+            </tr>
+            <tr>
+              <td><code>app/services/pipelines.py</code> — <code>PipelineService</code><br><small>DAG with CLONE/AGENT/DELIVERY/GATE steps</small></td>
+              <td>Pipeline + DAG Execution Engine</td>
+              <td><span class="badge badge-green">Strong</span></td>
+            </tr>
+            <tr>
+              <td><code>app/services/factory_v3.py</code> — <code>WorkflowOrchestrator</code><br><small>Queue-based async execution</small></td>
+              <td>DAG Executor (async, dependencies, retry, context)</td>
+              <td><span class="badge badge-green">Strong</span></td>
+            </tr>
+            <tr>
+              <td><code>app/services/platform_v7.py</code> — <code>AIRegistryService</code><br><small>Governed model + prompt registry with DLP</small></td>
+              <td>Model Router + ModelProvider abstraction</td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+            </tr>
+            <tr>
+              <td><code>app/services/agent_llm_bindings.py</code><br><small>Per-agent LLM override system with guards AT-05–AT-14</small></td>
+              <td>Model Router (EXPLICIT / DEFAULT / FALLBACK strategies)</td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+            </tr>
+            <tr>
+              <td><code>app/providers/http_adapter.py</code><br><small>OpenAI-compatible provider adapter</small></td>
+              <td>OpenAIProvider / OllamaProvider (OpenAI-compatible)</td>
+              <td><span class="badge badge-green">Strong</span></td>
+            </tr>
+            <tr>
+              <td><code>schemas/migration-specification.schema.json</code><br><small>JSON Schema for migration YAML</small></td>
+              <td>Schema Engine (JSON Schema validation)</td>
+              <td><span class="badge badge-amber">Domain-Specific</span></td>
+            </tr>
+            <tr>
+              <td><code>app/service.py</code> — <code>GATE_TRANSITIONS</code> G0–G5<br><small>Six governance gates with roles and decisions</small></td>
+              <td>Not in EAOF MVP — exceeds the spec</td>
+              <td><span class="badge badge-cyan">Beyond EAOF</span></td>
+            </tr>
+            <tr>
+              <td><code>app/domain/state_machine.py</code><br><small>22-state lifecycle machine</small></td>
+              <td>Pipeline Status (DRAFT/VALIDATED/PUBLISHED/DISABLED) — simpler</td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+            </tr>
+            <tr>
+              <td><code>audit_ledger</code> table (hash-chained)<br><small>Tamper-evident audit trail</small></td>
+              <td>Execution Persistence (node_executions) — basic version</td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+            </tr>
+            <tr>
+              <td><code>app/static/</code> — vanilla JS SPA<br><small>Pipeline wizard, agent registry, approvals UI</small></td>
+              <td>React + TypeScript + React Flow frontend</td>
+              <td><span class="badge badge-amber">Functional but dated</span></td>
+            </tr>
+            <tr>
+              <td><code>app/agents/reasoning.py</code> — <code>ReasoningGateway</code><br><small>Deterministic fallback → model-assisted</small></td>
+              <td>Agent Runtime (deterministic-first is stronger than EAOF)</td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+            </tr>
+            <tr>
+              <td>No generic schema mapping between nodes</td>
+              <td>Schema Mapping Engine ($.customer.email → $.recipient)</td>
+              <td><span class="badge badge-red">Missing</span></td>
+            </tr>
+            <tr>
+              <td>No visual React Flow pipeline designer</td>
+              <td>Pipeline Designer (drag/drop nodes, connect, map)</td>
+              <td><span class="badge badge-red">Missing</span></td>
+            </tr>
+            <tr>
+              <td>No generic capability-based agent discovery</td>
+              <td>Agent Discovery (GET /agents?capability=summarization)</td>
+              <td><span class="badge badge-amber">Partial</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-warn">
+        <div class="callout-title">Important Distinction</div>
+        ACE's governance model (G0–G5 gates, evidence binding, quorum approvals, hash-chained audit ledger, DLP on prompts) is <strong>significantly more mature</strong> than anything EAOF specifies. EAOF's MVP does not include governance at all. If ACE adopts EAOF, it must carry its governance layer forward — not regress to EAOF's simpler model.
+      </div>
+    </section>
+
+    <!-- ===== PART 3 ===== -->
+    <section class="section" id="p3">
+      <div class="section-header">
+        <span class="section-num">Part 3</span>
+        <h2>Maturity Assessment</h2>
+      </div>
+
+      <div class="score-ring-wrap">
+        <div class="score-ring">
+          <svg width="100" height="100" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)" stroke-width="10"/>
+            <circle cx="50" cy="50" r="40" fill="none" stroke="var(--accent)" stroke-width="10"
+              stroke-dasharray="251.2" stroke-dashoffset="70" stroke-linecap="round"/>
+          </svg>
+          <div class="score-text">
+            <div class="score-pct">72%</div>
+            <div class="score-label">Maturity</div>
+          </div>
+        </div>
+        <div>
+          <p style="font-size:14px;font-weight:600;margin-bottom:6px;">ACE Migration Factory EAOF Maturity: 72%</p>
+          <p style="font-size:13px;color:var(--fg-muted);">ACE implements or exceeds 72% of EAOF capabilities. Several key capabilities are missing (generic schema mapping, visual designer) but the core engine is proven and production-grade.</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>EAOF Capability</th><th>ACE Status</th><th>Evidence</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Agent Registry</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>agent-catalogue.v1.json + agent_registry table + drift detection</td>
+            </tr>
+            <tr>
+              <td><b>Agent Contract (id, version, I/O schema)</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>BaseAgent has id/version/tools/outputs but lacks formal JSON Schema I/O contracts</td>
+            </tr>
+            <tr>
+              <td><b>Agent Versioning</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>agent_runs records version; catalogue tracks version per agent</td>
+            </tr>
+            <tr>
+              <td><b>Agent Discovery (capability search)</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>GET /api/v2/agent-registry exists; no ?capability= filter implemented</td>
+            </tr>
+            <tr>
+              <td><b>Schema Contracts (node I/O)</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>migration-specification.schema.json validates the spec; no generic inter-node schema contracts</td>
+            </tr>
+            <tr>
+              <td><b>Schema Compatibility Checking</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>No generic source→target schema compatibility engine</td>
+            </tr>
+            <tr>
+              <td><b>Schema Mapping Engine</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>No $.path → $.path mapping between nodes</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Creation</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>PipelineService with CLONE/AGENT/DELIVERY/GATE step types</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Validation</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>Dependency resolution, agent existence checks, impact preview</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Versioning</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>Job iterations exist; pipeline versions not independently versioned</td>
+            </tr>
+            <tr>
+              <td><b>DAG Execution Engine</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>WorkflowOrchestrator + PipelineService.advance(); parallel-eligible steps</td>
+            </tr>
+            <tr>
+              <td><b>Parallel Execution</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>Steps with no unresolved dependencies are enqueued concurrently</td>
+            </tr>
+            <tr>
+              <td><b>Retry</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>workflow_queue retry + pipeline step retry API endpoint</td>
+            </tr>
+            <tr>
+              <td><b>Execution Persistence</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>pipeline_executions, agent_runs, workflow_queue, checkpoints</td>
+            </tr>
+            <tr>
+              <td><b>Execution Monitoring</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>Dashboard, node-level status, evidence inspection</td>
+            </tr>
+            <tr>
+              <td><b>Model Provider Abstraction</b></td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+              <td>HttpProviderAdapter (OpenAI-compat), AI Registry, DLP, per-agent bindings</td>
+            </tr>
+            <tr>
+              <td><b>Model Router</b></td>
+              <td><span class="badge badge-green">Exceeds EAOF</span></td>
+              <td>AgentLLMBindingService with DRAFT/ACTIVE overrides and 10 guards</td>
+            </tr>
+            <tr>
+              <td><b>Anthropic Provider</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>HttpProviderAdapter is OpenAI-compatible; Anthropic needs its own messages API format</td>
+            </tr>
+            <tr>
+              <td><b>Runtime Isolation</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>FACTORY_WORKSPACE_ROOT confinement; tool allowlists per agent</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Designer UI</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>Pipeline wizard exists but not a visual React Flow drag-drop designer</td>
+            </tr>
+            <tr>
+              <td><b>Schema Mapping UI</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>No visual field mapping panel</td>
+            </tr>
+            <tr>
+              <td><b>Governance Layer</b></td>
+              <td><span class="badge badge-cyan">Beyond EAOF</span></td>
+              <td>G0–G5 gates, quorum, evidence binding, audit ledger — not in EAOF MVP at all</td>
+            </tr>
+            <tr>
+              <td><b>API Node</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>Connector profiles support HTTP; not a first-class pipeline node type</td>
+            </tr>
+            <tr>
+              <td><b>Transform Node</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>No generic pick/rename/merge transform node type</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Node (composability)</b></td>
+              <td><span class="badge badge-red">Missing</span></td>
+              <td>No pipeline-as-node capability</td>
+            </tr>
+            <tr>
+              <td><b>Docker / Container Deployment</b></td>
+              <td><span class="badge badge-green">Implemented</span></td>
+              <td>Dockerfile + compose.yaml; non-root, read-only FS, cap_drop=ALL</td>
+            </tr>
+            <tr>
+              <td><b>Structured Logging + Correlation ID</b></td>
+              <td><span class="badge badge-amber">Partial</span></td>
+              <td>workflow_events table; no structured JSON logs with correlation IDs in output</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Capability Maturity by Category</h3>
+      <div class="progress-row"><div class="progress-label">Agent Registry & Contracts</div><div class="progress-bar-wrap"><div class="progress-bar bar-green" style="width:80%"></div></div><div class="progress-pct">80%</div></div>
+      <div class="progress-row"><div class="progress-label">Pipeline Engine</div><div class="progress-bar-wrap"><div class="progress-bar bar-green" style="width:90%"></div></div><div class="progress-pct">90%</div></div>
+      <div class="progress-row"><div class="progress-label">Execution & Retry</div><div class="progress-bar-wrap"><div class="progress-bar bar-green" style="width:95%"></div></div><div class="progress-pct">95%</div></div>
+      <div class="progress-row"><div class="progress-label">Model Abstraction</div><div class="progress-bar-wrap"><div class="progress-bar bar-green" style="width:85%"></div></div><div class="progress-pct">85%</div></div>
+      <div class="progress-row"><div class="progress-label">Schema Engine</div><div class="progress-bar-wrap"><div class="progress-bar bar-amber" style="width:30%"></div></div><div class="progress-pct">30%</div></div>
+      <div class="progress-row"><div class="progress-label">Frontend / UI</div><div class="progress-bar-wrap"><div class="progress-bar bar-amber" style="width:45%"></div></div><div class="progress-pct">45%</div></div>
+      <div class="progress-row"><div class="progress-label">Governance (beyond EAOF)</div><div class="progress-bar-wrap"><div class="progress-bar bar-accent" style="width:100%"></div></div><div class="progress-pct">100%+</div></div>
+      <div class="progress-row"><div class="progress-label">Observability & Logging</div><div class="progress-bar-wrap"><div class="progress-bar bar-amber" style="width:55%"></div></div><div class="progress-pct">55%</div></div>
+      <div class="progress-row"><div class="progress-label">Node Types (API/Transform/Pipeline)</div><div class="progress-bar-wrap"><div class="progress-bar bar-red" style="width:20%"></div></div><div class="progress-pct">20%</div></div>
+      <div class="progress-row"><div class="progress-label">Testing Coverage</div><div class="progress-bar-wrap"><div class="progress-bar bar-green" style="width:85%"></div></div><div class="progress-pct">85%</div></div>
+    </section>
+
+    <!-- ===== PART 4 ===== -->
+    <section class="section" id="p4">
+      <div class="section-header">
+        <span class="section-num">Part 4</span>
+        <h2>Business Benefits</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>EAOF Capability</th><th>Current Pain in ACE</th><th>Benefit if Adopted</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Formal Agent I/O Schemas</b></td>
+              <td>Agent inputs and outputs are implicit. A developer must read Python code to understand what an agent needs and produces. Integration errors are found at runtime, not at design time.</td>
+              <td><b>Faster onboarding.</b> New developers and external integrators understand agent contracts from a JSON Schema, not from source code. Compatibility errors are caught before execution. Estimated 30–40% reduction in integration bugs.</td>
+            </tr>
+            <tr>
+              <td><b>Capability-Based Agent Discovery</b></td>
+              <td>To find relevant agents, you must read the code or documentation. No API to query "which agents support entity extraction?"</td>
+              <td><b>Reuse before building.</b> Teams across the organization can discover existing AI capabilities via API. Reduces duplicate development. Estimated 20–30% reduction in redundant agent builds enterprise-wide.</td>
+            </tr>
+            <tr>
+              <td><b>Schema Mapping Engine</b></td>
+              <td>Data transformations between pipeline stages are done inside agent code. Each agent must understand the preceding agent's output format, creating tight coupling.</td>
+              <td><b>Decoupled agents.</b> Agents become truly reusable because they declare their schema; mapping is handled by the platform. A summarizer agent can accept text from any source without knowing what agent produced it.</td>
+            </tr>
+            <tr>
+              <td><b>Generic Node Types (API, Transform)</b></td>
+              <td>Every pipeline step requires a full Python agent. Simple tasks (call an HTTP endpoint, rename a field) need the same boilerplate as complex LLM agents.</td>
+              <td><b>10× faster simple integrations.</b> An API node to call an external service or a Transform node to reshape data requires no custom code. Reduces developer time from days to minutes for common tasks.</td>
+            </tr>
+            <tr>
+              <td><b>Visual Pipeline Designer</b></td>
+              <td>Pipeline creation requires code changes. Business analysts and architects cannot participate in pipeline design without engineering involvement.</td>
+              <td><b>Citizen integration.</b> Business analysts design draft pipelines. Engineers review and approve. Reduces time-to-first-draft from days to hours. Increases stakeholder engagement with the migration factory.</td>
+            </tr>
+            <tr>
+              <td><b>Pipeline Composability (Pipeline-as-Node)</b></td>
+              <td>ACE Migration Factory is a single, monolithic pipeline. You cannot embed it inside a larger enterprise workflow or call it as a sub-process from another system.</td>
+              <td><b>Enterprise integration capability.</b> The migration factory becomes a building block. Enterprise orchestration platforms can invoke the entire migration process as a single node, enabling autonomous end-to-end DevOps workflows.</td>
+            </tr>
+            <tr>
+              <td><b>Model Provider Abstraction (already strong in ACE)</b></td>
+              <td>Already well-implemented. Current pain: Anthropic requires a different API format than OpenAI-compatible endpoints.</td>
+              <td>Add native Anthropic adapter alongside existing OpenAI adapter. Zero pipeline changes required to use Claude models directly.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== PART 5 ===== -->
+    <section class="section" id="p5">
+      <div class="section-header">
+        <span class="section-num">Part 5</span>
+        <h2>Agent Analysis</h2>
+      </div>
+      <p>For each ACE agent, the table below shows what EAOF concepts would improve it, what remains unchanged, and the estimated benefit.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ACE Agent</th><th>EAOF Improvement</th><th>Unchanged</th><th>Benefit</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Repository Intake</b><br><small>Scans ACE repo; builds file inventory</small></td>
+              <td>Formal output schema (<code>FileInventory</code>) as JSON Schema. Transform node for path normalization. Capability tag: <code>repository-analysis</code>.</td>
+              <td>Core scanning logic, tool allowlist (<code>repository.read</code>), evidence writing.</td>
+              <td><span class="badge badge-green">Reuse</span> Same agent discoverable by any project needing repo scanning.</td>
+            </tr>
+            <tr>
+              <td><b>Dormancy Intelligence</b><br><small>Classifies ACTIVE/DORMANT/MIGRATED</small></td>
+              <td>Formal I/O schema. Capability tag: <code>dormancy-classification</code>. Output feeds schema mapper to decouple from next stage.</td>
+              <td>DormancyService business logic, deterministic fallback, telemetry integration.</td>
+              <td><span class="badge badge-cyan">Composability</span> Dormancy analysis reusable for any app portfolio review, not only ACE.</td>
+            </tr>
+            <tr>
+              <td><b>Framework Baseline</b><br><small>Extracts Spring template</small></td>
+              <td>Formal output schema for Spring framework profile. API node to fetch framework templates from external repositories.</td>
+              <td>PriorityOneService.baseline_framework, clarification flow.</td>
+              <td><span class="badge badge-amber">Minor</span> Marginal improvement; highly domain-specific.</td>
+            </tr>
+            <tr>
+              <td><b>ACE Analysis</b><br><small>Parses .msgflow/.esql into semantic model</small></td>
+              <td>Formal output schema for <code>ACESemanticModel</code>. Schema mapper to project specific fields to downstream agents rather than passing the whole model.</td>
+              <td>ACEParser business logic (most complex agent in system).</td>
+              <td><span class="badge badge-green">Efficiency</span> Downstream agents receive only what they need; reduces context size and improves LLM accuracy.</td>
+            </tr>
+            <tr>
+              <td><b>Migration Specification</b><br><small>Generates validated YAML spec</small></td>
+              <td>The existing <code>migration-specification.schema.json</code> is already a strong EAOF schema contract. Minor: expose spec validation as a standalone schema API endpoint.</td>
+              <td>SpecificationService, JSON Schema validation, all output fields.</td>
+              <td><span class="badge badge-green">Leverage</span> This agent already models EAOF best practice. Expose it as a reusable capability.</td>
+            </tr>
+            <tr>
+              <td><b>Planning</b><br><small>Creates mapping catalogue + task graph</small></td>
+              <td>Output schema for <code>MigrationPlan</code>. Transform node for plan post-processing (sorting, filtering). Schema mapper between ACE Analysis output and Planning input.</td>
+              <td>MappingAndPlanningService, G1+G2 gate enforcement, clarification flow.</td>
+              <td><span class="badge badge-green">Reliability</span> Explicit contract prevents planning from receiving incomplete ACE analysis.</td>
+            </tr>
+            <tr>
+              <td><b>Code Generation</b><br><small>Generates Spring Boot project</small></td>
+              <td>Formal output schema. API node to interact with CI/CD systems. Pipeline node: the generated project could itself be passed to a validation sub-pipeline.</td>
+              <td>generate_spring, quality_validate, G3 approval, workspace confinement.</td>
+              <td><span class="badge badge-cyan">Composability</span> Code generation becomes the entry to a sub-pipeline (build, test, scan) rather than a monolithic agent.</td>
+            </tr>
+            <tr>
+              <td><b>Test Engineering</b><br><small>Prepares differential test cases</small></td>
+              <td>Formal test case schema. API node to invoke test runners. Output schema for test results that feeds Variance Analysis via schema mapper.</td>
+              <td>prepare_differential, runtime adapters, evidence writing.</td>
+              <td><span class="badge badge-green">Decoupling</span> Test Engineering and Variance Analysis become independently reusable.</td>
+            </tr>
+            <tr>
+              <td><b>Variance Analysis</b><br><small>Compares ACE vs Spring results</small></td>
+              <td>Formal output schema for <code>VarianceReport</code>. Capability tag: <code>differential-analysis</code>. Reusable for any before/after comparison, not just ACE migration.</td>
+              <td>DifferentialService core logic, semantic-review model binding.</td>
+              <td><span class="badge badge-cyan">Reuse</span> High-value generic capability that other teams (testing, A/B analysis) could leverage.</td>
+            </tr>
+            <tr>
+              <td><b>RCA</b><br><small>Root cause analysis on variances</small></td>
+              <td>Formal I/O schema. Capability tag: <code>root-cause-analysis</code>. Could be discovered and used by any system that produces failure reports.</td>
+              <td>RCAService, ConfidenceRemediationService, hypothesis scoring.</td>
+              <td><span class="badge badge-cyan">Strategic</span> RCA is a high-value reusable capability across all engineering teams.</td>
+            </tr>
+            <tr>
+              <td><b>Remediation</b><br><small>Bounded code patches</small></td>
+              <td>Formal patch schema. Transform node to prepare patch context. API node to submit patches to code review systems.</td>
+              <td>ConfidenceRemediationService, confidence threshold guard, workspace confinement.</td>
+              <td><span class="badge badge-amber">Incremental</span> Core business logic unchanged; platform improvements are at the edges.</td>
+            </tr>
+            <tr>
+              <td><b>Governance</b><br><small>Reports gate status, evaluates policy</small></td>
+              <td>This agent embodies what EAOF calls a future "Policy Engine". The governance agent is already ahead of EAOF's roadmap. No EAOF improvement needed — ACE should guide EAOF governance design.</td>
+              <td>Everything — G0–G5 logic, quorum, evidence binding, audit ledger.</td>
+              <td><span class="badge badge-cyan">Contribute</span> ACE should export this governance model as a reference for EAOF's enterprise phase.</td>
+            </tr>
+            <tr>
+              <td><b>Knowledge Evidence</b><br><small>Indexes artefacts; knowledge service</small></td>
+              <td>Capability tag: <code>knowledge-indexing</code>. Formal output schema. Embeddings model binding already exists. Generic capability for enterprise knowledge management.</td>
+              <td>KnowledgeService, embedding model binding (AT-07 guard).</td>
+              <td><span class="badge badge-green">Reuse</span> Discoverable as a knowledge indexing service for other enterprise AI workflows.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== PART 6 ===== -->
+    <section class="section" id="p6">
+      <div class="section-header">
+        <span class="section-num">Part 6</span>
+        <h2>Skills Analysis</h2>
+      </div>
+
+      <h3>What are Skills in the current system?</h3>
+      <p>The <code>external-skills/iib-to-ms-migration/SKILL.md</code> is a Claude Code skill — a structured prompt document that guides an AI assistant through a complex, stateful workflow using a state file (<code>state.json</code>). It operates <em>outside</em> the ACE Factory pipeline entirely — it is a developer tool, not a production agent.</p>
+
+      <div class="flow">
+<span class="hl">Skills Framework (Claude Code)</span>
+  │
+  ├─ SKILL.md         — Stage-based instructions for the AI assistant
+  ├─ state.json       — Session persistence (INTAKE → SCAFFOLD → GENERATE → HANDOFF)
+  └─ references/      — Backend-specific rule files (SOAP, MQ, REST, CICS, etc.)
+
+<span class="hl">ACE Migration Factory</span>
+  │
+  ├─ agent-prompts.v1.json   — Governed LLM prompt templates (versioned, approved)
+  ├─ agent-catalogue.v1.json — Agent contracts (deterministic + model-assisted)
+  └─ pipeline             — Orchestrated multi-agent workflow
+
+<span class="hl">EAOF MVP</span>
+  │
+  ├─ Agent Registry       — Registered, versioned agents with I/O schemas
+  ├─ Prompt templates     — (implied but not formalized in MVP spec)
+  └─ Pipeline Designer    — Visual composition of agents</div>
+
+      <h3>How do Skills map to EAOF concepts?</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Skills Component</th><th>EAOF Equivalent</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SKILL.md stage definitions (INTAKE/SCAFFOLD/GENERATE/HANDOFF)</td>
+              <td>Pipeline with 4 nodes</td>
+              <td>Could be formalized as a Pipeline definition so it is tracked, versioned, and governed in the factory</td>
+            </tr>
+            <tr>
+              <td>Stage-specific instructions in SKILL.md</td>
+              <td>Agent prompts + Agent capabilities</td>
+              <td>Migrate to <code>agent-prompts.v1.json</code> for governance, DLP, and version tracking</td>
+            </tr>
+            <tr>
+              <td>state.json (resume across sessions)</td>
+              <td>Execution Context + Execution Persistence</td>
+              <td>WorkflowOrchestrator checkpoints already provide this; skill could use factory checkpoints</td>
+            </tr>
+            <tr>
+              <td>references/ rule files (backend-specific)</td>
+              <td>Agent capabilities / tool allowlist</td>
+              <td>Encode as Agent capabilities with tagged capability names (e.g. <code>soap-migration</code>, <code>mq-migration</code>)</td>
+            </tr>
+            <tr>
+              <td>13 mandatory rules</td>
+              <td>Pipeline Validation rules</td>
+              <td>Express as machine-readable pipeline validation constraints, not natural language text</td>
+            </tr>
+            <tr>
+              <td>Gap checklist (20+ items)</td>
+              <td>Pipeline Validation output (machine-readable errors)</td>
+              <td>Move to structured validation API; enables automated compliance checking</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Recommended Skills Architecture in EAOF Model</h3>
+      <div class="flow">
+<span class="hl">Today (Skills as Claude Code operator instructions)</span>
+
+Claude Code Session
+    │
+    ├─ Reads SKILL.md           [instructions for this session]
+    ├─ Creates state.json       [local file, session-scoped]
+    └─ Executes manually        [no governance, no audit trail]
+
+
+<span class="hl">Target (Skills as Factory Pipeline)</span>
+
+ACE Factory
+    │
+    ├─ Migration Pipeline           [versioned, governed]
+    │   ├─ INTAKE Agent             [registered, schema contract]
+    │   ├─ SCAFFOLD Agent           [registered, schema contract]
+    │   ├─ GENERATE Agent           [registered, schema contract]
+    │   └─ HANDOFF Agent            [registered, schema contract]
+    │
+    ├─ agent-prompts.v1.json        [DLP-protected, approved prompts]
+    ├─ Execution Context            [replaces state.json]
+    └─ Audit Ledger                 [replaces nothing — skills have no audit]</div>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Skills Verdict</div>
+        The external skills should be considered a <strong>prototyping and developer-productivity layer</strong>, not a production execution layer. EAOF and ACE Factory together provide the governed runtime. Skills should feed into factory agent design — not replace it. Where a skill describes a workflow, that workflow should be formalized as an ACE Factory pipeline.
+      </div>
+    </section>
+
+    <!-- ===== PART 7 ===== -->
+    <section class="section" id="p7">
+      <div class="section-header">
+        <span class="section-num">Part 7</span>
+        <h2>What Should Not Be Adopted</h2>
+      </div>
+
+      <div class="callout callout-warn">
+        <div class="callout-title">Be Critical</div>
+        Not every EAOF concept adds value to ACE Migration Factory today. The following are over-engineering risks, premature investments, or capabilities that add cost without proportional return.
+      </div>
+
+      <h3>Do NOT adopt these now</h3>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-red">Skip Now</span>
+          <b>React Flow Visual Pipeline Designer</b>
+        </div>
+        <p><b>Why it seems valuable:</b> EAOF's drag-and-drop pipeline designer is a flagship feature.</p>
+        <p><b>Why ACE doesn't need it yet:</b> ACE has exactly one pipeline topology. Migration pipelines are not user-designed — they follow a well-understood, regulated sequence. A visual designer adds UI complexity without adding business capability. The existing wizard UI is sufficient for the current use case.</p>
+        <p><b>Reconsider when:</b> ACE expands to multiple migration types (WebSphere, JBoss, etc.) that require different pipeline topologies per project.</p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-red">Skip Now</span>
+          <b>Generic Transform Node</b>
+        </div>
+        <p><b>Why it seems valuable:</b> Avoids writing Python agents for simple field transformations.</p>
+        <p><b>Why ACE doesn't need it yet:</b> ACE's domain transformations (ESQL to Java, message flow to REST controller) are complex and cannot be expressed as simple field pick/rename operations. The lightweight transforms EAOF provides would cover less than 5% of ACE's actual transformation needs.</p>
+        <p><b>Reconsider when:</b> Generic data processing pipelines beyond IBM ACE are added to the factory.</p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-red">Skip Now</span>
+          <b>EAOF's Simplified Governance Model</b>
+        </div>
+        <p><b>Why it seems attractive:</b> EAOF's governance is simpler and easier to implement.</p>
+        <p><b>Why ACE must not regress:</b> ACE's governance model (G0–G5, evidence binding, quorum, hash-chained audit) is a core product differentiator and likely a compliance requirement for enterprise customers. EAOF MVP has no governance. ACE should <em>export</em> its governance model to EAOF, not adopt EAOF's weaker model.</p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-amber">Wait</span>
+          <b>Pipeline Node (Pipeline-as-a-Node / Composability)</b>
+        </div>
+        <p><b>Why it seems valuable:</b> Enables sub-pipeline composition and embedding the factory in larger workflows.</p>
+        <p><b>Why it should wait:</b> This is a complex architectural addition requiring careful design of how parent pipeline context and governance gates propagate into child pipelines. The business case is not yet established. Build it when there is a concrete enterprise integration requirement.</p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-amber">Wait</span>
+          <b>Migrating from stdlib HTTP Server to FastAPI</b>
+        </div>
+        <p><b>Why it seems valuable:</b> FastAPI provides automatic OpenAPI docs, type validation, async support, and better maintainability.</p>
+        <p><b>Why it should wait:</b> The existing server works. Migration carries risk — the current server has subtle security behaviors (HEAD method blocking, path traversal prevention, security headers, rate limiting) that must be exactly replicated. This is a large refactor with no feature benefit for end users. Do it only if the API surface needs to expand significantly or if there are measurable performance issues.</p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-red">Never</span>
+          <b>EAOF's Approach to Agent I/O (replacing governance with schemas alone)</b>
+        </div>
+        <p>EAOF relies on schema contracts as the primary inter-agent safety mechanism. ACE uses schema contracts <em>plus</em> governance gates, evidence binding, and tool allowlists. Schema contracts are necessary but not sufficient for enterprise AI governance. Adding EAOF schemas must not weaken ACE's existing safety model.</p>
+      </div>
+    </section>
+
+    <!-- ===== PART 8 ===== -->
+    <section class="section" id="p8">
+      <div class="section-header">
+        <span class="section-num">Part 8</span>
+        <h2>Quick Wins</h2>
+      </div>
+      <p>These 10 EAOF concepts can be adopted with minimal risk, in roughly ascending order of effort.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>EAOF Concept</th><th>What to Do</th><th>Effort</th><th>Value</th><th>Risk</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><b>Standardize Error Model</b></td>
+              <td>Add <code>code</code>, <code>node_id</code>, <code>path</code>, <code>retryable</code>, <code>details</code> to all API error responses. Already partially done — formalize it.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><b>Capability Tags on Agents</b></td>
+              <td>Add a <code>capabilities</code> array to <code>agent-catalogue.v1.json</code> (e.g. <code>"dormancy-classification"</code>). Expose <code>GET /api/v2/agents?capability=X</code> filter.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><b>Formal Agent I/O Schemas</b></td>
+              <td>Add <code>input_schema</code> and <code>output_schema</code> (JSON Schema) to each agent in <code>agent-catalogue.v1.json</code>. Wire into <code>BaseAgent</code> for runtime validation.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><b>Expose Agent Graph API</b></td>
+              <td><code>GET /api/v2/agent-registry/graph</code> already exists. Enhance to include I/O schema and capability in the graph response. Enables visual tooling without frontend changes.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><b>Schema Validation API Endpoint</b></td>
+              <td>Expose <code>POST /api/v1/schema/validate</code> to validate arbitrary JSON payloads against a registered agent's input schema. Enables external pipeline validation tooling.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td><b>Add Native Anthropic Provider</b></td>
+              <td>Add <code>AnthropicProvider</code> alongside the existing <code>HttpProviderAdapter</code>. Anthropic uses the Messages API format, not OpenAI-compatible. Enables Claude models without a LiteLLM proxy.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><b>Structured JSON Logging with Correlation ID</b></td>
+              <td>Emit structured JSON logs with <code>execution_id</code>, <code>job_id</code>, <code>agent_id</code>, <code>node_id</code> on every log line. Enables log aggregation and observability tooling without code-level changes.</td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td><b>Pipeline Version Immutability</b></td>
+              <td>EAOF specifies published pipelines are immutable. Adopt: once a pipeline reaches VALIDATED status, freeze its node/edge/mapping configuration. New edits require a new draft version.</td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><b>Schema Compatibility Checker</b></td>
+              <td>Add <code>POST /api/v1/schema/compatibility</code> that takes a source output schema and target input schema and returns compatibility verdict + required transformations. Enables automated pipeline validation.</td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-high">High</span></td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td><b>OpenTelemetry Extension Points</b></td>
+              <td>Add <code>OTEL_EXPORTER_*</code> environment variable hooks. No implementation needed — add the interface seam and document the extension point. Satisfies EAOF's observability extensibility requirement with zero code risk.</td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+              <td><span class="effort-pill ep-med">Med</span></td>
+              <td><span class="effort-pill ep-low">Low</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout-ok">
+        <div class="callout-title">Quick Win Priority</div>
+        Items 1–3 (Error Model, Capability Tags, Formal I/O Schemas) can be delivered in a single sprint by one engineer. Combined, they significantly improve developer experience and lay the foundation for the schema engine.
+      </div>
+    </section>
+
+    <!-- ===== PART 10 ===== -->
+    <section class="section" id="p10">
+      <div class="section-header">
+        <span class="section-num">Part 10</span>
+        <h2>Target Architecture</h2>
+      </div>
+
+      <h3>Current Architecture</h3>
+      <div class="flow"><span class="hl">ACE Migration Factory Enterprise — Current</span>
+
+React SPA (vanilla JS)
+     │  REST /api/v2–v7
+     ▼
+Python stdlib HTTP Server
+     │
+     ├── FactoryService (job lifecycle, gates G0–G5)
+     ├── AgentRegistry.dispatch (contract check, LLM binding)
+     ├── WorkflowOrchestrator (queue-based async)
+     └── PipelineService (DAG steps: CLONE/AGENT/DELIVERY/GATE)
+          │
+          ├── 14 Domain Agents (ACE-specific)
+          │      └── ReasoningGateway → HttpProviderAdapter (OpenAI-compat)
+          │
+          └── AIRegistryService (prompts, models, DLP, gateway)
+               │
+               └── SQLite / PostgreSQL
+                    ├── agent_registry       <span class="ok">✓ registry</span>
+                    ├── pipeline_steps       <span class="ok">✓ dag</span>
+                    ├── workflow_queue       <span class="ok">✓ execution</span>
+                    ├── audit_ledger         <span class="ok">✓ governance</span>
+                    └── agent_llm_bindings   <span class="ok">✓ model routing</span>
+
+<span class="warn">⚠  Missing: formal I/O schemas, schema mapping, capability search</span>
+<span class="warn">⚠  Missing: native Anthropic adapter</span>
+<span class="warn">⚠  Missing: structured JSON logs</span></div>
+
+      <h3>Recommended Target Architecture</h3>
+      <div class="flow"><span class="hl">ACE Migration Factory Enterprise — Target (EAOF-Aligned)</span>
+
+React + TypeScript (SPA, modernized)
+     │  REST /api/v1
+     ▼
+Python stdlib HTTP Server  <span class="ok">(unchanged — no FastAPI migration)</span>
+     │
+     ├── FactoryService     <span class="ok">(unchanged — G0–G5 governance retained)</span>
+     ├── AgentRegistry      <span class="ok">(enhanced: capability tags, I/O schema validation)</span>
+     ├── WorkflowOrchestrator  <span class="ok">(unchanged)</span>
+     ├── PipelineService    <span class="ok">(enhanced: version immutability)</span>
+     └── <span class="hl">SchemaEngine (NEW)</span>
+          ├── SchemaValidator      — validates agent I/O at dispatch time
+          ├── CompatibilityChecker — source schema → target schema check
+          └── SchemaMapAPI         — POST /api/v1/schema/compatibility
+               │
+               ├── 14 Domain Agents
+               │    └── <span class="hl">Formal I/O JSON Schemas (NEW)</span>
+               │    └── <span class="hl">Capability Tags (NEW)</span>
+               │    └── ReasoningGateway
+               │         ├── HttpProviderAdapter (OpenAI/Ollama)  <span class="ok">✓</span>
+               │         └── <span class="hl">AnthropicProvider (NEW)</span>
+               │
+               ├── AIRegistryService  <span class="ok">(unchanged)</span>
+               ├── <span class="hl">Structured JSON Logger (NEW)</span>
+               │    └── execution_id + job_id + agent_id on every line
+               │
+               └── SQLite / PostgreSQL
+                    └── <span class="ok">(schema additions only — no migration risk)</span>
+
+
+<span class="ok">✓ Governance: G0–G5, evidence binding, audit ledger — unchanged</span>
+<span class="ok">✓ Model routing: AgentLLMBindingService, guards AT-05–AT-14 — unchanged</span>
+<span class="hl">+ Schema contracts: formal I/O schemas on all 14 agents</span>
+<span class="hl">+ Capability discovery: GET /agents?capability=X</span>
+<span class="hl">+ Native Anthropic provider adapter</span>
+<span class="hl">+ Schema compatibility API</span>
+<span class="hl">+ Structured JSON observability logs</span></div>
+
+      <h3>What Changes, What Stays, What Improves</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Action</th><th>Rationale</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Governance gates G0–G5</td>
+              <td><span class="badge badge-green">Unchanged</span></td>
+              <td>Core differentiator. Exceeds EAOF. Do not regress.</td>
+            </tr>
+            <tr>
+              <td>Agent contract structure</td>
+              <td><span class="badge badge-amber">Enhance</span></td>
+              <td>Add input_schema, output_schema, capabilities to catalogue entries.</td>
+            </tr>
+            <tr>
+              <td>WorkflowOrchestrator (DAG)</td>
+              <td><span class="badge badge-green">Unchanged</span></td>
+              <td>Production-grade, proven engine. Matches EAOF's execution model.</td>
+            </tr>
+            <tr>
+              <td>HttpProviderAdapter</td>
+              <td><span class="badge badge-amber">Extend</span></td>
+              <td>Add AnthropicProvider alongside existing adapter. Zero impact on existing flows.</td>
+            </tr>
+            <tr>
+              <td>Frontend (vanilla JS SPA)</td>
+              <td><span class="badge badge-amber">Incremental</span></td>
+              <td>Modernize to TypeScript + React at natural refactor opportunities. Not urgent.</td>
+            </tr>
+            <tr>
+              <td>stdlib HTTP Server</td>
+              <td><span class="badge badge-green">Unchanged</span></td>
+              <td>Stable, secure, working. FastAPI migration deferred.</td>
+            </tr>
+            <tr>
+              <td>AI Registry + DLP</td>
+              <td><span class="badge badge-green">Unchanged</span></td>
+              <td>Exceeds EAOF's model governance. Core security asset.</td>
+            </tr>
+            <tr>
+              <td>Schema Engine</td>
+              <td><span class="badge badge-cyan">New</span></td>
+              <td>New module: schema validation at dispatch, compatibility checking API.</td>
+            </tr>
+            <tr>
+              <td>Structured logging</td>
+              <td><span class="badge badge-cyan">New</span></td>
+              <td>Replace ad-hoc prints/events with JSON lines carrying execution context.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== PART 11 ===== -->
+    <section class="section" id="p11">
+      <div class="section-header">
+        <span class="section-num">Part 11</span>
+        <h2>Executive Summary</h2>
+      </div>
+
+      <div class="rec-banner">
+        <div class="rec-verdict">Recommendation: Selective Adoption</div>
+        <div class="rec-desc">ACE Migration Factory should adopt specific EAOF patterns that improve composability, developer experience, and discoverability — while preserving its governance model, which already exceeds EAOF's specification. A full platform rebuild is not justified and would regress maturity.</div>
+      </div>
+
+      <h3>Answers to the Ten Key Questions</h3>
+
+      <div class="card">
+        <h4>1. Should ACE Migration Factory adopt EAOF concepts?</h4>
+        <p><strong>Yes — selectively.</strong> ACE already implements roughly 72% of the EAOF MVP architecture. The remaining 28% includes capabilities (schema contracts, capability discovery, native Anthropic provider) that would deliver real value with low implementation risk.</p>
+      </div>
+
+      <div class="card">
+        <h4>2. Which concepts should be adopted?</h4>
+        <ul>
+          <li>Formal JSON Schema I/O contracts on all 14 agents</li>
+          <li>Capability tags + capability-based agent discovery API</li>
+          <li>Schema compatibility checker API</li>
+          <li>Native Anthropic provider adapter</li>
+          <li>Structured JSON logging with execution context</li>
+          <li>Pipeline version immutability (once VALIDATED)</li>
+          <li>Standardized machine-readable error model</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>3. Which concepts already exist?</h4>
+        <p>Agent Registry, Agent Versioning, Pipeline DAG Engine, Async Execution, Retry, Execution Persistence, Execution Monitoring, Model Abstraction (exceeds EAOF), Model Router (exceeds EAOF), Runtime Isolation, Governance (far exceeds EAOF), Audit Trail, Containerized Deployment, Comprehensive Testing.</p>
+      </div>
+
+      <div class="card">
+        <h4>4. Which concepts are missing?</h4>
+        <p>Formal agent I/O schemas, generic schema mapping engine, schema compatibility API, capability-based agent search, native Anthropic provider, visual pipeline designer (not recommended for MVP), structured observability logs, pipeline node composability.</p>
+      </div>
+
+      <div class="card">
+        <h4>5. What are the biggest expected benefits?</h4>
+        <ul>
+          <li><strong>Developer productivity:</strong> Formal I/O schemas reduce integration errors and onboarding time by an estimated 30–40%.</li>
+          <li><strong>Reuse:</strong> Capability discovery enables other teams to find and reuse ACE agents (RCA, Variance Analysis, Knowledge Evidence) without rebuilding them.</li>
+          <li><strong>Model flexibility:</strong> Native Anthropic adapter enables direct Claude model access without a proxy, reducing latency and operational cost.</li>
+          <li><strong>Observability:</strong> Structured logging enables log aggregation, alerting, and dashboards with zero business logic changes.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>6. What are the implementation risks?</h4>
+        <ul>
+          <li><strong>Schema validation at dispatch:</strong> Adding I/O validation to <code>AgentRegistry.dispatch</code> could break agents with undeclared outputs. Requires careful schema authoring before activating validation enforcement.</li>
+          <li><strong>Governance regression:</strong> Any EAOF adoption that weakens the G0–G5 gate model or evidence binding creates compliance and security risk. This must be a red line.</li>
+          <li><strong>FastAPI migration temptation:</strong> EAOF specifies FastAPI; teams may attempt a full server migration as a proxy for EAOF adoption. This is a significant refactor risk with no end-user benefit in the short term.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>7. What is the recommended adoption strategy?</h4>
+        <ol>
+          <li><strong>Sprint 1 (1–2 weeks):</strong> Error model standardization, capability tags, formal I/O schemas in catalogue JSON (no enforcement yet). Zero runtime risk.</li>
+          <li><strong>Sprint 2 (2–3 weeks):</strong> Schema validation at dispatch (warn mode, not enforce). Anthropic provider adapter. Structured logging.</li>
+          <li><strong>Sprint 3 (2–3 weeks):</strong> Schema compatibility API. Capability discovery endpoint. Pipeline version immutability.</li>
+          <li><strong>Sprint 4 (3–4 weeks):</strong> Schema enforcement at dispatch (enforce mode after all schemas validated). OpenTelemetry extension points.</li>
+          <li><strong>Backlog:</strong> Visual pipeline designer (when multiple pipeline topologies are needed). Pipeline composability (when enterprise integration is required).</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h4>8. Estimated engineering effort</h4>
+        <div class="table-wrap" style="margin:0">
+          <table>
+            <thead><tr><th>Sprint</th><th>Items</th><th>Estimated Effort</th></tr></thead>
+            <tbody>
+              <tr><td>Sprint 1</td><td>Error model, capability tags, I/O schemas (JSON only)</td><td>1 engineer × 1–2 weeks</td></tr>
+              <tr><td>Sprint 2</td><td>Schema validation (warn), Anthropic adapter, logging</td><td>1–2 engineers × 2–3 weeks</td></tr>
+              <tr><td>Sprint 3</td><td>Schema compatibility API, capability search, version immutability</td><td>1–2 engineers × 2–3 weeks</td></tr>
+              <tr><td>Sprint 4</td><td>Schema enforcement, OTEL hooks</td><td>1 engineer × 1–2 weeks</td></tr>
+              <tr><td><b>Total</b></td><td>All priority items</td><td><b>~2–3 engineers × 8–10 weeks</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>9. Estimated business value</h4>
+        <div class="card-grid" style="margin-top:12px">
+          <div class="card-sm">
+            <div class="card-label">Onboarding Speed</div>
+            <div class="card-value">30–40%</div>
+            <div class="card-desc">Faster with formal I/O schemas replacing code reading</div>
+          </div>
+          <div class="card-sm">
+            <div class="card-label">Integration Bugs</div>
+            <div class="card-value">↓ 30%</div>
+            <div class="card-desc">Caught at design time via schema compatibility checker</div>
+          </div>
+          <div class="card-sm">
+            <div class="card-label">Agent Reuse</div>
+            <div class="card-value">×3</div>
+            <div class="card-desc">Capability discovery enables reuse across enterprise teams</div>
+          </div>
+          <div class="card-sm">
+            <div class="card-label">Model Flexibility</div>
+            <div class="card-value">+1</div>
+            <div class="card-desc">Native Anthropic provider adds Claude models without proxy overhead</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>10. Final Recommendation</h4>
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;padding:16px;background:var(--accent-lt);border-radius:8px;border:1px solid var(--accent);">
+          <div style="font-size:32px;font-weight:900;color:var(--accent)">✓</div>
+          <div>
+            <div style="font-size:16px;font-weight:800;color:var(--accent)">Recommend — Selective Adoption</div>
+            <div style="font-size:13px;color:var(--fg-muted);margin-top:4px;">Not "Strongly Recommend" because ACE already implements the core architecture. Selective adoption is the correct posture.</div>
+          </div>
+        </div>
+        <p><strong>Why not "Strongly Recommend" a full EAOF migration?</strong> Because rebuilding ACE to match EAOF's MVP spec would produce a system <em>less capable</em> than what exists today. EAOF's MVP has no governance, no DLP, no evidence binding, no audit ledger, no deterministic fallback mode. ACE has all of these.</p>
+        <p><strong>Why not "Neutral"?</strong> Because EAOF's concepts for schema contracts, capability discovery, and provider abstraction are genuine gaps in ACE that would deliver measurable developer and business value. These gaps should be closed.</p>
+        <p><strong>Strategic framing:</strong> ACE Migration Factory should not be positioned as "an EAOF implementation." It should be positioned as a <em>reference implementation of governed enterprise AI orchestration</em> that informed and validated many of EAOF's design decisions independently. The correct relationship is: adopt EAOF's missing patterns into ACE, and contribute ACE's governance model back to EAOF's enterprise roadmap.</p>
+      </div>
+
+      <div class="callout callout-info" style="margin-top:24px">
+        <div class="callout-title">One-Line Summary for Every Audience</div>
+        ACE Migration Factory is already 72% of the way to EAOF compliance. The remaining 28% — formal agent schemas, capability discovery, schema compatibility checking, and an Anthropic adapter — represents 8–10 weeks of targeted engineering work that would meaningfully improve developer productivity and unlock enterprise-wide agent reuse.
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+// Sidebar active section tracking
+const sections = document.querySelectorAll('.section[id]');
+const navItems = document.querySelectorAll('.nav-item');
+
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      navItems.forEach(n => n.classList.remove('active'));
+      const match = document.querySelector('.nav-item[href="#' + e.target.id + '"]');
+      if (match) match.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+
+sections.forEach(s => io.observe(s));
+
+navItems.forEach(item => {
+  item.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(item.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>

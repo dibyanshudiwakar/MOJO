@@ -1,0 +1,21 @@
+{
+  "profiles": [
+    {"category":"source-control","name":"git-primary","provider":"generic-git","priority":10,"enabled":true,"secret_reference":"vault://git/primary","config":{"base_url":"https://git.example.invalid","api_version":"v1","verify_tls":true}},
+    {"category":"source-control","name":"git-secondary","provider":"generic-git","priority":20,"enabled":true,"secret_reference":"vault://git/secondary","config":{"base_url":"https://git-secondary.example.invalid","verify_tls":true}},
+    {"category":"cicd","name":"pipeline-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://cicd/primary","config":{"base_url":"https://ci.example.invalid","verify_tls":true}},
+    {"category":"artifact-repository","name":"artifacts-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://artifacts/primary","config":{"base_url":"https://artifacts.example.invalid","verify_tls":true}},
+    {"category":"deployment","name":"deployment-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://deployment/primary","config":{"base_url":"https://deployment.example.invalid","verify_tls":true}},
+    {"category":"ace-runtime","name":"ace-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://ace/primary","config":{"base_url":"https://ace.example.invalid","verify_tls":true}},
+    {"category":"telemetry","name":"telemetry-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://telemetry/primary","config":{"base_url":"https://telemetry.example.invalid","verify_tls":true}},
+    {"category":"service-registry","name":"registry-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://registry/primary","config":{"base_url":"https://registry.example.invalid","verify_tls":true}},
+    {"category":"identity","name":"identity-primary","provider":"oidc","priority":10,"enabled":true,"secret_reference":"vault://identity/client","config":{"issuer":"https://identity.example.invalid","audience":"ace-factory","verify_tls":true}},
+    {"category":"secrets-vault","name":"vault-primary","provider":"reference-only","priority":10,"enabled":true,"secret_reference":"bootstrap://vault","config":{"endpoint":"https://vault.example.invalid","verify_tls":true}},
+    {"category":"object-storage","name":"evidence-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://storage/primary","config":{"base_url":"https://storage.example.invalid","verify_tls":true}},
+    {"category":"model-gateway","name":"model-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://model/primary","config":{"base_url":"https://models.example.invalid","verify_tls":true,"region":"approved-region"}},
+    {"category":"security-scanner","name":"scanner-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://scanner/primary","config":{"base_url":"https://scanner.example.invalid","verify_tls":true}},
+    {"category":"observability","name":"observability-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://observability/primary","config":{"base_url":"https://observability.example.invalid","verify_tls":true}},
+    {"category":"workflow-queue","name":"queue-primary","provider":"reference-only","priority":10,"enabled":true,"secret_reference":"vault://queue/primary","config":{"endpoint":"queue://primary"}},
+    {"category":"notification","name":"notification-primary","provider":"generic-http","priority":10,"enabled":true,"secret_reference":"vault://notification/primary","config":{"base_url":"https://notify.example.invalid","verify_tls":true}}
+  ],
+  "routing": {"default":{"strategy":"priority","failover_enabled":true,"health_required":true}}
+}

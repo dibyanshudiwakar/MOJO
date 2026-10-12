@@ -1,0 +1,589 @@
+<title>ACE Modernization Accelerator — Executive Slide</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
+
+<style>
+/* ── Tokens — CVS Health light palette ── */
+:root {
+  --bg:      #FFFFFF;
+  --navy:    #003D6B;
+  --red:     #CC0000;
+  --link:    #A8D0E6;
+  --body:    #222222;
+  --muted:   #6B6B6B;
+  --card:    #EDF4FA;
+  --rule:    #D0E2EE;
+  color-scheme: light;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #C8CDD4;
+  font-family: 'Inter', system-ui, sans-serif;
+  padding: 36px 24px 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 36px;
+}
+
+/* ── Slide frame — 16:9 ── */
+.sf {
+  width: 100%;
+  max-width: 1120px;
+  aspect-ratio: 16 / 9;
+  box-shadow: 0 8px 48px rgba(0,0,0,0.22);
+}
+
+.sl {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 3.2% 5.0% 2.2%;
+}
+
+/* ── Header ── */
+.hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-shrink: 0;
+  margin-bottom: 1.4%;
+}
+.hd-l { display: flex; align-items: flex-start; gap: 0.42em; }
+.hd-heart { color: var(--red); font-size: clamp(12px,1.85vw,24px); line-height:1; margin-top:0.1em; flex-shrink:0; }
+.hd-title { font-size: clamp(10px,1.6vw,20px); font-weight: 700; color: #111; line-height: 1.25; }
+.hd-r { display: flex; align-items: center; gap: 0.85em; flex-shrink: 0; }
+.hd-logo { display: flex; align-items: center; gap: 0.32em; font-size: clamp(5px,0.64vw,8px); font-weight: 600; color: var(--navy); line-height: 1.35; white-space: nowrap; }
+.hd-lmark { font-size: clamp(9px,1.4vw,18px); font-weight: 900; letter-spacing: -0.05em; line-height: 1; color: var(--navy); }
+.hd-sep { width: 1px; height: clamp(16px,2.2vw,28px); background: var(--rule); }
+
+/* ── Transformation flow ── */
+.flow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 1.4%;
+}
+.fn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(4px,0.65%,8px) clamp(8px,1.3%,16px);
+  gap: 0.18em;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+.fn-legacy { background: #F6F4F2; border-left: 3px solid #C0A880; flex: 0.8; }
+.fn-factory {
+  background: var(--navy); border: none; flex: 1.3;
+  border-radius: 2px;
+  padding-top: clamp(5px,0.9%,11px);
+  padding-bottom: clamp(5px,0.9%,11px);
+  box-shadow: 0 3px 18px rgba(0,61,107,0.26);
+}
+.fn-spring { background: #F0F8F2; border-left: 3px solid #4A9A60; flex: 0.8; }
+.fa {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 0.2em;
+  padding: 0 clamp(3px,0.45%,7px); flex-shrink: 0;
+}
+.fa svg { width: clamp(12px,1.6vw,20px); height: clamp(12px,1.6vw,20px); }
+.fa-label {
+  font-size: clamp(4px,0.48vw,6px); color: var(--muted);
+  letter-spacing: 0.1em; text-transform: uppercase;
+  font-weight: 600; text-align: center; white-space: nowrap;
+}
+.fn-cap {
+  font-size: clamp(4px,0.5vw,6px); font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.65;
+}
+.fn-legacy .fn-cap { color: #7A6550; }
+.fn-factory .fn-cap { color: rgba(255,255,255,0.6); }
+.fn-spring .fn-cap { color: #3A7A50; }
+.fn-name { font-size: clamp(8px,1.1vw,14px); font-weight: 800; line-height: 1.15; }
+.fn-legacy .fn-name { color: #444; }
+.fn-factory .fn-name { color: #fff; }
+.fn-spring .fn-name { color: var(--navy); }
+.fn-sub { font-size: clamp(5px,0.62vw,8px); line-height: 1.55; margin-top: 0.15em; }
+.fn-legacy .fn-sub { color: #7A6550; }
+.fn-factory .fn-sub { color: rgba(255,255,255,0.78); }
+.fn-spring .fn-sub { color: #3A6A4A; }
+.fn-tags { display: flex; flex-wrap: wrap; gap: 0.22em; margin-top: 0.4em; }
+.fn-tag {
+  font-size: clamp(4px,0.48vw,6px); font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0.2em 0.48em; border-radius: 2px; white-space: nowrap;
+}
+.fn-factory .fn-tag { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.9); border: 1px solid rgba(255,255,255,0.26); }
+.fn-spring .fn-tag { background: #E0F2E8; color: #1A7A40; border: 1px solid #5CB87A; }
+
+/* ── Three pillars ── */
+.pillars {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: clamp(6px, 1.2%, 14px);
+  min-height: 0;
+  margin-bottom: 1.0%;
+}
+
+.pillar {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--navy);
+  border-radius: 2px;
+  padding: 2.6% 3.0% 2.2%;
+  overflow: hidden;
+}
+
+/* Pillar top: circle icon + name + badge in a row */
+.pl-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7em;
+  flex-shrink: 0;
+  margin-bottom: 0.55em;
+}
+
+.pl-circle {
+  width: clamp(26px, 3.8vw, 46px);
+  height: clamp(26px, 3.8vw, 46px);
+  background: var(--navy);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0,61,107,0.22);
+}
+.pl-circle svg { width: 46%; height: 46%; }
+
+.pl-heading { display: flex; flex-direction: column; gap: 0.22em; }
+
+.pl-name {
+  font-size: clamp(11px, 1.6vw, 20px);
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.pl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: clamp(6px, 0.8vw, 10px);
+  font-weight: 700;
+  color: var(--navy);
+  background: var(--card);
+  border: 1px solid var(--link);
+  padding: 0.18em 0.6em;
+  border-radius: 2px;
+  white-space: nowrap;
+  width: fit-content;
+}
+.pl-badge-num {
+  font-size: clamp(9px, 1.2vw, 15px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+/* Divider */
+.pl-rule {
+  height: 1.5px;
+  background: var(--rule);
+  flex-shrink: 0;
+  margin-bottom: 0.6em;
+}
+
+/* Body text */
+.pl-body {
+  font-size: clamp(6px, 0.75vw, 9.5px);
+  color: var(--body);
+  line-height: 1.7;
+  flex: 1;
+}
+
+/* Callout box */
+.pl-call {
+  margin-top: 0.6em;
+  background: var(--card);
+  border-left: 3px solid var(--navy);
+  padding: 0.38em 0.65em;
+  flex-shrink: 0;
+}
+.pl-call-main {
+  font-size: clamp(7px, 0.92vw, 11.5px);
+  font-weight: 700;
+  color: var(--navy);
+  line-height: 1.25;
+}
+.pl-call-sub {
+  margin-top: 0.18em;
+  font-size: clamp(5px, 0.58vw, 7.5px);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ── Bottom footer ── */
+.bt {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 4%;
+  padding-top: 0.6%;
+  border-top: 1px solid var(--rule);
+}
+
+/* Bottom right */
+.bt-r {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.22em;
+}
+.bt-tag {
+  font-size: clamp(6px,0.8vw,10px);
+  font-weight: 700;
+  color: var(--body);
+  text-align: right;
+  line-height: 1.35;
+}
+.bt-tag-s { font-weight: 400; color: var(--muted); display: block; }
+.cvs-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 0.15em;
+  font-weight: 800;
+  font-size: clamp(8px,1.05vw,13px);
+  line-height: 1;
+  margin-top: 0.3em;
+}
+.cvs-h { color: var(--red); }
+.cvs-n { color: #111; }
+.cvs-hl { color: #111; font-weight: 400; }
+.bt-copy { font-size: clamp(4px,0.5vw,6.5px); color: var(--muted); text-align: right; }
+
+/* ── Below-slide support sections ── */
+.ds { width: 100%; max-width: 1120px; color: #333; }
+.ds-lbl { font-size: 9.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #999; padding-bottom: 10px; border-bottom: 1px solid #ddd; margin-bottom: 18px; }
+.grd { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px; }
+.gi h4 { font-size: 9.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+.gi p { font-size: 12px; line-height: 1.65; color: #666; }
+.gi p + p { margin-top: 6px; }
+.sw-r { display: flex; flex-wrap: wrap; gap: 7px 12px; margin-bottom: 8px; }
+.sw { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666; }
+.sw-d { width: 13px; height: 13px; border-radius: 2px; flex-shrink: 0; }
+.nt { font-size: 13px; line-height: 1.78; color: #555; max-width: 900px; }
+.nt p + p { margin-top: 11px; }
+.nt strong { color: #333; font-weight: 600; }
+.sep { border-top: 1px solid #ddd; padding-top: 28px; }
+
+/* Mobile */
+@media (max-width: 680px) {
+  .sf { aspect-ratio: auto; }
+  .sl { height: auto; padding: 22px 18px 18px; }
+  .flow { flex-direction: column; }
+  .fa { flex-direction: row; padding: 4px 0; }
+  .pillars { grid-template-columns: 1fr; gap: 14px; }
+  .bt { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .grd { grid-template-columns: 1fr; }
+}
+</style>
+
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  SLIDE                                                 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<div class="sf">
+<div class="sl">
+
+  <!-- HEADER -->
+  <div class="hd">
+    <div class="hd-l">
+      <span class="hd-heart">♥</span>
+      <span class="hd-title">ACE Modernization Accelerator — Governed AI at Enterprise Scale</span>
+    </div>
+    <div class="hd-r">
+      <div class="hd-logo">
+        <span class="hd-lmark">I|TS</span>
+        <span>Information Security<br>&amp; Technology Solutions</span>
+      </div>
+      <div class="hd-sep"></div>
+      <div class="hd-logo">
+        <span class="hd-lmark">I≡</span>
+        <span>Infrastructure<br>Engineering</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRANSFORMATION FLOW -->
+  <div class="flow">
+
+    <!-- Before: Legacy ACE -->
+    <div class="fn fn-legacy">
+      <div class="fn-cap">Before</div>
+      <div class="fn-name">Legacy ACE<br>Integration Flows</div>
+      <div class="fn-sub">ESQL · Message Maps · Monolithic Flows<br>Manual migration · 6–18 months per service</div>
+    </div>
+
+    <!-- Arrow 1 -->
+    <div class="fa">
+      <svg viewBox="0 0 22 10" fill="none">
+        <line x1="0" y1="5" x2="19" y2="5" stroke="#D0E2EE" stroke-width="1.5"/>
+        <polyline points="14 1.5 19 5 14 8.5" stroke="#003D6B" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+      </svg>
+      <div class="fa-label">AI-Powered</div>
+    </div>
+
+    <!-- The Product: ACE Modernization Accelerator -->
+    <div class="fn fn-factory">
+      <div class="fn-cap">The Product</div>
+      <div class="fn-name">ACE Migration<br>Factory</div>
+      <div class="fn-sub">
+        14 AI Agents · 6 Human Approval Gates<br>
+        Tamper-proof Audit · Differential Testing<br>
+        Any AI Provider · Reusable across the portfolio
+      </div>
+      <div class="fn-tags">
+        <span class="fn-tag">Governed</span>
+        <span class="fn-tag">Auditable</span>
+        <span class="fn-tag">Repeatable</span>
+      </div>
+    </div>
+
+    <!-- Arrow 2 -->
+    <div class="fa">
+      <svg viewBox="0 0 22 10" fill="none">
+        <line x1="0" y1="5" x2="19" y2="5" stroke="#D0E2EE" stroke-width="1.5"/>
+        <polyline points="14 1.5 19 5 14 8.5" stroke="#003D6B" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+      </svg>
+      <div class="fa-label">Production-Ready</div>
+    </div>
+
+    <!-- After: Spring Boot -->
+    <div class="fn fn-spring">
+      <div class="fn-cap">After</div>
+      <div class="fn-name">Spring Boot<br>Microservices</div>
+      <div class="fn-sub">Cloud-Native · Behaviourally Equivalent<br>Every promotion backed by a complete evidence package</div>
+      <div class="fn-tags">
+        <span class="fn-tag">Modern</span>
+        <span class="fn-tag">Verified</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- THREE PILLARS -->
+  <div class="pillars">
+
+    <!-- GOVERN -->
+    <div class="pillar">
+      <div class="pl-top">
+        <div class="pl-circle">
+          <!-- Shield with checkmark -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L4 6v5.5c0 5 3.5 9.8 8 11.1 4.5-1.3 8-6.1 8-11.1V6z" fill="rgba(255,255,255,0.14)" stroke="white"/>
+            <polyline points="9 12 11 14 15 10"/>
+          </svg>
+        </div>
+        <div class="pl-heading">
+          <div class="pl-name">Govern</div>
+          <div class="pl-badge">
+            <span class="pl-badge-num">6</span> Human Gates
+          </div>
+        </div>
+      </div>
+      <div class="pl-rule"></div>
+      <div class="pl-body">
+        Every approval is locked to the exact artefact reviewed. A changed document automatically invalidates its sign-off — no stale approvals, ever. Every agent action, decision, and approval is permanently recorded in a tamper-proof audit ledger.
+      </div>
+      <div class="pl-call">
+        <div class="pl-call-main">AI accelerates.<br>Humans decide.<br>Always.</div>
+        <div class="pl-call-sub">No AI output reaches production without a named human gate. Governance is structural — it cannot be bypassed under schedule pressure.</div>
+      </div>
+    </div>
+
+    <!-- AUTOMATE -->
+    <div class="pillar">
+      <div class="pl-top">
+        <div class="pl-circle">
+          <!-- Agent network: nodes + edges -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round">
+            <circle cx="5"  cy="5"  r="2" fill="white" stroke="none"/>
+            <circle cx="19" cy="5"  r="2" fill="white" stroke="none"/>
+            <circle cx="12" cy="12" r="2.2" fill="white" stroke="none"/>
+            <circle cx="5"  cy="19" r="2" fill="white" stroke="none"/>
+            <circle cx="19" cy="19" r="2" fill="white" stroke="none"/>
+            <line x1="7"   y1="5"   x2="17"  y2="5"/>
+            <line x1="5"   y1="7"   x2="5"   y2="17"/>
+            <line x1="19"  y1="7"   x2="19"  y2="17"/>
+            <line x1="7"   y1="19"  x2="17"  y2="19"/>
+            <line x1="6.8" y1="6.8" x2="10.3" y2="10.3"/>
+            <line x1="17.2" y1="6.8" x2="13.7" y2="10.3"/>
+            <line x1="6.8" y1="17.2" x2="10.3" y2="13.7"/>
+            <line x1="17.2" y1="17.2" x2="13.7" y2="13.7"/>
+          </svg>
+        </div>
+        <div class="pl-heading">
+          <div class="pl-name">Automate</div>
+          <div class="pl-badge">
+            <span class="pl-badge-num">14</span> AI Agents
+          </div>
+        </div>
+      </div>
+      <div class="pl-rule"></div>
+      <div class="pl-body">
+        Discovery to production — governed end-to-end. Fourteen specialised agents cover every stage: intake, analysis, specification, planning, code generation, differential testing, variance analysis, RCA, and remediation. Each agent operates within a declared, audited authority boundary it cannot exceed.
+      </div>
+      <div class="pl-call">
+        <div class="pl-call-main">6–18 month migration cycles → now a governed, repeatable process.</div>
+        <div class="pl-call-sub">Differential testing verifies behavioural equivalence between ACE and Spring Boot before any production promotion.</div>
+      </div>
+    </div>
+
+    <!-- SCALE -->
+    <div class="pillar">
+      <div class="pl-top">
+        <div class="pl-circle">
+          <!-- Expand / scale arrows -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3"  y1="21" x2="10" y2="14"/>
+          </svg>
+        </div>
+        <div class="pl-heading">
+          <div class="pl-name">Scale</div>
+          <div class="pl-badge">
+            <span class="pl-badge-num" style="-webkit-text-stroke:clamp(1px,0.1vw,1.5px) var(--navy);color:transparent;">∞</span>&nbsp; Provider Flexibility
+          </div>
+        </div>
+      </div>
+      <div class="pl-rule"></div>
+      <div class="pl-body">
+        Run hundreds of ACE services concurrently — each isolated, each through the same governed pipeline. Open-source models by default; any AI provider substitutable per agent without changing a pipeline definition. Every agent built is a reusable capability across every future migration.
+      </div>
+      <div class="pl-call">
+        <div class="pl-call-main">Provider decisions are commercial — not technical constraints.</div>
+        <div class="pl-call-sub">Switch models, switch providers. The factory keeps running. The organisation owns the capability.</div>
+      </div>
+    </div>
+
+  </div><!-- /pillars -->
+
+  <!-- FOOTER -->
+  <div class="bt">
+    <div class="bt-tag">
+      AI providers are infrastructure.
+      <span class="bt-tag-s">Your capabilities are the asset.</span>
+    </div>
+    <div class="cvs-logo">
+      <span class="cvs-h">♥</span>
+      <span class="cvs-n">CVS</span>
+      <span class="cvs-hl">Health</span>
+    </div>
+    <div class="bt-copy">©2025 CVS Health and/or one of its affiliates: Confidential &amp; Proprietary</div>
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  VISUAL DESIGN GUIDANCE                                -->
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<div class="ds">
+  <div class="ds-lbl">Visual Design Guidance — PowerPoint Build Reference</div>
+  <div class="grd">
+
+    <div class="gi">
+      <h4>Colour Palette</h4>
+      <div class="sw-r">
+        <div class="sw"><div class="sw-d" style="background:#FFFFFF;border:1px solid #ccc"></div>Slide BG &nbsp;#FFFFFF</div>
+        <div class="sw"><div class="sw-d" style="background:#003D6B"></div>Navy &nbsp;#003D6B</div>
+        <div class="sw"><div class="sw-d" style="background:#CC0000"></div>CVS Red &nbsp;#CC0000</div>
+        <div class="sw"><div class="sw-d" style="background:#A8D0E6"></div>Badge Border &nbsp;#A8D0E6</div>
+        <div class="sw"><div class="sw-d" style="background:#EDF4FA"></div>Card BG &nbsp;#EDF4FA</div>
+        <div class="sw"><div class="sw-d" style="background:#4ADE80"></div>Live badge &nbsp;green</div>
+      </div>
+      <p>Matches CVS Health deck palette exactly. Each pillar has a 3px navy top border — a subtle architectural framing that signals the three are parallel propositions, not sequential steps. The evidence badges (6 Human Gates / 14 AI Agents / ∞) use the card-fill tint so numbers are proof points, not the primary visual headline. Callout boxes use navy left border + card fill — same pattern as the existing deck's timeline callouts.</p>
+    </div>
+
+    <div class="gi">
+      <h4>Typography &amp; Hierarchy</h4>
+      <p><strong style="color:#555">Font:</strong> Inter, closely matching Calibri/Helvetica Neue in the existing deck. Pillar names (GOVERN / AUTOMATE / SCALE) are the primary H1 of each column — 800 weight, uppercase, navy. This deliberately inverts the old design where the stat number was the H1. Value proposition leads; evidence badge follows.</p>
+      <p><strong style="color:#555">Evidence badges:</strong> The numbers (6, 14, ∞) live inside lozenge badges at secondary hierarchy, alongside the pillar name. In PowerPoint: a rounded rectangle shape (navy outline, card-fill), small text label. "∞" uses outlined text (navy stroke, transparent fill) to signal limitlessness vs the hard counts 6 and 14.</p>
+      <p><strong style="color:#555">Circle icons:</strong> White vector icons on navy circles — same grammar as CVS timeline slides. Icons are 46% of circle diameter. No connector line between circles: the three pillars are parallel propositions, not a sequential flow.</p>
+    </div>
+
+    <div class="gi">
+      <h4>Layout &amp; Flow Visual</h4>
+      <p>Slide structure (top to bottom): header → transformation flow → three support pillars → footer. The flow is the hero — it tells the product story in one glance before the audience reads a word.</p>
+      <p><strong style="color:#555">Transformation flow (three nodes + two arrows):</strong> "Before" node (Legacy ACE, warm grey tint, amber left border) → "AI-Powered" arrow → factory node (navy fill, white text, shadow — visually dominant) → "Production-Ready" arrow → "After" node (Spring Boot, green tint, green left border). The factory node takes 1.3× the width of the flanking nodes to signal it is the subject. The flanking nodes' colour warmth (legacy=amber, modern=green) creates a problem→solution gradient without labels.</p>
+      <p><strong style="color:#555">Three pillars:</strong> GOVERN / AUTOMATE / SCALE — each with navy top border, icon circle, evidence badge, body text, and callout. These are support detail, not the story. They answer "how does the factory work?" after the flow answers "what does it do?"</p>
+      <p>Footer (single ruled row): tagline left, CVS logo centre, copyright right. Clean, consistent with existing deck convention.</p>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  SPEAKER NOTES — FULL TEAM TALKING TRACK              -->
+<!-- ═══════════════════════════════════════════════════════ -->
+
+<div class="ds sep">
+  <div class="ds-lbl">Speaker Notes — Full Team Talking Track (~2 minutes)</div>
+  <div class="nt">
+    <p><strong>Opening — 15 sec</strong><br>
+    "Most organisations have invested in AI. Very few trust it in production at scale. The gap is not the intelligence of the models — it is the absence of governance around them. We solved that problem. This slide shows how."</p>
+
+    <p><strong>GOVERN (left pillar) — 25 sec</strong><br>
+    Point to the Govern pillar. "Every approval in this system is cryptographically locked to the exact artefact the approver reviewed. If that document changes after sign-off — even by a single character — the approval is automatically invalidated. There are no stale approvals. Six mandatory human checkpoints gate every migration. Every agent action, every decision, every approval is recorded in a tamper-proof, hash-chained audit ledger. AI accelerates. Humans decide. Always. No AI output governs a production decision without a named human gate."</p>
+
+    <p><strong>AUTOMATE (centre pillar) — 25 sec</strong><br>
+    Point to the Automate pillar. "Fourteen specialised AI agents drive the full migration pipeline — from the moment we discover an ACE service to the moment a Spring Boot microservice is production-ready. Each agent operates within a declared, audited authority boundary it cannot exceed. Agent contracts are hashed at startup — any unauthorised modification fails initialisation. Before any generated code advances, we run live differential testing: the original ACE service and the generated Spring Boot service receive the same inputs. Behavioural equivalence is verified at runtime. Migration cycles that previously took six to eighteen months per service now run as a governed, repeatable process."</p>
+
+    <p><strong>SCALE (right pillar) — 20 sec</strong><br>
+    Point to the Scale pillar. "The factory is designed for a full portfolio. Hundreds of ACE services can run in parallel, each isolated, each through the same governed pipeline — the only serialisation is the approval gates within a single service, which is intentional. And critically — any AI provider. The platform ships with open-source Qwen3 models by default. Any agent's model can be overridden per-project with any approved provider: OpenAI, Anthropic, Azure, or on-premises. Switch providers without changing a pipeline definition. Provider relationships are commercial decisions — not technical constraints."</p>
+
+    <p><strong>Flow visual — 10 sec</strong><br>
+    Point across the flow. "The product takes your Legacy ACE integration flows — ESQL, message maps, all of it — and runs them through a governed AI factory. Fourteen AI agents do the analysis, specification, code generation, and testing. Six human approval gates ensure nothing reaches production without named sign-off. What comes out the other side is a Spring Boot microservice that is behaviourally equivalent to the original — proven by live differential testing before promotion. That is the product."</p>
+
+    <p><strong>Close — 10 sec</strong><br>
+    Point to the tagline. "AI providers are infrastructure. Your capabilities are the asset. We are not delivering AI tools. We are delivering the infrastructure that makes your organisation's AI investment permanent, reusable, and auditable."</p>
+
+    <hr style="margin:18px 0;border:none;border-top:1px solid #e0e0e0">
+
+    <p><strong>Q&amp;A — Common questions</strong></p>
+    <p><strong>Q: What AI models does this use?</strong><br>
+    "We ship with open-source Qwen3 models — Apache 2.0 licensed — as the system default. There are four model aliases: a reasoning model for analysis, planning and RCA; a smaller reasoning model for orchestration and governance explanations; a coding model for code generation and test engineering; and an embeddings model for the knowledge base and retrieval. Any of these can be overridden per-agent per-project with any approved AI provider, using the Edit Agent configuration. The governance gates are deterministic — they are not made by the AI models. Changing the model cannot bypass a gate."</p>
+
+    <p><strong>Q: Who approves at each gate?</strong><br>
+    "Six named approvers across the pipeline: Service Owner at G0 (proceed decision), Java Architect at G1 (Spring framework template), ACE Subject Matter Expert at G2 (migration specification), Product Owner at G3 (migration plan), QA Lead at G4 (variance disposition), and Release Manager at G5 (production promotion). Each sign-off is SHA-256-bound to the exact artefact reviewed. If anyone submits a revised document after approval, the approval for that document is automatically retired."</p>
+
+    <p><strong>Q: Can this platform extend beyond IBM ACE migration?</strong><br>
+    "Yes — the architecture is not locked to ACE. The agent registry, pipeline engine, model router, and audit ledger are all general-purpose components. The ACE migration factory is the first full production use case. The governance principles — evidence-bound approvals, agent authority contracts, tamper-proof audit — apply to any enterprise process where AI automation needs human oversight. Finance, Legal, and Operations teams could run equivalent governed pipelines using the same structural patterns."</p>
+
+    <p><strong>Q: What is the audit trail actually capturing?</strong><br>
+    "Every agent run, every workflow state transition, every approval, every variance classification, every clarification question and its answer — all recorded in a hash-chained, append-only ledger. Each record captures: the model version used, the prompt version, the agent tool policy version, the approver identity, and the SHA-256 hash of every artefact involved. Modifying any prior record breaks the cryptographic chain and is immediately detectable. For a regulatory audit, this is a query, not a reconstruction exercise."</p>
+
+    <p><strong>Q: Can this scale to a full IBM ACE portfolio?</strong><br>
+    "Yes — by architecture. Every migration job is isolated by job ID. Multiple services can be in-flight simultaneously, each progressing independently through the same governed pipeline. The only serialisation is the human gate approvals within a single service's lifecycle, which is intentional. The database layer is a swap from SQLite to PostgreSQL for scale. Agent workers are stateless and containerisable. The queue is replaceable with SQS or Kafka using the same interface contract."</p>
+  </div>
+</div>

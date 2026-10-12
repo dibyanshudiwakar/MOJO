@@ -1,0 +1,434 @@
+{
+  "catalogue_version": "1.0",
+  "agents": [
+    {
+      "agent_id": "migration-orchestrator",
+      "display_name": "Migration Orchestrator Agent",
+      "version": "1.0.0",
+      "description": "Migration Orchestrator architecture contract.",
+      "accepted_inputs": [
+        "job_state",
+        "policies",
+        "approved_artefacts"
+      ],
+      "produced_outputs": [
+        "commands",
+        "next_state_proposal",
+        "clarification_request"
+      ],
+      "required_role": "ORCHESTRATOR",
+      "tool_allowlist": [
+        "workflow.read",
+        "workflow.transition",
+        "agent.invoke",
+        "clarification.create"
+      ],
+      "dependencies": [],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-small"
+    },
+    {
+      "agent_id": "repository-intake",
+      "display_name": "Repository Intake Agent",
+      "version": "1.0.0",
+      "description": "Repository Intake architecture contract.",
+      "accepted_inputs": [
+        "repository_references",
+        "credential_secret_references"
+      ],
+      "produced_outputs": [
+        "intake_manifest",
+        "gaps"
+      ],
+      "required_role": "REPOSITORY_INTAKE",
+      "tool_allowlist": [
+        "repository.read",
+        "evidence.write"
+      ],
+      "dependencies": [],
+      "status": "APPROVED",
+      "effective_from": "2026-10-05T12:49:29.201355+00:00",
+      "approved_by": "somya.paliwal1@cvshealth.com",
+      "approval_evidence_id": "",
+      "supersedes_version": "",
+      "enabled": true,
+      "default_model_alias": "reasoning-small"
+    },
+    {
+      "agent_id": "dormancy-intelligence",
+      "display_name": "Dormancy Intelligence Agent",
+      "version": "1.0.0",
+      "description": "Dormancy Intelligence architecture contract.",
+      "accepted_inputs": [
+        "telemetry",
+        "deployment_inventory",
+        "service_registry"
+      ],
+      "produced_outputs": [
+        "classification",
+        "evidence",
+        "confidence"
+      ],
+      "required_role": "DORMANCY_ANALYST",
+      "tool_allowlist": [
+        "telemetry.read",
+        "registry.read",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "repository-intake"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-small"
+    },
+    {
+      "agent_id": "framework-baseline",
+      "display_name": "Framework Baseline Agent",
+      "version": "1.0.0",
+      "description": "Framework Baseline architecture contract.",
+      "accepted_inputs": [
+        "reference_repositories",
+        "architecture_standards"
+      ],
+      "produced_outputs": [
+        "framework_template",
+        "conflicts"
+      ],
+      "required_role": "FRAMEWORK_ANALYST",
+      "tool_allowlist": [
+        "repository.read",
+        "evidence.write",
+        "clarification.create"
+      ],
+      "dependencies": [
+        "repository-intake"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-10-05T12:38:46.728144+00:00",
+      "approved_by": "somya.paliwal1@cvshealth.com",
+      "approval_evidence_id": "",
+      "supersedes_version": "",
+      "enabled": true,
+      "default_model_alias": "reasoning-large"
+    },
+    {
+      "agent_id": "ace-analysis",
+      "display_name": "ACE Analysis Agent",
+      "version": "1.0.0",
+      "description": "ACE Analysis architecture contract.",
+      "accepted_inputs": [
+        "ace_repository_snapshot"
+      ],
+      "produced_outputs": [
+        "analysis_document",
+        "semantic_model",
+        "ambiguities"
+      ],
+      "required_role": "ACE_ANALYST",
+      "tool_allowlist": [
+        "repository.read",
+        "parser.execute",
+        "evidence.write",
+        "clarification.create"
+      ],
+      "dependencies": [
+        "repository-intake"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-10-06T07:05:49.043465+00:00",
+      "approved_by": "somya.paliwal1@cvshealth.com",
+      "approval_evidence_id": "",
+      "supersedes_version": "",
+      "enabled": true
+    },
+    {
+      "agent_id": "migration-specification",
+      "display_name": "Migration Specification Agent",
+      "version": "1.0.0",
+      "description": "Migration Specification architecture contract.",
+      "accepted_inputs": [
+        "semantic_model",
+        "approved_defaults"
+      ],
+      "produced_outputs": [
+        "migration_specification_yaml"
+      ],
+      "required_role": "SPECIFICATION_AUTHOR",
+      "tool_allowlist": [
+        "evidence.read",
+        "schema.validate",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "ace-analysis"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-large"
+    },
+    {
+      "agent_id": "planning",
+      "display_name": "Planning Agent",
+      "version": "1.0.0",
+      "description": "Planning architecture contract.",
+      "accepted_inputs": [
+        "approved_analysis",
+        "migration_yaml",
+        "framework_template"
+      ],
+      "produced_outputs": [
+        "plan",
+        "task_graph",
+        "mapping",
+        "risk_register"
+      ],
+      "required_role": "MIGRATION_PLANNER",
+      "tool_allowlist": [
+        "evidence.read",
+        "plan.write",
+        "clarification.create"
+      ],
+      "dependencies": [
+        "migration-specification",
+        "framework-baseline"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-large"
+    },
+    {
+      "agent_id": "code-generation",
+      "display_name": "Code Generation Agent",
+      "version": "1.0.0",
+      "description": "Code Generation architecture contract.",
+      "accepted_inputs": [
+        "approved_plan",
+        "target_template"
+      ],
+      "produced_outputs": [
+        "source_code",
+        "tests",
+        "manifest",
+        "provenance"
+      ],
+      "required_role": "CODE_GENERATOR",
+      "tool_allowlist": [
+        "repository.branch",
+        "repository.write",
+        "build.execute",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "planning"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "coding"
+    },
+    {
+      "agent_id": "test-engineering",
+      "display_name": "Test Engineering Agent",
+      "version": "1.0.0",
+      "description": "Test Engineering architecture contract.",
+      "accepted_inputs": [
+        "behaviour_model",
+        "test_data",
+        "endpoint_adapters"
+      ],
+      "produced_outputs": [
+        "test_suites",
+        "execution_evidence"
+      ],
+      "required_role": "TEST_ENGINEER",
+      "tool_allowlist": [
+        "test.execute",
+        "runtime.invoke",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "ace-analysis"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "coding"
+    },
+    {
+      "agent_id": "variance-analysis",
+      "display_name": "Variance Analysis Agent",
+      "version": "1.0.0",
+      "description": "Variance Analysis architecture contract.",
+      "accepted_inputs": [
+        "ace_results",
+        "java_results"
+      ],
+      "produced_outputs": [
+        "variance_records",
+        "severity"
+      ],
+      "required_role": "VARIANCE_ANALYST",
+      "tool_allowlist": [
+        "evidence.read",
+        "comparison.execute",
+        "variance.write"
+      ],
+      "dependencies": [
+        "test-engineering"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "semantic-review"
+    },
+    {
+      "agent_id": "rca",
+      "display_name": "RCA Agent",
+      "version": "1.0.0",
+      "description": "RCA architecture contract.",
+      "accepted_inputs": [
+        "variance",
+        "logs",
+        "code",
+        "analysis"
+      ],
+      "produced_outputs": [
+        "rca_hypotheses",
+        "confidence",
+        "missing_evidence"
+      ],
+      "required_role": "RCA_ANALYST",
+      "tool_allowlist": [
+        "evidence.read",
+        "repository.read",
+        "rca.write"
+      ],
+      "dependencies": [
+        "variance-analysis"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-large"
+    },
+    {
+      "agent_id": "remediation",
+      "display_name": "Remediation Agent",
+      "version": "1.0.0",
+      "description": "Remediation architecture contract.",
+      "accepted_inputs": [
+        "approved_rca",
+        "policy"
+      ],
+      "produced_outputs": [
+        "patch_plan",
+        "code_changes",
+        "tests"
+      ],
+      "required_role": "REMEDIATION_ENGINEER",
+      "tool_allowlist": [
+        "repository.branch",
+        "repository.write",
+        "test.execute",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "rca"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "coding"
+    },
+    {
+      "agent_id": "governance",
+      "display_name": "Governance Agent",
+      "version": "1.0.0",
+      "description": "Governance architecture contract.",
+      "accepted_inputs": [
+        "policies",
+        "lifecycle_events"
+      ],
+      "produced_outputs": [
+        "allow_deny_decision",
+        "approval_requirement",
+        "evidence_requirement"
+      ],
+      "required_role": "GOVERNANCE_ENGINE",
+      "tool_allowlist": [
+        "policy.read",
+        "policy.evaluate",
+        "audit.write"
+      ],
+      "dependencies": [],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "reasoning-small"
+    },
+    {
+      "agent_id": "knowledge-evidence",
+      "display_name": "Knowledge and Evidence Agent",
+      "version": "1.0.0",
+      "description": "Knowledge and Evidence architecture contract.",
+      "accepted_inputs": [
+        "versioned_artefacts",
+        "metadata"
+      ],
+      "produced_outputs": [
+        "cited_context",
+        "version_lineage"
+      ],
+      "required_role": "KNOWLEDGE_CURATOR",
+      "tool_allowlist": [
+        "evidence.read",
+        "index.write",
+        "index.read"
+      ],
+      "dependencies": [],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "embeddings"
+    }
+  ]
+}

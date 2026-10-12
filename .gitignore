@@ -1,0 +1,34 @@
+# Secrets
+*.signing-key
+*.secret-key
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual Environments
+venv/
+.venv/
+
+# VS Code
+.vscode/
+.idea/
+
+
+# Claude
+.claude/scratch/
+
+# Node
+node_modules/
+
+# Build Output
+dist/
+build/
+
+# Logs
+*.log

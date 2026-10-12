@@ -1,0 +1,46 @@
+{
+  "catalogue_version": "1.0",
+  "note": "Version-controlled prompt templates for the model-assisted agent steps. These are registered through POST /api/v7/prompts and require an AI_GOVERNANCE_ADMIN to move them to APPROVED; they are never self-approved by an agent. Until a prompt here is approved and a provider execution adapter is configured, the corresponding agent produces its deterministic service-backed result and records mode=DETERMINISTIC_FALLBACK.",
+  "prompts": [
+    {
+      "name": "agent/dormancy-intelligence/classification-rationale",
+      "version": "1",
+      "template": "You are given deployment and telemetry evidence for one integration service. State which dormancy classification the supplied evidence supports and which evidence item is decisive. Cite only the supplied evidence. If the evidence is insufficient for a classification, say UNKNOWN and list what is missing. Return JSON: {\"classification\":..., \"decisive_evidence\":..., \"missing_evidence\":[...]}."
+    },
+    {
+      "name": "agent/ace-analysis/ambiguity-triage",
+      "version": "1",
+      "template": "You are given an IBM ACE semantic model and the ambiguities a deterministic parser could not resolve. For each ambiguity, state the question a named owner must answer and the migration impact if it stays open. Do not infer runtime behaviour that is not present in the model. Return JSON: {\"ambiguities\":[{\"question\":..., \"owner\":..., \"impact\":..., \"evidenceReference\":...}]}."
+    },
+    {
+      "name": "agent/migration-specification/authoring",
+      "version": "1",
+      "template": "You are given an ACE semantic model and an approved framework template. Produce the migration specification fields that the schema requires and the model does not directly supply: target Spring modules and approved dependencies. Every entry must trace to a construct in the model. Return JSON: {\"springModules\":[...], \"approvedDependencies\":[...], \"notes\":[...]}."
+    },
+    {
+      "name": "agent/planning/risk-assessment",
+      "version": "1",
+      "template": "You are given a mapping catalogue between ACE constructs and approved Spring patterns. Identify migration risks that follow from the mappings themselves, each with a severity, a response and an owner. Do not propose a mapping that is not already approved in the catalogue. Return JSON: {\"risks\":[{\"category\":..., \"severity\":..., \"statement\":..., \"response\":..., \"owner\":...}]}."
+    },
+    {
+      "name": "agent/variance-analysis/severity-rationale",
+      "version": "1",
+      "template": "You are given normalised ACE and Spring Boot results for one differential test case and the variances a deterministic comparator found. For each variance, state whether it is a behavioural difference or a permitted representation difference, and why. Do not dismiss a variance without naming the normalisation rule that permits it. Return JSON: {\"assessments\":[{\"path\":..., \"behavioural\":true, \"rationale\":...}]}."
+    },
+    {
+      "name": "agent/rca/hypothesis",
+      "version": "1",
+      "template": "You are given variance records, the ACE analysis they relate to and the generated target code. Propose root-cause hypotheses. Each hypothesis must cite the specific evidence supporting it and list the evidence that is missing to confirm it. Never assert a cause that the supplied evidence cannot support. Return JSON: {\"hypotheses\":[{\"hypothesis\":..., \"supporting_evidence\":[...], \"missing_evidence\":[...], \"affected_scope\":...}]}."
+    },
+    {
+      "name": "agent/remediation/patch-plan",
+      "version": "1",
+      "template": "You are given an approved root cause and the governed remediation policy. Propose the bounded change that addresses the cause, the regression tests that prove it, and the blast radius. Only use an approved remediation pattern. If the change would exceed a bounded impact, say so and request clarification instead. Return JSON: {\"pattern\":..., \"changes\":[{\"path\":..., \"intent\":...}], \"tests\":[...], \"bounded\":true}."
+    },
+    {
+      "name": "agent/migration-orchestrator/next-action",
+      "version": "1",
+      "template": "You are given a migration job's lifecycle state, its produced artefacts and the governance evaluation of what its next transition requires. Propose the next action: which agent to run with which inputs, or which gate approval is awaited. Never propose a transition whose gate is unsatisfied. Return JSON: {\"next_agent\":..., \"params\":{...}, \"next_state\":..., \"blocked_by\":...}."
+    }
+  ]
+}

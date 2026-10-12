@@ -1,0 +1,1743 @@
+<title>ACE Modernization Accelerator Walkthrough</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* === DESIGN TOKENS ===
+     Layout: vertical timeline with sticky pipeline nav, expanding phase sections */
+  :root {
+    --bg:        #f8fafc;
+    --bg-card:   #ffffff;
+    --bg-muted:  #f1f5f9;
+    --border:    #e2e8f0;
+    --fg:        #0f172a;
+    --fg-muted:  #64748b;
+    --fg-subtle: #94a3b8;
+    --accent:    #2563eb;
+    --accent-bg: #eff6ff;
+    --ai:        #d97706;
+    --ai-bg:     #fffbeb;
+    --det:       #059669;
+    --det-bg:    #ecfdf5;
+    --gate:      #7c3aed;
+    --gate-bg:   #f5f3ff;
+    --warn:      #dc2626;
+    --warn-bg:   #fef2f2;
+    --ok:        #16a34a;
+    --track:     #3b82f6;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #0f172a;
+      --bg-card:   #1e293b;
+      --bg-muted:  #1e293b;
+      --border:    #334155;
+      --fg:        #f1f5f9;
+      --fg-muted:  #94a3b8;
+      --fg-subtle: #475569;
+      --accent:    #60a5fa;
+      --accent-bg: #1e3a5f;
+      --ai:        #fbbf24;
+      --ai-bg:     #1c1400;
+      --det:       #34d399;
+      --det-bg:    #0a2318;
+      --gate:      #a78bfa;
+      --gate-bg:   #1e1333;
+      --warn:      #f87171;
+      --warn-bg:   #1f0a0a;
+      --ok:        #4ade80;
+      --track:     #3b82f6;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #0f172a;
+    --bg-card:   #1e293b;
+    --bg-muted:  #1e293b;
+    --border:    #334155;
+    --fg:        #f1f5f9;
+    --fg-muted:  #94a3b8;
+    --fg-subtle: #475569;
+    --accent:    #60a5fa;
+    --accent-bg: #1e3a5f;
+    --ai:        #fbbf24;
+    --ai-bg:     #1c1400;
+    --det:       #34d399;
+    --det-bg:    #0a2318;
+    --gate:      #a78bfa;
+    --gate-bg:   #1e1333;
+    --warn:      #f87171;
+    --warn-bg:   #1f0a0a;
+    --ok:        #4ade80;
+    --track:     #3b82f6;
+    color-scheme: dark;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    padding-inline: 0;
+  }
+
+  /* NAV */
+  .pipeline-nav {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 100;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .pipeline-nav::-webkit-scrollbar { display: none; }
+  .pipeline-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: max-content;
+    padding: 12px 0;
+  }
+  .nav-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color .15s, background .15s;
+    letter-spacing: .02em;
+  }
+  .nav-step:hover { color: var(--fg); background: var(--bg-muted); }
+  .nav-step.active { color: var(--accent); background: var(--accent-bg); }
+  .nav-step .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .nav-arrow {
+    color: var(--fg-subtle);
+    font-size: 11px;
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+
+  /* LAYOUT */
+  .page-wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px 80px;
+  }
+
+  /* HERO */
+  .hero {
+    padding: 56px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .hero h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(28px, 5vw, 44px);
+    font-weight: 700;
+    line-height: 1.15;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub {
+    font-size: 17px;
+    color: var(--fg-muted);
+    max-width: 62ch;
+    margin: 0 0 28px;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: .01em;
+  }
+  .chip-blue { background: var(--accent-bg); color: var(--accent); }
+  .chip-ai   { background: var(--ai-bg);     color: var(--ai); }
+  .chip-det  { background: var(--det-bg);    color: var(--det); }
+  .chip-gate { background: var(--gate-bg);   color: var(--gate); }
+
+  /* LEGEND */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-muted);
+    margin-bottom: 48px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .legend-swatch {
+    width: 14px; height: 14px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  /* PHASE SECTIONS */
+  .phase {
+    margin-bottom: 56px;
+    scroll-margin-top: calc(60px + env(safe-area-inset-top, 0px));
+  }
+  .phase-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .phase-num {
+    flex-shrink: 0;
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .phase-num-blue  { background: var(--accent-bg); color: var(--accent); }
+  .phase-num-ai    { background: var(--ai-bg);     color: var(--ai); }
+  .phase-num-det   { background: var(--det-bg);    color: var(--det); }
+  .phase-num-gate  { background: var(--gate-bg);   color: var(--gate); }
+  .phase-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    margin: 0 0 4px;
+    line-height: 1.2;
+  }
+  .phase-sub {
+    font-size: 13px;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+  .state-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .06em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    display: inline-block;
+    margin-top: 6px;
+  }
+
+  /* CARDS */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fg);
+  }
+  .card-title svg { flex-shrink: 0; }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* AGENT CARDS */
+  .agent-card {
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .agent-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .agent-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    flex: 1;
+    min-width: 0;
+  }
+  .agent-body { padding: 16px 20px; background: var(--bg-card); }
+  .agent-body p { margin: 0 0 10px; font-size: 14px; color: var(--fg-muted); }
+  .agent-body p:last-child { margin-bottom: 0; }
+  .agent-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .agent-col { flex: 1; min-width: 160px; }
+  .col-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--fg-subtle);
+    margin-bottom: 6px;
+  }
+  .output-list {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .output-list li {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    word-break: break-all;
+  }
+
+  /* GATE CARDS */
+  .gate-card {
+    border: 2px solid var(--gate);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 24px 0;
+    background: var(--gate-bg);
+  }
+  .gate-header {
+    background: var(--gate);
+    color: #fff;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .gate-body { padding: 16px 20px; }
+  .gate-body p { margin: 0 0 8px; font-size: 14px; }
+  .gate-body p:last-child { margin-bottom: 0; }
+  .gate-role {
+    display: inline-block;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gate);
+    margin: 2px;
+  }
+  .gate-checklist {
+    list-style: none;
+    padding: 0; margin: 10px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gate-checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .gate-checklist li::before {
+    content: "✓";
+    color: var(--gate);
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* CODE BLOCK */
+  .code-block {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+    line-height: 1.7;
+    color: var(--fg);
+  }
+  .code-block .kw { color: var(--accent); }
+  .code-block .str { color: var(--det); }
+  .code-block .cm { color: var(--fg-subtle); font-style: italic; }
+  .code-block .key { color: var(--ai); }
+
+  /* DIFF TABLE */
+  .diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .diff-table th {
+    text-align: left;
+    font-size: 11px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    padding: 6px 10px;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .diff-table tr:last-child td { border-bottom: none; }
+  .diff-pass { color: var(--det); }
+  .diff-var  { color: var(--warn); }
+  .diff-mask { color: var(--fg-muted); font-style: italic; }
+
+  /* FLOW DIAGRAM */
+  .flow-wrap {
+    overflow-x: auto;
+    margin: 20px 0;
+  }
+  .flow-wrap svg { display: block; }
+
+  /* METRIC ROW */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .metric {
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .metric-val {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .metric-lbl {
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .col-accent { color: var(--accent); }
+  .col-ai     { color: var(--ai); }
+  .col-det    { color: var(--det); }
+  .col-gate   { color: var(--gate); }
+  .col-ok     { color: var(--ok); }
+
+  /* DIVIDER */
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* REPO CARD */
+  .repo-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    background: var(--bg-card);
+    margin-bottom: 12px;
+  }
+  .repo-icon {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .repo-icon-blue { background: var(--accent-bg); }
+  .repo-icon-det  { background: var(--det-bg); }
+  .repo-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+  .repo-desc { font-size: 13px; color: var(--fg-muted); }
+
+  /* EVIDENCE BADGE */
+  .evidence {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    margin: 2px;
+  }
+  .evidence .hash { color: var(--accent); }
+
+  /* TIMELINE CONNECTOR */
+  .timeline-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 0 0 0 20px;
+    position: relative;
+    margin-bottom: 8px;
+  }
+  .tl-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-bottom: 4px;
+    position: relative;
+    z-index: 1;
+  }
+  .tl-line {
+    width: 2px;
+    background: var(--border);
+    flex: 1;
+    min-height: 16px;
+  }
+
+  /* DELIVERABLE GRID */
+  .deliverable-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .deliverable {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    background: var(--bg-card);
+    position: relative;
+    overflow: hidden;
+  }
+  .deliverable::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+  }
+  .del-blue::before  { background: var(--accent); }
+  .del-det::before   { background: var(--det); }
+  .del-gate::before  { background: var(--gate); }
+  .del-ai::before    { background: var(--ai); }
+  .deliverable-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .deliverable-desc { font-size: 13px; color: var(--fg-muted); }
+
+  /* REMEDIATION FLOW */
+  .rem-step {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .rem-num {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--ai-bg);
+    border: 2px solid var(--ai);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ai);
+  }
+  .rem-content { flex: 1; min-width: 0; }
+  .rem-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .rem-desc { font-size: 13px; color: var(--fg-muted); }
+
+  /* VARIANCE ANALYSIS */
+  .variance-card {
+    border: 1px solid var(--warn);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .variance-head {
+    background: var(--warn-bg);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--warn);
+  }
+  .variance-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--warn);
+    font-weight: 600;
+  }
+  .variance-severity {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .sev-high { background: var(--warn); color: #fff; }
+  .sev-med  { background: var(--ai-bg); color: var(--ai); border: 1px solid var(--ai); }
+  .sev-low  { background: var(--det-bg); color: var(--det); border: 1px solid var(--det); }
+  .variance-body { padding: 12px 16px; background: var(--bg-card); }
+  .variance-body p { margin: 0 0 6px; font-size: 13px; }
+
+  /* CONFIDENCE METER */
+  .conf-meter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 0;
+  }
+  .conf-track {
+    flex: 1;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .conf-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--warn), var(--ai), var(--det));
+  }
+  .conf-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--det);
+    white-space: nowrap;
+  }
+
+  p { margin: 0 0 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  ul.body-list {
+    padding-left: 18px;
+    margin: 8px 0;
+  }
+  ul.body-list li { margin-bottom: 6px; font-size: 14px; }
+
+  strong { font-weight: 600; }
+
+  .text-muted { color: var(--fg-muted); }
+  .text-small { font-size: 13px; }
+
+  .notice {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 12px 0;
+    border-left: 3px solid;
+  }
+  .notice-blue { background: var(--accent-bg); border-color: var(--accent); color: var(--fg); }
+  .notice-warn { background: var(--warn-bg);   border-color: var(--warn);   color: var(--fg); }
+  .notice-ok   { background: var(--det-bg);    border-color: var(--det);    color: var(--fg); }
+
+  @media (max-width: 480px) {
+    .page-wrap { padding: 0 16px 60px; }
+    .pipeline-nav { padding: 0 16px; }
+    .card { padding: 16px; }
+    .agent-header { padding: 12px 16px; }
+    .agent-body { padding: 14px 16px; }
+  }
+</style>
+
+<!-- STICKY PIPELINE NAV -->
+<nav class="pipeline-nav" aria-label="Pipeline stages">
+  <div class="pipeline-steps">
+    <a class="nav-step active" href="#onboarding"><span class="dot"></span>Onboarding</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#analysis"><span class="dot"></span>ACE Analysis</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#framework"><span class="dot"></span>Framework Baseline</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#planning"><span class="dot"></span>Planning</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#generation"><span class="dot"></span>Code Generation</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#differential"><span class="dot"></span>Differential Testing</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#variance"><span class="dot"></span>Variance Review</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#remediation"><span class="dot"></span>Remediation</a>
+    <span class="nav-arrow">›</span>
+    <a class="nav-step" href="#completion"><span class="dot"></span>Completion</a>
+  </div>
+</nav>
+
+<div class="page-wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="eyebrow">ACE Modernization Accelerator — End-to-End Walkthrough</div>
+    <h1>Migrating the <span>Customer Profile Service</span> from IBM ACE to Spring Boot</h1>
+    <p class="hero-sub">A realistic walkthrough showing every agent, every approval gate, and every output — told from the perspective of both the business and the engineering team.</p>
+    <div class="hero-meta">
+      <span class="chip chip-blue">ACE v12 → Spring Boot 3</span>
+      <span class="chip chip-ai">3 AI-Powered Agents</span>
+      <span class="chip chip-det">4 Deterministic Agents</span>
+      <span class="chip chip-gate">6 Approval Gates (G0–G5)</span>
+    </div>
+  </header>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--ai)"></div>
+      AI-Powered Agent — uses an approved language model; output is probabilistic and reviewed by a human
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--det)"></div>
+      Deterministic Agent — rule-based, produces the same output given the same input; fully auditable
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--gate)"></div>
+      Approval Gate — a named human checkpoint; the pipeline cannot continue without a recorded decision
+    </div>
+  </div>
+
+  <!-- ==============================
+       PHASE 1 — ONBOARDING
+       ============================== -->
+  <section class="phase" id="onboarding">
+    <div class="phase-header">
+      <div class="phase-num phase-num-blue">01</div>
+      <div>
+        <h2 class="phase-title">Onboarding — User Creates the Migration</h2>
+        <p class="phase-sub">Business: commit to migrating this service. Technical: supply the artifacts the factory needs to begin.</p>
+        <span class="state-badge">State: CREATED → INTAKE_VALIDATED</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 7h6M5 9.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        The Migration Request
+      </div>
+      <p>A migration engineer at <strong>Acme Bank</strong> opens the ACE Modernization Accelerator portal and submits a new migration job. They fill in a YAML specification — the machine-readable contract that governs everything that follows.</p>
+      <div class="code-block"><span class="cm"># migration-specification.yaml — submitted at job creation</span>
+<span class="key">metadata</span>:
+  <span class="key">service</span>: <span class="str">CustomerProfileService</span>
+  <span class="key">sourceCommit</span>: <span class="str">a7f3c91</span>        <span class="cm"># exact Git SHA of the ACE source to migrate</span>
+  <span class="key">analysisVersion</span>: <span class="str">"1.0"</span>
+  <span class="key">frameworkTemplateVersion</span>: <span class="str">"3.2"</span>   <span class="cm"># Spring Boot 3.2 target template</span>
+<span class="key">source</span>:
+  <span class="key">aceVersion</span>: <span class="str">"12"</span>
+  <span class="key">applications</span>: [<span class="str">CustomerProfileApplication</span>]
+  <span class="key">flows</span>: [<span class="str">GetCustomerFlow</span>, <span class="str">UpdateCustomerFlow</span>, <span class="str">CustomerValidator</span>]
+  <span class="key">esql</span>:  [<span class="str">CustomerProfileCompute.esql</span>]
+  <span class="key">schemas</span>: [<span class="str">CustomerProfile.xsd</span>]
+<span class="key">governance</span>:
+  <span class="key">enabledGates</span>: [<span class="str">G0</span>, <span class="str">G1</span>, <span class="str">G2</span>, <span class="str">G3</span>, <span class="str">G4</span>, <span class="str">G5</span>]
+  <span class="key">iterationLimit</span>: 5        <span class="cm"># max remediation cycles before STOPPED</span></div>
+      <p class="text-muted text-small">The factory validates this YAML against a JSON Schema contract. If it fails validation, the job stays in <strong>CREATED</strong> and the errors are returned to the engineer. A SHA-256 hash of the specification is stored as evidence before any agent runs.</p>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <p class="col-label">Source Repository (Customer's ACE Code)</p>
+        <div class="repo-card">
+          <div class="repo-icon repo-icon-blue">📦</div>
+          <div>
+            <div class="repo-name">acme-bank/customer-profile-ace</div>
+            <div class="repo-desc">IBM ACE v12 message flow project. Contains <code>CustomerProfileApplication</code> with 3 flows, 1 ESQL module, XSD schema, MQ &amp; HTTP policies. Pinned at commit <strong>a7f3c91</strong>.</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="col-label">Framework Template Repository (Target Blueprint)</p>
+        <div class="repo-card">
+          <div class="repo-icon repo-icon-det">🏗️</div>
+          <div>
+            <div class="repo-name">acme-bank/spring-migration-template</div>
+            <div class="repo-desc">Approved Spring Boot 3.2 golden template. Defines Maven conventions, security config, messaging adapters, logging standards, and observability hooks. Version <strong>3.2</strong>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- G0 GATE -->
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G0 — Intake Validation Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> Confirm the migration is sanctioned, scoped, and safe to begin. Nobody wastes engineering time on an out-of-scope or duplicate request.</p>
+        <p><strong>Technical purpose:</strong> Verify the specification YAML passes schema validation, the source commit exists and is reachable, and the governance configuration is complete.</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">MIGRATION_MANAGER</span></p>
+        <ul class="gate-checklist">
+          <li>Specification is schema-valid (no INVALID status on the saved spec record)</li>
+          <li>Source repository and commit SHA are accessible via the source-control connector</li>
+          <li>All six governance gates (G0–G5) are explicitly enabled</li>
+          <li>Service name does not duplicate an active migration job</li>
+        </ul>
+        <p style="margin-top:10px" class="text-small text-muted">A APPROVE decision is recorded with the approver's identity, timestamp, and the spec evidence ID. Open clarifications block any transition except STOPPED or FAILED.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 2 — ACE ANALYSIS
+       ============================== -->
+  <section class="phase" id="analysis">
+    <div class="phase-header">
+      <div class="phase-num phase-num-det">02</div>
+      <div>
+        <h2 class="phase-title">ACE Analysis — Parsing the Legacy Application</h2>
+        <p class="phase-sub">Business: understand exactly what the existing service does. Technical: extract a complete, machine-readable inventory of the ACE application.</p>
+        <span class="state-badge">State: INTAKE_VALIDATED → DORMANCY_ASSESSED → ACE_ANALYSED</span>
+      </div>
+    </div>
+
+    <!-- Agent: ACEParser -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--det-bg)">
+        <div class="chip chip-det" style="font-size:10px">Deterministic</div>
+        <div class="agent-name">ACEParser</div>
+        <span class="text-small text-muted">No AI · Rule-based XML &amp; ESQL</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Reads the ACE project at commit <code>a7f3c91</code> and extracts every structural element using deterministic XML parsing and ESQL grammar rules. No inference — if it is in the source, it is recorded; if it is ambiguous, it becomes a clarification item.</p>
+        <div class="agent-row">
+          <div class="agent-col">
+            <div class="col-label">Inputs Consumed</div>
+            <ul class="output-list">
+              <li>CustomerProfileApplication/</li>
+              <li>GetCustomerFlow.msgflow</li>
+              <li>UpdateCustomerFlow.msgflow</li>
+              <li>CustomerValidator.msgflow</li>
+              <li>CustomerProfileCompute.esql</li>
+              <li>CustomerProfile.xsd</li>
+            </ul>
+          </div>
+          <div class="agent-col">
+            <div class="col-label">Outputs Produced</div>
+            <ul class="output-list">
+              <li>ACE Inventory (JSON)</li>
+              <li>Dependency Graph</li>
+              <li>Interface Catalogue</li>
+              <li>Behaviour Map</li>
+              <li>Ambiguity Register</li>
+              <li>Evidence Hash (SHA-256)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card-title" style="margin-top:4px">What the ACE Inventory contains — Customer Profile Service</div>
+        <div class="two-col">
+          <div class="card" style="margin:0">
+            <div class="card-title">Interfaces Discovered</div>
+            <ul class="body-list">
+              <li><strong>HTTP GET</strong> <code>/customer/{id}</code> → JSON response</li>
+              <li><strong>HTTP PUT</strong> <code>/customer/{id}</code> → JSON body</li>
+              <li><strong>MQ Input</strong> queue <code>CPS.IN</code> (async update events)</li>
+              <li><strong>MQ Output</strong> queue <code>CPS.OUT</code> (audit trail)</li>
+            </ul>
+          </div>
+          <div class="card" style="margin:0">
+            <div class="card-title">Behaviour Patterns Extracted</div>
+            <ul class="body-list">
+              <li>ESQL field mapping: <code>InputRoot.JSON</code> → <code>OutputRoot.JSON</code></li>
+              <li>Error handling: MQMD header propagation on failure</li>
+              <li>XSD validation node on inbound HTTP path</li>
+              <li>Routing: <code>CustomerValidator</code> fans out to Get/Update sub-flows</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="notice notice-warn" style="margin-top:12px">
+          <strong>Ambiguity raised (clarification item):</strong> The ESQL module references an MQ policy <code>MQPolicy_Prod</code> by name but the policy file is not present in the committed source tree. The ACEParser records this as an OPEN clarification — <em>"Which MQ policy applies? Blocks adapter mapping."</em> — assigned to the ACE-SME role. The pipeline cannot advance past G1 until this is resolved.
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent: DormancyScanner -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--det-bg)">
+        <div class="chip chip-det" style="font-size:10px">Deterministic</div>
+        <div class="agent-name">DormancyAssessor</div>
+        <span class="text-small text-muted">No AI · Commit history analysis</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Queries the source-control connector for commit history on the ACE application. Computes last-modified dates per file, counts active contributors, and checks for in-flight branches. Produces a dormancy report that informs whether migration should proceed or the application should be decommissioned instead.</p>
+        <div class="agent-row">
+          <div class="agent-col">
+            <div class="col-label">Outputs Produced</div>
+            <ul class="output-list">
+              <li>Dormancy Report (JSON)</li>
+              <li>Last-commit: 14 days ago</li>
+              <li>Contributors (90d): 3</li>
+              <li>Status: ACTIVE — proceed</li>
+            </ul>
+          </div>
+          <div class="agent-col">
+            <div class="col-label">Business Meaning</div>
+            <p style="font-size:13px">The service is live and actively maintained. Migration is warranted. If the service were dormant (&gt;6 months, 0 contributors), the factory would flag it for decommission review instead of investing migration effort.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G1 — Analysis Review Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> An ACE Subject Matter Expert (SME) confirms the inventory is accurate and all ambiguities are resolved. Business stakeholders know the scope will not change after this gate.</p>
+        <p><strong>Technical purpose:</strong> All OPEN clarification items must be in RESOLVED status. The approver confirms the interface catalogue and behaviour map match the known behaviour of the production service.</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">ACE_SME</span></p>
+        <ul class="gate-checklist">
+          <li>ACE Inventory evidence ID is linked to the approval record</li>
+          <li>MQ policy clarification resolved: <code>MQPolicy_NonProd</code> confirmed for this environment</li>
+          <li>All 4 interfaces catalogued and agreed with service owner</li>
+          <li>Dormancy report confirms ACTIVE status</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 3 — FRAMEWORK BASELINE
+       ============================== -->
+  <section class="phase" id="framework">
+    <div class="phase-header">
+      <div class="phase-num phase-num-det">03</div>
+      <div>
+        <h2 class="phase-title">Framework Baseline — Reading the Target Template</h2>
+        <p class="phase-sub">Business: establish which engineering standards the new service must conform to. Technical: extract a versioned, verifiable fingerprint of the approved Spring Boot template.</p>
+        <span class="state-badge">State: ACE_ANALYSED → FRAMEWORK_BASELINED</span>
+      </div>
+    </div>
+
+    <!-- Agent: FrameworkConventionExtractor -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--det-bg)">
+        <div class="chip chip-det" style="font-size:10px">Deterministic</div>
+        <div class="agent-name">FrameworkConventionExtractor</div>
+        <span class="text-small text-muted">No AI · Maven/Gradle + annotation scan</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Reads the <code>acme-bank/spring-migration-template</code> repository at its pinned version. Extracts conventions across every engineering dimension by parsing the project's POM, annotations, configuration files, and policy stubs. Produces a versioned framework template that the code generator must honour — and a <em>golden verifier</em> file that is used later to confirm the generated code conforms.</p>
+
+        <div class="two-col">
+          <div>
+            <div class="col-label">Dimensions Extracted</div>
+            <ul class="body-list">
+              <li><strong>Build:</strong> Maven 3.9, Java 21, Spring Boot 3.2.x</li>
+              <li><strong>Config:</strong> <code>application.yml</code> + env-var overrides</li>
+              <li><strong>Security:</strong> OAuth2 resource server, HTTPS-only</li>
+              <li><strong>Messaging:</strong> Spring Integration with IBM MQ BOM</li>
+              <li><strong>Logging:</strong> Logback JSON, MDC correlation ID</li>
+              <li><strong>Observability:</strong> Micrometer + Actuator <code>/health</code></li>
+              <li><strong>Error handling:</strong> <code>@ControllerAdvice</code> problem JSON</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-label">Outputs Produced</div>
+            <ul class="output-list">
+              <li>Framework Template (JSON)</li>
+              <li>Golden Verifier (checksums)</li>
+              <li>Approved Dependency BOM</li>
+              <li>Security Config Stub</li>
+              <li>Evidence Hash (SHA-256)</li>
+            </ul>
+            <div class="notice notice-blue" style="margin-top:12px">
+              The golden verifier is stored as signed evidence. After code generation, the build validator re-runs this extractor on the generated project and diffs its output against this baseline. Any deviation fails G4.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G2 — Framework Approval Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> The platform team confirms that the framework template being used is the current approved standard. This gate prevents a migration from baking in outdated libraries or deprecated security patterns.</p>
+        <p><strong>Technical purpose:</strong> Verify that the framework template version matches the organisation's current approved template version, and that the golden verifier hash matches the stored baseline.</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">PLATFORM_LEAD</span></p>
+        <ul class="gate-checklist">
+          <li>Framework template version 3.2 is the current approved version</li>
+          <li>Approved dependency BOM hash matches the signed enterprise BOM</li>
+          <li>Security stub includes OAuth2 resource-server configuration</li>
+          <li>Golden verifier stored as evidence with SHA-256 hash</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 4 — PLANNING
+       ============================== -->
+  <section class="phase" id="planning">
+    <div class="phase-header">
+      <div class="phase-num phase-num-ai">04</div>
+      <div>
+        <h2 class="phase-title">Migration Planning — Mapping ACE to Spring</h2>
+        <p class="phase-sub">Business: produce a documented plan that architects can review and sign off before any code is written. Technical: generate a deterministic mapping catalogue and an AI-assisted migration plan.</p>
+        <span class="state-badge">State: FRAMEWORK_BASELINED → ACE_ANALYSED → PLAN_APPROVED</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Mapping Catalogue (Deterministic)
+      </div>
+      <p>The system reads the ACE Inventory and the Framework Template and generates a mapping catalogue: for every ACE construct, it looks up the approved Spring equivalent. Mappings that have no approved target pattern are placed on the <strong>Unsupported Mapping Register</strong> and must be resolved before the plan can proceed.</p>
+
+      <div style="overflow-x:auto">
+        <table class="diff-table">
+          <thead>
+            <tr>
+              <th>ACE Construct</th>
+              <th>Spring Equivalent</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>HTTPInputNode</code> GET /customer/{id}</td>
+              <td><code>@GetMapping</code> on <code>CustomerController</code></td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td><code>HTTPInputNode</code> PUT /customer/{id}</td>
+              <td><code>@PutMapping</code> on <code>CustomerController</code></td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td><code>MQInputNode</code> queue CPS.IN</td>
+              <td><code>@JmsListener</code> with IBM MQ Spring Boot</td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td><code>MQOutputNode</code> queue CPS.OUT</td>
+              <td><code>JmsTemplate.convertAndSend()</code></td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td><code>XSDValidationNode</code> CustomerProfile.xsd</td>
+              <td>Bean Validation + <code>@Valid</code> on DTO</td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td>ESQL <code>MQMD</code> header propagation</td>
+              <td>Custom <code>MessagePostProcessor</code></td>
+              <td class="diff-pass">✓ Mapped</td>
+            </tr>
+            <tr>
+              <td>ESQL <code>BLOB</code> domain reference</td>
+              <td>—</td>
+              <td class="diff-var">⚠ Unsupported — clarification raised</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Agent: AI Planning -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--ai-bg)">
+        <div class="chip chip-ai" style="font-size:10px">AI-Powered</div>
+        <div class="agent-name">MigrationPlanGenerator</div>
+        <span class="text-small text-muted">Uses approved LLM via model gateway</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Using the resolved mapping catalogue as grounded input, the planning agent calls the organisation's approved model gateway (governed by the Prompt Registry — only approved prompt versions are accepted). It produces a structured migration plan with rationale, risk register, and a module breakdown for the generated Spring project.</p>
+        <p><strong>Why AI here?</strong> The mapping from ACE architectural patterns to idiomatic Spring Boot requires contextual reasoning: choosing between synchronous and reactive models, deciding how to restructure ESQL transformation logic into service classes, and writing explanatory rationale that architects can evaluate. This cannot be reduced to a lookup table.</p>
+        <div class="notice notice-warn">
+          <strong>Governance constraint:</strong> The model gateway rejects any prompt that has not been versioned and approved. It records a <code>PROVIDER_EXECUTION_REQUIRED</code> status — the actual LLM call goes through an approved connector, never directly from application code. Secrets are blocked at the gateway boundary.
+        </div>
+        <div class="agent-row" style="margin-top:12px">
+          <div class="agent-col">
+            <div class="col-label">Inputs</div>
+            <ul class="output-list">
+              <li>Resolved Mapping Catalogue</li>
+              <li>ACE Inventory (evidence-bound)</li>
+              <li>Framework Template v3.2</li>
+              <li>Approved Prompt v2.4</li>
+            </ul>
+          </div>
+          <div class="agent-col">
+            <div class="col-label">Outputs Produced</div>
+            <ul class="output-list">
+              <li>Migration Plan (JSON)</li>
+              <li>Risk Register (3 risks)</li>
+              <li>Module List</li>
+              <li>Rationale Document</li>
+              <li>Plan Content Hash</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card-title" style="margin-top:12px">Plan excerpt — module breakdown</div>
+        <div class="code-block"><span class="key">modules</span>:
+  - <span class="key">name</span>: <span class="str">customer-profile-service</span>
+    <span class="key">layers</span>:
+      - <span class="str">CustomerController</span>      <span class="cm"># HTTP flows → REST endpoints</span>
+      - <span class="str">CustomerEventListener</span>   <span class="cm"># MQ input flow → @JmsListener</span>
+      - <span class="str">CustomerProfileService</span>  <span class="cm"># ESQL compute → service class</span>
+      - <span class="str">CustomerRepository</span>      <span class="cm"># data access (clarification: DB type TBD)</span>
+      - <span class="str">CustomerProfileDto</span>      <span class="cm"># XSD schema → Java record + @Valid</span>
+      - <span class="str">MqAuditGateway</span>          <span class="cm"># MQ output → JmsTemplate wrapper</span></div>
+      </div>
+    </div>
+
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G3 — Solution Architect Review Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> A Solution Architect reviews the migration plan and signs off that the proposed architecture is sound, risks are acceptable, and the approach will produce a production-ready service. This is the most consequential gate — it authorises code generation to begin.</p>
+        <p><strong>Technical purpose:</strong> The G3 package bundles the plan, mapping catalogue, risk register, and all content hashes. The approval record is cryptographically bound to the plan hash. The code generator will refuse to run without a G3 APPROVE record that matches the current plan hash.</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">SOLUTION_ARCHITECT</span></p>
+        <ul class="gate-checklist">
+          <li>Migration plan content hash matches the G3 package hash</li>
+          <li>All 6 mappings are resolved; BLOB clarification has an accepted workaround</li>
+          <li>Risk register reviewed: 3 risks accepted with mitigations noted</li>
+          <li>Module breakdown aligns with the organisation's domain model</li>
+          <li>Approved prompt version confirmed; model gateway evidence attached</li>
+        </ul>
+        <div class="notice notice-ok" style="margin-top:10px">After G3 APPROVE, the migration is locked to this plan. Any change to the plan resets the hash and requires a new G3 decision before generation can proceed.</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 5 — CODE GENERATION
+       ============================== -->
+  <section class="phase" id="generation">
+    <div class="phase-header">
+      <div class="phase-num phase-num-ai">05</div>
+      <div>
+        <h2 class="phase-title">Code Generation &amp; Build Validation</h2>
+        <p class="phase-sub">Business: produce the new service. Technical: generate a traceable Spring Boot project, build it, and verify it meets the framework golden baseline.</p>
+        <span class="state-badge">State: PLAN_APPROVED → IMPLEMENTING → BUILD_VALIDATED</span>
+      </div>
+    </div>
+
+    <!-- Agent: SpringProjectGenerator -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--ai-bg)">
+        <div class="chip chip-ai" style="font-size:10px">AI-Powered</div>
+        <div class="agent-name">SpringProjectGenerator</div>
+        <span class="text-small text-muted">Uses approved LLM · Produces traceable Maven project</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Translates the approved migration plan into a working Spring Boot project. For each module in the plan, it generates Java classes, configuration files, and unit tests. Every generated file carries a provenance comment linking it back to the ACE artifact it originated from. Business semantics that remain unresolved are left as clearly marked <code>TODO</code> clarification stubs — they are never guessed.</p>
+        <p><strong>Why AI here?</strong> Producing idiomatic, compilable Java from ACE ESQL and message flow graphs requires natural-language reasoning about intent, naming, and code structure. The generator is guided by the mapping catalogue (deterministic) but the code it writes is evaluated, not just looked up.</p>
+        <div class="agent-row">
+          <div class="agent-col">
+            <div class="col-label">Files Generated</div>
+            <ul class="output-list">
+              <li>pom.xml</li>
+              <li>application.yml</li>
+              <li>CustomerController.java</li>
+              <li>CustomerEventListener.java</li>
+              <li>CustomerProfileService.java</li>
+              <li>CustomerProfileDto.java</li>
+              <li>MqAuditGateway.java</li>
+              <li>CustomerControllerTest.java</li>
+              <li>CustomerEventListenerTest.java</li>
+            </ul>
+          </div>
+          <div class="agent-col">
+            <div class="col-label">Provenance Manifest</div>
+            <p style="font-size:13px; color:var(--fg-muted)">Every file is listed in a provenance manifest: file path → source ACE artifact → mapping ID → plan section. This manifest is stored as evidence and used by auditors to trace any generated line back to its origin in the ACE source.</p>
+            <div class="notice notice-blue" style="margin-top:8px">Unresolved BLOB domain handling is emitted as a <code>// ACE-CLARIFICATION: BLOB domain — manual review required</code> stub in <code>CustomerProfileService.java</code>, not guessed code.</div>
+          </div>
+        </div>
+        <div class="card-title" style="margin-top:4px">Sample generated class (with provenance)</div>
+        <div class="code-block"><span class="cm">// ACE-PROVENANCE: GetCustomerFlow.msgflow → GET /customer/{id}
+// Mapping ID: MAP-001 | Plan section: 2.1</span>
+<span class="kw">@RestController</span>
+<span class="kw">@RequestMapping</span>(<span class="str">"/customer"</span>)
+<span class="kw">public class</span> CustomerController {
+    <span class="kw">@GetMapping</span>(<span class="str">"/{id}"</span>)
+    <span class="kw">public</span> ResponseEntity&lt;CustomerProfileDto&gt; getCustomer(
+            <span class="kw">@PathVariable</span> String id) {
+        <span class="cm">// service call delegated to CustomerProfileService</span>
+        <span class="kw">return</span> ResponseEntity.ok(service.findById(id));
+    }
+}</div>
+      </div>
+    </div>
+
+    <!-- Agent: BuildRunner -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--det-bg)">
+        <div class="chip chip-det" style="font-size:10px">Deterministic</div>
+        <div class="agent-name">BuildRunner</div>
+        <span class="text-small text-muted">No AI · Allow-listed Maven execution</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> Executes <code>mvn clean verify</code> against the generated project using a strict allow-list of permitted Maven commands. Times out after a configured limit. Hashes the build output (JAR, test reports) and stores them as evidence. If the build fails, the job transitions to BUILD_VALIDATED failure and the engineer is notified to remediate.</p>
+        <p><strong>Why deterministic?</strong> Build execution must be reproducible and auditable. The allow-list prevents arbitrary shell injection. The output hash proves that the artifact deployed later is the same artifact the tests ran against.</p>
+        <div class="two-col">
+          <div>
+            <div class="col-label">Build Result</div>
+            <div class="metric-row" style="margin:0">
+              <div class="metric"><div class="metric-val col-det">47</div><div class="metric-lbl">Tests Passed</div></div>
+              <div class="metric"><div class="metric-val col-warn">0</div><div class="metric-lbl">Failures</div></div>
+              <div class="metric"><div class="metric-val col-ai">84%</div><div class="metric-lbl">Coverage</div></div>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Evidence Stored</div>
+            <div>
+              <span class="evidence"><span class="hash">sha256:</span>3a7f9c…</span>
+              <span class="evidence">JAR artifact</span>
+            </div>
+            <div style="margin-top:4px">
+              <span class="evidence"><span class="hash">sha256:</span>b12e4a…</span>
+              <span class="evidence">surefire-reports/</span>
+            </div>
+            <div style="margin-top:4px">
+              <span class="evidence"><span class="hash">sha256:</span>d99f11…</span>
+              <span class="evidence">framework conformance</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G4 — Build Validation Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> The generated service actually compiles, its tests pass, and it conforms to every engineering standard the platform team set. Nothing proceeds to live testing without a green build.</p>
+        <p><strong>Technical purpose:</strong> Verify the build evidence matches the provenance manifest, framework conformance check passes the golden verifier, and all mandatory security scanners report either PASS or NOT_CONFIGURED (pending connector setup).</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">BUILD_ENGINEER</span></p>
+        <ul class="gate-checklist">
+          <li>Build artifact SHA-256 matches the provenance manifest entry</li>
+          <li>Framework conformance re-run matches the G2 golden verifier hash</li>
+          <li>47/47 unit tests pass; 0 failures</li>
+          <li>BLOB domain clarification stub noted — not blocking (scope confirmed)</li>
+          <li>SAST / dependency scan evidence attached (or NOT_CONFIGURED acknowledged)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 6 — DIFFERENTIAL TESTING
+       ============================== -->
+  <section class="phase" id="differential">
+    <div class="phase-header">
+      <div class="phase-num phase-num-det">06</div>
+      <div>
+        <h2 class="phase-title">Differential Testing — Does the New Service Behave the Same?</h2>
+        <p class="phase-sub">Business: prove the new service produces identical results to the original for every known scenario. Technical: run both runtimes against the same inputs and compare outputs structurally.</p>
+        <span class="state-badge">State: BUILD_VALIDATED → DIFFERENTIAL_TESTING → VARIANCE_REVIEW</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z" stroke="currentColor" stroke-width="1.3"/></svg>
+        How Differential Testing Works
+      </div>
+      <p>The factory constructs a set of <strong>canonical test envelopes</strong> — pairs of (input, expected output) drawn from the migration specification's test section, production traffic samples (masked), and the ACE Inventory's known interface contracts. Each envelope is run against both the original ACE runtime and the new Spring Boot service. The responses are compared structurally using the <strong>DifferentialEvidenceEngine</strong>.</p>
+
+      <div class="flow-wrap">
+        <svg viewBox="0 0 700 140" width="700" height="140" style="max-width:100%">
+          <!-- boxes -->
+          <rect x="10" y="50" width="120" height="40" rx="8" fill="var(--bg-muted)" stroke="var(--border)" stroke-width="1.5"/>
+          <text x="70" y="74" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--fg)" text-anchor="middle">Test Envelope</text>
+          <text x="70" y="86" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--fg-muted)" text-anchor="middle">N=12 cases</text>
+          <!-- arrows from envelope to both runtimes -->
+          <path d="M130 65 L180 45" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+          <path d="M130 75 L180 95" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+          <!-- ACE runtime -->
+          <rect x="180" y="25" width="130" height="40" rx="8" fill="var(--ai-bg)" stroke="var(--ai)" stroke-width="1.5"/>
+          <text x="245" y="49" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--ai)" text-anchor="middle">ACE Runtime</text>
+          <text x="245" y="61" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--fg-muted)" text-anchor="middle">CustomerProfileApp v12</text>
+          <!-- Spring runtime -->
+          <rect x="180" y="75" width="130" height="40" rx="8" fill="var(--det-bg)" stroke="var(--det)" stroke-width="1.5"/>
+          <text x="245" y="99" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--det)" text-anchor="middle">Spring Boot</text>
+          <text x="245" y="111" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--fg-muted)" text-anchor="middle">customer-profile-service</text>
+          <!-- arrows to diff engine -->
+          <path d="M310 45 L370 68" stroke="var(--fg-subtle)" stroke-width="1.5" fill="none" marker-end="url(#arr2)"/>
+          <path d="M310 95 L370 75" stroke="var(--fg-subtle)" stroke-width="1.5" fill="none" marker-end="url(#arr2)"/>
+          <!-- Diff engine -->
+          <rect x="370" y="50" width="150" height="40" rx="8" fill="var(--gate-bg)" stroke="var(--gate)" stroke-width="1.5"/>
+          <text x="445" y="74" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--gate)" text-anchor="middle">DifferentialEvidence</text>
+          <text x="445" y="86" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--fg-muted)" text-anchor="middle">Engine (Deterministic)</text>
+          <!-- arrow to result -->
+          <path d="M520 70 L570 70" stroke="var(--fg-subtle)" stroke-width="1.5" fill="none" marker-end="url(#arr2)"/>
+          <!-- result box -->
+          <rect x="570" y="50" width="120" height="40" rx="8" fill="var(--bg-muted)" stroke="var(--border)" stroke-width="1.5"/>
+          <text x="630" y="72" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--fg)" text-anchor="middle">PASS / VARIANCE</text>
+          <text x="630" y="84" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--fg-muted)" text-anchor="middle">per test case</text>
+          <defs>
+            <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="arr2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--fg-subtle)"/></marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Agent: DifferentialEvidenceEngine -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--det-bg)">
+        <div class="chip chip-det" style="font-size:10px">Deterministic</div>
+        <div class="agent-name">DifferentialEvidenceEngine</div>
+        <span class="text-small text-muted">No AI · Structural deep comparison</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> For each test envelope, it applies the comparison policy (masks, ignored paths, numeric tolerances, ordering rules) and performs a deep structural comparison of ACE output vs Spring output. Records a PASS or VARIANCE evidence record for every case. Hashes every evidence record so results cannot be altered after the fact.</p>
+
+        <div class="two-col">
+          <div>
+            <div class="col-label">Comparison Policy Applied</div>
+            <ul class="body-list">
+              <li><strong>Masks:</strong> <code>$.customerId</code>, <code>$.timestamp</code> (sensitive — replaced with <code>[MASKED]</code> in evidence)</li>
+              <li><strong>Ignored paths:</strong> <code>$.responseTime</code>, <code>$.traceId</code> (non-functional)</li>
+              <li><strong>Tolerance:</strong> ±0.01 on <code>$.creditScore</code> (float rounding)</li>
+              <li><strong>Ordering:</strong> significant on <code>$.addressHistory</code></li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-label">Test Results — 12 Cases</div>
+            <div class="metric-row" style="margin:0">
+              <div class="metric"><div class="metric-val col-det">9</div><div class="metric-lbl">PASS</div></div>
+              <div class="metric"><div class="metric-val col-warn">3</div><div class="metric-lbl">VARIANCE</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto; margin-top:14px">
+          <table class="diff-table">
+            <thead>
+              <tr><th>Case</th><th>Scenario</th><th>Result</th><th>Note</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>TC-01</td><td>GET known customer</td><td class="diff-pass">PASS</td><td>Exact structural match</td></tr>
+              <tr><td>TC-02</td><td>GET unknown customer → 404</td><td class="diff-pass">PASS</td><td>Error format matches</td></tr>
+              <tr><td>TC-03</td><td>PUT update phone number</td><td class="diff-pass">PASS</td><td></td></tr>
+              <tr><td>TC-04</td><td>PUT invalid payload → 400</td><td class="diff-pass">PASS</td><td>Validation errors match</td></tr>
+              <tr><td>TC-05</td><td>MQ async update event</td><td class="diff-pass">PASS</td><td>CPS.OUT message equivalent</td></tr>
+              <tr><td>TC-06</td><td>MQ audit trail message</td><td class="diff-pass">PASS</td><td></td></tr>
+              <tr><td>TC-07</td><td>GET → address history order</td><td class="diff-pass">PASS</td><td>Ordering preserved</td></tr>
+              <tr><td>TC-08</td><td>GET → credit score field</td><td class="diff-pass">PASS</td><td>Within ±0.01 tolerance</td></tr>
+              <tr><td>TC-09</td><td>Concurrent GET requests (×10)</td><td class="diff-pass">PASS</td><td></td></tr>
+              <tr><td>TC-10</td><td>PUT → MQ header propagation</td><td class="diff-var">VARIANCE</td><td>MQMD CorrelId format differs</td></tr>
+              <tr><td>TC-11</td><td>GET → null optional field</td><td class="diff-var">VARIANCE</td><td>ACE omits field; Spring emits <code>null</code></td></tr>
+              <tr><td>TC-12</td><td>Large payload (500KB)</td><td class="diff-var">VARIANCE</td><td>Spring truncates at 256KB default</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 7 — VARIANCE REVIEW
+       ============================== -->
+  <section class="phase" id="variance">
+    <div class="phase-header">
+      <div class="phase-num phase-num-gate">07</div>
+      <div>
+        <h2 class="phase-title">Variance Review — Classifying the Differences</h2>
+        <p class="phase-sub">Business: decide which differences matter and which are acceptable. Technical: triage each variance, record a root cause, and choose: accept, remediate, or stop.</p>
+        <span class="state-badge">State: DIFFERENTIAL_TESTING → VARIANCE_REVIEW → REMEDIATING / READY_FOR_PROMOTION</span>
+      </div>
+    </div>
+
+    <p>Three variances were found. The variance review team classifies each one. A variance is not automatically a blocker — some differences reflect intentional improvements (better null handling, safer defaults). The classification determines what happens next.</p>
+
+    <!-- Variance 1 -->
+    <div class="variance-card">
+      <div class="variance-head">
+        <span class="variance-id">VAR-001 · TC-10</span>
+        <span class="variance-severity sev-high">High</span>
+        <span style="flex:1; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:var(--fg)">MQMD CorrelId format differs</span>
+      </div>
+      <div class="variance-body">
+        <p><strong>ACE output:</strong> <code>"CorrelId": "414d512043505300000..."</code> (hex-encoded bytes)</p>
+        <p><strong>Spring output:</strong> <code>"correlationId": "414d51-2043-5053..."</code> (UUID-formatted string)</p>
+        <p><strong>Business impact:</strong> Any downstream system that reads the CorrelId to correlate MQ messages will break. This is a blocking variance — it must be remediated before promotion.</p>
+        <p><strong>Decision:</strong> REMEDIATE</p>
+      </div>
+    </div>
+
+    <!-- Variance 2 -->
+    <div class="variance-card">
+      <div class="variance-head">
+        <span class="variance-id">VAR-002 · TC-11</span>
+        <span class="variance-severity sev-med">Medium</span>
+        <span style="flex:1; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:var(--fg)">Null optional field serialisation</span>
+      </div>
+      <div class="variance-body">
+        <p><strong>ACE output:</strong> JSON object omits <code>middleName</code> when absent</p>
+        <p><strong>Spring output:</strong> JSON includes <code>"middleName": null</code></p>
+        <p><strong>Business impact:</strong> Any client doing strict JSON schema validation against the ACE contract will fail. However, the team confirms that no consumers rely on field absence — they use null checks. The new behaviour is safer.</p>
+        <p><strong>Decision:</strong> ACCEPT (document as intentional improvement in release notes)</p>
+      </div>
+    </div>
+
+    <!-- Variance 3 -->
+    <div class="variance-card">
+      <div class="variance-head">
+        <span class="variance-id">VAR-003 · TC-12</span>
+        <span class="variance-severity sev-high">High</span>
+        <span style="flex:1; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:var(--fg)">Large payload truncation at 256KB</span>
+      </div>
+      <div class="variance-body">
+        <p><strong>ACE output:</strong> Full 500KB response returned</p>
+        <p><strong>Spring output:</strong> Response truncated at 256KB (Spring Boot default <code>max-http-request-header-size</code> misconfigured)</p>
+        <p><strong>Business impact:</strong> The bulk-export endpoint will silently truncate data for large customers. Blocking.</p>
+        <p><strong>Decision:</strong> REMEDIATE</p>
+      </div>
+    </div>
+
+    <div class="notice notice-blue" style="margin-top:4px">
+      <strong>Variance Review outcome:</strong> 2 variances require remediation (VAR-001, VAR-003). 1 variance accepted (VAR-002). The job transitions to REMEDIATING. If both remediations succeed, differential testing reruns automatically.
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 8 — REMEDIATION
+       ============================== -->
+  <section class="phase" id="remediation">
+    <div class="phase-header">
+      <div class="phase-num phase-num-ai">08</div>
+      <div>
+        <h2 class="phase-title">Remediation — Fixing the Variances</h2>
+        <p class="phase-sub">Business: close the gaps found in testing. Technical: run the confidence engine, apply approved patterns, and re-test.</p>
+        <span class="state-badge">State: VARIANCE_REVIEW → REMEDIATING → IMPLEMENTING → DIFFERENTIAL_TESTING</span>
+      </div>
+    </div>
+
+    <!-- Agent: ConfidenceRemediationService -->
+    <div class="agent-card">
+      <div class="agent-header" style="background:var(--ai-bg)">
+        <div class="chip chip-ai" style="font-size:10px">AI-Powered</div>
+        <div class="agent-name">ConfidenceRemediationService</div>
+        <span class="text-small text-muted">Uses approved LLM · Evidence-weighted scoring</span>
+      </div>
+      <div class="agent-body">
+        <p><strong>What it does:</strong> For each variance requiring remediation, the service computes a <em>confidence score</em> by weighting the available evidence: how well-understood is the root cause? Does an approved fix pattern exist in the knowledge index? Are there tests that cover the fix? Based on this score, it routes the variance to either a <strong>direct fix</strong> (applies the approved pattern automatically) or a <strong>clarification</strong> (a human must decide).</p>
+
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-title">VAR-001 — MQMD CorrelId format</div>
+          <div class="rem-step">
+            <div class="rem-num">1</div>
+            <div class="rem-content">
+              <div class="rem-title">Root Cause Analysis</div>
+              <div class="rem-desc">Spring's <code>JmsTemplate</code> generates a UUID-format correlation ID by default. The ACE MQMD node writes the raw byte array as hex. Root cause: <code>MqAuditGateway.java</code> does not implement a custom <code>MessagePostProcessor</code> to preserve the ACE hex format.</div>
+            </div>
+          </div>
+          <div class="rem-step">
+            <div class="rem-num">2</div>
+            <div class="rem-content">
+              <div class="rem-title">Confidence Score</div>
+              <div class="rem-desc">Evidence: root cause is clear (0.9), approved pattern exists in knowledge index (<code>MqHexCorrelIdPostProcessor</code> — pattern KB-042), test TC-10 covers the fix (0.85). </div>
+              <div class="conf-meter">
+                <div class="conf-track"><div class="conf-fill" style="width:88%"></div></div>
+                <div class="conf-val">0.88 — Direct Fix Eligible</div>
+              </div>
+            </div>
+          </div>
+          <div class="rem-step">
+            <div class="rem-num">3</div>
+            <div class="rem-content">
+              <div class="rem-title">Fix Applied</div>
+              <div class="rem-desc">The approved pattern <code>MqHexCorrelIdPostProcessor</code> is injected into <code>MqAuditGateway.java</code>. A rollback pointer is recorded (previous JAR hash). TC-10 is re-run and passes.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">VAR-003 — Large payload truncation</div>
+          <div class="rem-step">
+            <div class="rem-num">1</div>
+            <div class="rem-content">
+              <div class="rem-title">Root Cause Analysis</div>
+              <div class="rem-desc">Spring Boot's <code>server.tomcat.max-swallow-size</code> and <code>spring.mvc.async.request-timeout</code> defaults are too low for this service's bulk-export workload. Root cause: framework template v3.2 does not set a payload size override for bulk endpoints.</div>
+            </div>
+          </div>
+          <div class="rem-step">
+            <div class="rem-num">2</div>
+            <div class="rem-content">
+              <div class="rem-title">Confidence Score</div>
+              <div class="rem-desc">Root cause clear (0.85), approved pattern exists (<code>BulkEndpointSizeConfig</code> — pattern KB-019), but the max safe payload size for this service's SLA is unknown. Score drops.</div>
+              <div class="conf-meter">
+                <div class="conf-track"><div class="conf-fill" style="width:54%"></div></div>
+                <div class="conf-val">0.54 — Clarification Required</div>
+              </div>
+            </div>
+          </div>
+          <div class="rem-step">
+            <div class="rem-num">3</div>
+            <div class="rem-content">
+              <div class="rem-title">Clarification Raised</div>
+              <div class="rem-desc">The engine raises a clarification: <em>"What is the maximum payload size for the bulk-export endpoint in production? Needed to configure <code>max-swallow-size</code> safely."</em> Assigned to the service owner. Pipeline pauses until resolved.</div>
+            </div>
+          </div>
+          <div class="rem-step">
+            <div class="rem-num">4</div>
+            <div class="rem-content">
+              <div class="rem-title">Clarification Resolved → Fix Applied</div>
+              <div class="rem-desc">Service owner responds: max 2MB. The approved pattern sets <code>server.tomcat.max-swallow-size=2097152</code> in <code>application.yml</code>. TC-12 re-runs and passes.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="notice notice-ok" style="margin-top:4px">
+          Both remediations complete within iteration 1 of 5. The factory automatically re-queues differential testing. All 12 cases now pass. The job advances to <strong>READY_FOR_PROMOTION</strong>.
+        </div>
+
+        <div class="notice notice-blue">
+          <strong>Rollback safety:</strong> Every remediation records a rollback pointer — the JAR hash before the fix was applied. If a remediation introduces a regression, the factory can revert to the previous build artifact and retry with a different approach.
+        </div>
+      </div>
+    </div>
+
+    <div class="gate-card">
+      <div class="gate-header">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.5"/><path d="M8 5v3.5L10 10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        G5 — Promotion Gate
+      </div>
+      <div class="gate-body">
+        <p><strong>Business purpose:</strong> Final human sign-off before the migrated service is promoted to the target environment. The delivery team confirms the release package is complete, all variances are closed, and the service is ready for production deployment.</p>
+        <p><strong>Technical purpose:</strong> All 12 differential test cases PASS. All variance records are in ACCEPTED or REMEDIATED status. Delivery automation is authorised to tag the release and open a pull request to the target repository.</p>
+        <p><strong>Approver role:</strong> <span class="gate-role">DELIVERY_LEAD</span> + <span class="gate-role">SERVICE_OWNER</span></p>
+        <ul class="gate-checklist">
+          <li>12/12 differential test cases PASS (iteration 2)</li>
+          <li>VAR-001 status: REMEDIATED (pattern KB-042 applied, evidence linked)</li>
+          <li>VAR-002 status: ACCEPTED (documented in release notes)</li>
+          <li>VAR-003 status: REMEDIATED (pattern KB-019 applied, evidence linked)</li>
+          <li>Provenance manifest complete — every file traced to source ACE artifact</li>
+          <li>Rollback pointers recorded for both remediation changes</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ==============================
+       PHASE 9 — COMPLETION
+       ============================== -->
+  <section class="phase" id="completion">
+    <div class="phase-header">
+      <div class="phase-num phase-num-det">09</div>
+      <div>
+        <h2 class="phase-title">Completion — Final Deliverables</h2>
+        <p class="phase-sub">Business: a production-ready microservice with full audit trail. Technical: a versioned release package with evidence, test results, and delivery artefacts.</p>
+        <span class="state-badge">State: READY_FOR_PROMOTION → COMPLETED</span>
+      </div>
+    </div>
+
+    <div class="metric-row">
+      <div class="metric"><div class="metric-val col-det">12/12</div><div class="metric-lbl">Tests Pass</div></div>
+      <div class="metric"><div class="metric-val col-accent">6/6</div><div class="metric-lbl">Gates Approved</div></div>
+      <div class="metric"><div class="metric-val col-ai">2</div><div class="metric-lbl">Remediations</div></div>
+      <div class="metric"><div class="metric-val col-ok">1</div><div class="metric-lbl">Iteration Used</div></div>
+    </div>
+
+    <div class="deliverable-grid">
+      <div class="deliverable del-det">
+        <div class="deliverable-name">Spring Boot Service</div>
+        <div class="deliverable-desc"><code>customer-profile-service</code> — compilable Maven project, 47 unit tests, 84% coverage, conformant with framework template v3.2.</div>
+      </div>
+      <div class="deliverable del-det">
+        <div class="deliverable-name">Provenance Manifest</div>
+        <div class="deliverable-desc">Every generated file traced to its source ACE artifact, mapping ID, and plan section. SHA-256 hashed and evidence-stored.</div>
+      </div>
+      <div class="deliverable del-gate">
+        <div class="deliverable-name">Full Audit Trail</div>
+        <div class="deliverable-desc">All 6 gate decisions recorded with approver identity, timestamp, evidence IDs, and rationale. Immutable — cannot be altered after the fact.</div>
+      </div>
+      <div class="deliverable del-blue">
+        <div class="deliverable-name">Differential Test Evidence</div>
+        <div class="deliverable-desc">12 canonical test envelopes, per-case PASS/VARIANCE records, comparison policy, and output hashes for both ACE and Spring runtimes.</div>
+      </div>
+      <div class="deliverable del-ai">
+        <div class="deliverable-name">Variance &amp; Remediation Log</div>
+        <div class="deliverable-desc">3 variance records (2 remediated, 1 accepted), root cause analysis, confidence scores, approved patterns applied, rollback pointers.</div>
+      </div>
+      <div class="deliverable del-det">
+        <div class="deliverable-name">Release Package</div>
+        <div class="deliverable-desc">JAR artifact (SHA-256 hashed), <code>application.yml</code>, Docker image stub, Git tag, and pull request opened to <code>acme-bank/platform-services</code>.</div>
+      </div>
+      <div class="deliverable del-gate">
+        <div class="deliverable-name">Migration Specification (final)</div>
+        <div class="deliverable-desc">Versioned YAML contract with all clarifications resolved, mappings confirmed, and test invariants validated. Stored as the definitive record of what was migrated and why.</div>
+      </div>
+      <div class="deliverable del-blue">
+        <div class="deliverable-name">Service Registry Entry</div>
+        <div class="deliverable-desc"><code>CustomerProfileService</code> registered in the organisation's service registry with source commit, target version, migration job ID, and owner.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:24px; border-color:var(--det)">
+      <div class="card-title">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke="var(--det)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        What the client can tell their stakeholders
+      </div>
+      <p>The Customer Profile Service has been migrated from IBM ACE v12 to Spring Boot 3.2. The migration factory ran <strong>7 agents</strong> across the pipeline — 4 deterministic (fully auditable, no AI) and 3 AI-powered (each with a human approval gate before its output could advance). <strong>Every decision</strong> — from the initial specification through to the final promotion — is recorded with evidence hashes, approver identities, and timestamps. If any question arises about why a particular line of code was generated, the provenance manifest traces it back to the original ACE flow in under a minute.</p>
+      <p>The service passed <strong>12 behavioural equivalence tests</strong>. Two differences from the original were found and fixed using approved engineering patterns from the organisation's knowledge index. One difference was accepted as an intentional improvement. The full evidence package is available for compliance, audit, and future reference.</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // Highlight active nav step based on scroll position
+  const phases = document.querySelectorAll('.phase[id]');
+  const navLinks = document.querySelectorAll('.nav-step');
+  const navEl = document.querySelector('.pipeline-nav');
+
+  function updateNav() {
+    let current = '';
+    const scrollY = window.scrollY + 120;
+    phases.forEach(ph => {
+      if (ph.offsetTop <= scrollY) current = ph.id;
+    });
+    navLinks.forEach(a => {
+      const active = a.getAttribute('href') === '#' + current;
+      a.classList.toggle('active', active);
+      if (active) {
+        // scroll the nav to keep the active item visible
+        const rect = a.getBoundingClientRect();
+        const navRect = navEl.getBoundingClientRect();
+        if (rect.right > navRect.right - 24) {
+          navEl.scrollLeft += rect.right - navRect.right + 40;
+        } else if (rect.left < navRect.left + 24) {
+          navEl.scrollLeft -= navRect.left - rect.left + 40;
+        }
+      }
+    });
+  }
+
+  window.addEventListener('scroll', updateNav, { passive: true });
+  updateNav();
+
+  // Smooth scroll for nav links
+  navLinks.forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const target = document.querySelector(a.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+</script>
