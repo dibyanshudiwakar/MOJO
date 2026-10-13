@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IIB-to-MS Migration Skill — ACE Factory Adoption Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f8f9fb;
+  --surface: #ffffff;
+  --surface-alt: #f1f3f7;
+  --border: #e2e6ed;
+  --fg: #1a2233;
+  --fg-muted: #5a6478;
+  --accent: #1d4ed8;
+  --accent-light: #dbeafe;
+  --accent-mid: #3b82f6;
+  --green: #16a34a;
+  --green-light: #dcfce7;
+  --amber: #b45309;
+  --amber-light: #fef3c7;
+  --red: #b91c1c;
+  --red-light: #fee2e2;
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+  --slate: #334155;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'Inter', system-ui, sans-serif;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117; --surface: #1a1f2e; --surface-alt: #242938; --border: #2d3348;
+    --fg: #e8edf5; --fg-muted: #8b96ad; --accent: #60a5fa; --accent-light: #1e3a5f;
+    --accent-mid: #3b82f6; --green: #4ade80; --green-light: #052e16;
+    --amber: #fbbf24; --amber-light: #2d1b00; --red: #f87171; --red-light: #2d0a0a;
+    --purple: #a78bfa; --purple-light: #1e1040; --slate: #94a3b8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1117; --surface: #1a1f2e; --surface-alt: #242938; --border: #2d3348;
+  --fg: #e8edf5; --fg-muted: #8b96ad; --accent: #60a5fa; --accent-light: #1e3a5f;
+  --accent-mid: #3b82f6; --green: #4ade80; --green-light: #052e16;
+  --amber: #fbbf24; --amber-light: #2d1b00; --red: #f87171; --red-light: #2d0a0a;
+  --purple: #a78bfa; --purple-light: #1e1040; --slate: #94a3b8;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 15px; }
+body { font-family: var(--sans); background: var(--bg); color: var(--fg); line-height: 1.65; }
+a { color: var(--accent); text-decoration: none; }
+code, pre { font-family: var(--mono); font-size: .84em; }
+ic { font-family: var(--mono); font-size: .82em; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--fg); }
+
+.layout { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+
+/* Sidebar */
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 28px 0 40px; display: flex; flex-direction: column; }
+.sidebar-logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.sidebar-logo .tag { font-size: .68rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.sidebar-logo h1 { font-size: .95rem; font-weight: 700; line-height: 1.3; color: var(--fg); }
+.sidebar-meta { font-size: .72rem; color: var(--fg-muted); margin-top: 4px; }
+.nav-section { font-size: .67rem; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); padding: 12px 20px 4px; }
+.nav-item { display: flex; align-items: baseline; gap: 8px; padding: 5px 20px; font-size: .8rem; color: var(--fg-muted); cursor: pointer; border-left: 2px solid transparent; transition: all .15s; }
+.nav-item:hover, .nav-item.active { color: var(--accent); background: var(--accent-light); border-left-color: var(--accent); }
+.nav-num { font-family: var(--mono); font-size: .7rem; color: var(--fg-muted); min-width: 16px; }
+.verdict-badge { margin: 16px 20px 0; padding: 10px 12px; background: var(--green-light); border: 1px solid var(--green); border-radius: var(--radius); font-size: .75rem; color: var(--green); font-weight: 600; text-align: center; }
+.theme-toggle { margin: auto 20px 0; padding-top: 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-size: .75rem; color: var(--fg-muted); cursor: pointer; user-select: none; }
+.toggle-track { width: 32px; height: 18px; background: var(--border); border-radius: 9px; position: relative; transition: background .2s; }
+.toggle-thumb { width: 12px; height: 12px; background: var(--surface); border-radius: 50%; position: absolute; top: 3px; left: 3px; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+[data-theme="dark"] .toggle-track { background: var(--accent); }
+[data-theme="dark"] .toggle-thumb { transform: translateX(14px); }
+
+/* Main */
+.main { padding: 40px 48px 80px; max-width: 1000px; }
+
+/* Section */
+.section { margin-bottom: 56px; scroll-margin-top: 24px; }
+.section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 14px; border-bottom: 2px solid var(--border); }
+.section-num { font-family: var(--mono); font-size: .75rem; font-weight: 500; color: var(--accent); background: var(--accent-light); padding: 2px 8px; border-radius: 4px; min-width: 28px; text-align: center; }
+.section-title { font-size: 1.25rem; font-weight: 700; color: var(--fg); text-wrap: balance; }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 16px; box-shadow: var(--shadow); }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.card-title { font-size: .85rem; font-weight: 600; color: var(--fg); margin-bottom: 8px; }
+.card-body { font-size: .82rem; color: var(--fg-muted); line-height: 1.6; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+th { background: var(--surface-alt); text-align: left; padding: 9px 12px; font-weight: 600; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-muted); border-bottom: 2px solid var(--border); }
+td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface-alt); }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: .7rem; font-weight: 600; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }
+.badge-green { background: var(--green-light); color: var(--green); }
+.badge-amber { background: var(--amber-light); color: var(--amber); }
+.badge-red { background: var(--red-light); color: var(--red); }
+.badge-blue { background: var(--accent-light); color: var(--accent); }
+.badge-purple { background: var(--purple-light); color: var(--purple); }
+.badge-slate { background: var(--surface-alt); color: var(--slate); }
+
+/* Code blocks */
+.code-block { background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin: 12px 0; overflow-x: auto; font-family: var(--mono); font-size: .78rem; line-height: 1.7; color: var(--fg); white-space: pre; }
+.code-label { font-size: .68rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 6px; }
+.hl-key { color: var(--accent); }
+.hl-str { color: var(--green); }
+.hl-comment { color: var(--fg-muted); font-style: italic; }
+.hl-class { color: var(--purple); }
+
+/* Pipeline */
+.pipeline { display: flex; flex-wrap: wrap; gap: 4px; align-items: stretch; margin: 16px 0; overflow-x: auto; }
+.pipe-step { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; min-width: 110px; flex: 1; }
+.pipe-arrow { display: flex; align-items: center; color: var(--fg-muted); font-size: .9rem; font-weight: 600; padding: 0 2px; }
+.pipe-state { font-family: var(--mono); font-size: .62rem; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.pipe-agents { font-size: .68rem; color: var(--fg-muted); line-height: 1.4; }
+.pipe-gate { font-size: .65rem; font-weight: 600; color: var(--amber); margin-top: 4px; }
+
+/* Stats */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+.stat-val { font-size: 2rem; font-weight: 700; line-height: 1; color: var(--accent); }
+.stat-lbl { font-size: .72rem; color: var(--fg-muted); margin-top: 4px; }
+
+/* Headings */
+h3 { font-size: .95rem; font-weight: 700; color: var(--fg); margin: 20px 0 10px; }
+h4 { font-size: .82rem; font-weight: 600; color: var(--fg); margin: 14px 0 6px; }
+p { font-size: .82rem; color: var(--fg-muted); margin-bottom: 10px; }
+ul, ol { font-size: .82rem; color: var(--fg-muted); padding-left: 20px; margin-bottom: 10px; }
+li { margin-bottom: 4px; }
+
+/* Hero */
+.hero { background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 100%); color: #fff; padding: 36px 48px; border-bottom: 1px solid var(--border); }
+.hero-tag { font-size: .7rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; opacity: .7; margin-bottom: 8px; }
+.hero h1 { font-size: 1.7rem; font-weight: 700; line-height: 1.2; margin-bottom: 10px; }
+.hero-sub { font-size: .88rem; opacity: .8; max-width: 680px; line-height: 1.6; }
+.hero-meta { display: flex; gap: 24px; margin-top: 20px; flex-wrap: wrap; }
+.hero-meta-item { font-size: .75rem; opacity: .75; }
+.hero-meta-item strong { opacity: 1; font-weight: 600; display: block; }
+
+/* Alerts */
+.alert { border-radius: var(--radius); padding: 12px 16px; font-size: .8rem; margin: 12px 0; display: flex; gap: 10px; align-items: flex-start; }
+.alert-info { background: var(--accent-light); border: 1px solid var(--accent-mid); }
+.alert-warn { background: var(--amber-light); border: 1px solid var(--amber); color: var(--amber); }
+.alert-success { background: var(--green-light); border: 1px solid var(--green); color: var(--green); }
+.alert-body { color: var(--fg); line-height: 1.6; }
+.alert-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+
+/* Decision */
+.decision-box { background: var(--green-light); border: 2px solid var(--green); border-radius: var(--radius); padding: 24px 28px; margin-top: 20px; }
+.decision-title { font-size: 1.1rem; font-weight: 700; color: var(--green); margin-bottom: 10px; }
+
+/* Responsive */
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  .main { padding: 24px 16px 60px; }
+  .hero { padding: 24px 16px; }
+  .hero h1 { font-size: 1.3rem; }
+}
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hero-tag">ACE Migration Factory Enterprise · Skill Adoption Review</div>
+  <h1>IIB-to-Microservices Migration Skill</h1>
+  <div class="hero-sub">10-part management assessment covering skill inventory, ACE agent mapping, implementation impact, and adoption recommendation. All file paths, class names, and method signatures verified against the actual codebase — no assumptions.</div>
+  <div class="hero-meta">
+    <div class="hero-meta-item"><strong>Review Date</strong>2026-10-12</div>
+    <div class="hero-meta-item"><strong>Skill Path</strong>external-skills/iib-to-ms-migration/</div>
+    <div class="hero-meta-item"><strong>ACE Agents Audited</strong>14 of 14</div>
+    <div class="hero-meta-item"><strong>Codebase Verified</strong>Yes — actual files read</div>
+  </div>
+</div>
+
+<div class="layout">
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="tag">ACE Migration Factory</div>
+    <h1>IIB-to-MS Skill Review</h1>
+    <div class="sidebar-meta">Implementation-Ready · Oct 2026</div>
+  </div>
+  <div class="nav-section">Document Parts</div>
+  <div class="nav-item active" onclick="navClick(this,'s1')"><span class="nav-num">01</span>What Is the Skill</div>
+  <div class="nav-item" onclick="navClick(this,'s2')"><span class="nav-num">02</span>Skill Inventory</div>
+  <div class="nav-item" onclick="navClick(this,'s3')"><span class="nav-num">03</span>Comparison with ACE</div>
+  <div class="nav-item" onclick="navClick(this,'s4')"><span class="nav-num">04</span>Skill-to-Agent Mapping</div>
+  <div class="nav-item" onclick="navClick(this,'s5')"><span class="nav-num">05</span>Usability Assessment</div>
+  <div class="nav-item" onclick="navClick(this,'s6')"><span class="nav-num">06</span>Implementation Impact</div>
+  <div class="nav-item" onclick="navClick(this,'s7')"><span class="nav-num">07</span>Approach per Skill Stage</div>
+  <div class="nav-item" onclick="navClick(this,'s8')"><span class="nav-num">08</span>Major Changes</div>
+  <div class="nav-item" onclick="navClick(this,'s9')"><span class="nav-num">09</span>Benefit Analysis</div>
+  <div class="nav-item" onclick="navClick(this,'s10')"><span class="nav-num">10</span>Decision &amp; Recommendation</div>
+  <div class="nav-item" onclick="navClick(this,'s11')"><span class="nav-num">11</span>LLM Provider Integration</div>
+  <div class="verdict-badge">✓ Strongly Recommend Adoption</div>
+  <div class="theme-toggle" onclick="toggleTheme()">
+    <div class="toggle-track"><div class="toggle-thumb"></div></div>
+    Dark mode
+  </div>
+</nav>
+
+<main class="main">
+
+<!-- ═══════════════════════ PART 1 ═══════════════════════ -->
+<section class="section" id="s1">
+  <div class="section-header">
+    <span class="section-num">01</span>
+    <h2 class="section-title">What Is the Skill</h2>
+  </div>
+
+  <p>The IIB-to-MS Migration Skill is a Claude Code skill (loaded via <ic>external-skills/iib-to-ms-migration/SKILL.md</ic>) that guides an LLM session through migrating IBM Integration Bus (IIB/ACE) message flows into CVS Health-standard Spring Boot 3.2.2 / Java 21 microservices deployable on OpenShift. It is not a standalone code generator — it is a governed, step-by-step instruction set binding CVS Health's internal EIP framework conventions, mandatory rules, and known defect patterns into a repeatable migration workflow.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">Entry Point</div>
+      <div class="card-body"><ic>external-skills/iib-to-ms-migration/SKILL.md</ic><br>Defines the 4-stage workflow, connector type routing, 13 mandatory rules, HANDOFF-C smoke test (added 2026-10-09), and state.json contract.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Workflow Stages</div>
+      <div class="card-body"><strong>INTAKE → SCAFFOLD → GENERATE → HANDOFF</strong><br>Each stage has explicit inputs, outputs, and blocking conditions enforced via state.json.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Connector Types (5)</div>
+      <div class="card-body">QL/CICS + Camel Bindy · RxClaim SBO XML/JAXB · REST External/Direct · IBM MQ + COBOL Copybook · SOAP</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Reference Library (7 files)</div>
+      <div class="card-body">Mandatory rules, 16 defect patterns, 25+ gap items, workflow state contract, structural conventions, fixed-file templates, config-map baseline.</div>
+    </div>
+  </div>
+
+  <h3>CVS Health EIP Framework Modules Governed by the Skill</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Module Artifact</th><th>Purpose</th><th>Connector Type</th></tr></thead>
+      <tbody>
+        <tr><td><ic>framework-starter</ic></td><td>Base autoconfiguration, actuator, config binding</td><td>All</td></tr>
+        <tr><td><ic>framework-restclient</ic></td><td>CVS-standard HTTP client (replaces RestTemplate — Rule R2)</td><td>REST External / Direct</td></tr>
+        <tr><td><ic>framework-connector-qlcics</ic></td><td>QL/CICS via Camel Bindy (mandatory, not optional — Rule R1)</td><td>QL/CICS</td></tr>
+        <tr><td><ic>framework-connector-rxclaimsbo</ic></td><td>RxClaim SBO via XML/JAXB</td><td>RxClaim SBO</td></tr>
+        <tr><td><ic>framework-mqclient</ic></td><td>IBM MQ with COBOL Copybook — signed-decimal N+1 bytes encoding</td><td>IBM MQ</td></tr>
+        <tr><td><ic>framework-soapclient</ic></td><td>SOAP service client</td><td>SOAP</td></tr>
+        <tr><td><ic>framework-oauth</ic></td><td>OAuth token management (no Kong token-validator — Rule R3)</td><td>REST External</td></tr>
+        <tr><td><ic>framework-eieusercontext</ic></td><td>EIE header propagation — real accessors only (Rule R8)</td><td>All</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Key Hard Constraints</h3>
+  <ul>
+    <li>Framework version: <ic>3.2.2</ic>, Java: <ic>21</ic> (defaults; override via state.json <ic>framework_version</ic>)</li>
+    <li>Base Docker image: <ic>quay-registry.aetna.com/cvs-base-images/os-eng/redhat/ubi9/openjdk-micro:21</ic></li>
+    <li>No <ic>QLRequest.builder()</ic>, no <ic>RestTemplate</ic>, no Kong token-validator, no custom exception classes</li>
+    <li>Always Camel Bindy for QL/CICS; CVS encrypt-credential endpoint by default</li>
+    <li>Timeout must return HTTP 408, not 500; COBOL signed-decimal: N+1 bytes</li>
+    <li>EieHeader uses real accessors only (no direct field access)</li>
+    <li><ic>application.properties</ic>: 1–7 lines; <ic>application-local.properties</ic>: 16–97 lines</li>
+    <li><ic>SPRING_CONFIG_LOCATION</ic> <strong>replaces</strong> (does not supplement) defaults</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════ PART 2 ═══════════════════════ -->
+<section class="section" id="s2">
+  <div class="section-header">
+    <span class="section-num">02</span>
+    <h2 class="section-title">Skill Inventory</h2>
+  </div>
+
+  <p>The skill consists of 8 files. All paths are relative to the repository root.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File Path</th><th>Items</th><th>Role</th><th>Consumed In Stage</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/SKILL.md</ic></td>
+          <td>Master</td>
+          <td>4-stage workflow definition, connector type routing, 13-rule enforcement directive, state.json contract, HANDOFF-C smoke test specification</td>
+          <td><span class="badge badge-blue">All stages</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/mandatory-migration-rules.md</ic></td>
+          <td>13 rules</td>
+          <td>Hard rules: no QLRequest.builder(), no RestTemplate, no Kong token-validator, Camel Bindy always for QL/CICS, EieHeader real accessors, timeout=408, framework 3.2.2/Java 21 default</td>
+          <td><span class="badge badge-blue">GENERATE</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/common-patterns-and-gotchas.md</ic></td>
+          <td>16 patterns</td>
+          <td>Verified defect patterns: timeout 408 vs 500, signed-decimal COBOL N+1 bytes, COALESCE "null" literal difference, nested ErrorUtil.errorResponse trap, circuit breaker isCircuitBreakerError(), verbatim error message strings</td>
+          <td><span class="badge badge-blue">GENERATE</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/gap-checklist.md</ic></td>
+          <td>25+ items</td>
+          <td>BLOCKING (B1–B6), HIGH (H1–H15), MEDIUM (M1–M25), REST-ONLY (R1–R16), MQ/COBOL-ONLY (MQ1–MQ3)</td>
+          <td><span class="badge badge-blue">INTAKE / GENERATE</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/workflow-and-state.md</ic></td>
+          <td>State contract</td>
+          <td>state.json schema, 5 mandatory INTAKE inputs, compile-gate auto-fix loop (3 attempts), HANDOFF-A0/A/B/C steps, resumption protocol</td>
+          <td><span class="badge badge-blue">INTAKE / HANDOFF</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/structural-conventions.md</ic></td>
+          <td>Conventions</td>
+          <td>10-environment config-map list (dev1–dev4, test1–test4, stage, prod), SPRING_CONFIG_LOCATION replaces defaults, application.properties 1–7 lines, application-local.properties 16–97 lines, Helm flat SCREAMING_SNAKE_CASE</td>
+          <td><span class="badge badge-blue">SCAFFOLD</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/fixed-file-templates.md</ic></td>
+          <td>Templates</td>
+          <td>Dockerfile template (ubi9 base image), GitHub Actions reusable workflow config, Helm RICH and SIMPLE families, Akeyless wiring Form 1 (creds-only) and Form 2 (creds+certs)</td>
+          <td><span class="badge badge-blue">SCAFFOLD</span></td>
+        </tr>
+        <tr>
+          <td><ic>external-skills/iib-to-ms-migration/references/templates/config-map-baseline.properties</ic></td>
+          <td>16 lines</td>
+          <td>Canonical baseline validated byte-for-byte against 3 production repos. Includes mandatory <ic>management.endpoints.web.exposure.include=health,info</ic> (not cosmetic — HANDOFF-C smoke test hits /actuator/health)</td>
+          <td><span class="badge badge-blue">SCAFFOLD</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-tile"><div class="stat-val">8</div><div class="stat-lbl">Skill Files</div></div>
+    <div class="stat-tile"><div class="stat-val">13</div><div class="stat-lbl">Mandatory Rules</div></div>
+    <div class="stat-tile"><div class="stat-val">16</div><div class="stat-lbl">Defect Patterns</div></div>
+    <div class="stat-tile"><div class="stat-val">25+</div><div class="stat-lbl">Gap Checklist Items</div></div>
+    <div class="stat-tile"><div class="stat-val">5</div><div class="stat-lbl">Connector Types</div></div>
+    <div class="stat-tile"><div class="stat-val">4</div><div class="stat-lbl">Workflow Stages</div></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 3 ═══════════════════════ -->
+<section class="section" id="s3">
+  <div class="section-header">
+    <span class="section-num">03</span>
+    <h2 class="section-title">Comparison with ACE Migration Factory</h2>
+  </div>
+
+  <p>Each capability the skill requires was checked against all 14 agent implementations in <ic>app/agents/</ic> and the services they call. Status is derived from reading the actual code.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Skill Capability</th><th>Status</th><th>ACE Agent / File</th><th>Gap / Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>IIB repository scanning (.msgflow, .esql, .xsd, .map, .wsdl, .xslt, .policyxml)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>RepositoryIntakeAgent</ic><br><ic>app/agents/repository_intake.py</ic></td>
+          <td><ic>IntakeService.scan()</ic> in <ic>app/services/factory_v3.py</ic> — <ic>EXT</ic> dict already maps all 7 IIB extensions. Outputs <ic>intake_manifest</ic> with <ic>gaps</ic> list.</td>
+        </tr>
+        <tr>
+          <td>Dormancy / worth-migrating classification</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>DormancyIntelligenceAgent</ic><br><ic>app/agents/dormancy_intelligence.py</ic></td>
+          <td><ic>DormancyService.assess(job_id, traffic_count, last_seen_days, deployed, already_migrated)</ic> in <ic>app/services/factory_v3.py</ic>. Produces <ic>EvidenceRef('DORMANCY_ASSESSMENT', '1.0.0', 'dormancy://&lt;id&gt;', ...)</ic></td>
+        </tr>
+        <tr>
+          <td>Framework baseline (EIP module versions, golden path)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>FrameworkBaselineAgent</ic><br><ic>app/agents/framework_baseline.py</ic></td>
+          <td><ic>PriorityOneService(repo).baseline_framework(job_id, path, version, effective_from, golden_path)</ic> in <ic>app/services/priority1.py</ic>. Creates <ic>EvidenceRef('FRAMEWORK_TEMPLATE', ...)</ic>. Conflicts create <ic>Clarification(stage='FRAMEWORK_BASELINE', owner='JAVA_ARCHITECT')</ic>.</td>
+        </tr>
+        <tr>
+          <td>ACE construct analysis (flows, nodes, ESQL, schemas)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>ACEAnalysisAgent</ic><br><ic>app/agents/ace_analysis.py</ic></td>
+          <td><ic>PriorityOneService(repo).analyze_ace(job_id, path, version)</ic> builds <ic>semantic_model</ic> JSON with flows, subflows, nodes, esql, maps, schemas, interfaces. Creates <ic>EvidenceRef('ACE_ANALYSIS', ...)</ic>. Prompt: <ic>'agent/ace-analysis/ambiguity-triage'</ic>.</td>
+        </tr>
+        <tr>
+          <td>Migration specification authoring (YAML)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>MigrationSpecificationAgent</ic><br><ic>app/agents/migration_specification.py</ic></td>
+          <td><ic>SpecificationService(repo, SCHEMA).save(job_id, version, text)</ic> in <ic>app/services/specification.py</ic>. Schema at <ic>schemas/migration-specification.schema.json</ic>. Outputs <ic>yaml.safe_dump()</ic> spec. Prompt: <ic>'agent/migration-specification/authoring'</ic>.</td>
+        </tr>
+        <tr>
+          <td>Mapping catalogue (ACE construct → Spring pattern)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>PlanningAgent</ic><br><ic>app/agents/planning.py</ic></td>
+          <td><ic>MappingAndPlanningService.create_mapping_catalogue(job_id, framework_id, analysis_id, specification_id, version, overrides)</ic> in <ic>app/services/migration_lifecycle_v6.py</ic>. Has <ic>DEFAULT_MAPPINGS</ic> dict with 21 ACE patterns. 5 IIB connector types added via <ic>overrides</ic> param — no code change needed.</td>
+        </tr>
+        <tr>
+          <td>Spring Boot project generation</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>CodeGenerationAgent</ic><br><ic>app/agents/code_generation.py</ic></td>
+          <td><ic>MappingAndPlanningService.generate_spring(job_id, plan_id, output_root, service_name, package_name)</ic> then <ic>quality_validate(job_id, plan_id, project_root, execute_build)</ic>. Calls <ic>SpringProjectGenerator</ic> in <ic>app/services/enterprise_v5.py</ic>. Produces <ic>EvidenceRef('GENERATED_PROJECT', ...)</ic>.</td>
+        </tr>
+        <tr>
+          <td>Differential test execution (ACE vs Spring Boot)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>TestEngineeringAgent</ic><br><ic>app/agents/test_engineering.py</ic></td>
+          <td>Uses <ic>ACERuntimeAdapter</ic> + <ic>SpringBootRuntimeAdapter</ic> from <ic>app/services/enterprise_v5.py</ic>. TRANSPORT_FIELDS masked: <ic>('$.adapter', '$.correlation_id', '$.latency_ms')</ic>. Records <ic>EvidenceRef('RUNTIME_EXECUTION', ...)</ic>.</td>
+        </tr>
+        <tr>
+          <td>Variance analysis — STRUCTURAL / TYPE / VALUE classification</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>VarianceAnalysisAgent</ic><br><ic>app/agents/variance_analysis.py</ic></td>
+          <td><ic>DifferentialService.compare()</ic> + <ic>MappingAndPlanningService.record_differential()</ic>. Prompt: <ic>'agent/variance-analysis/severity-rationale'</ic>. Runs at state <ic>DIFFERENTIAL_TESTING</ic>.</td>
+        </tr>
+        <tr>
+          <td>Root cause analysis with confidence scoring</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>RCAAgent</ic><br><ic>app/agents/rca.py</ic></td>
+          <td><ic>RCAService.record_root_cause(job_id, variance_ids, statement, score, evidence, gaps, paths)</ic> in <ic>app/services/rca.py</ic>. Confidence via <ic>ConfidenceRemediationService.score(**components)</ic>. Components: evidence_coverage, reproducible, traceability, rule_strength, test_isolation, historical_validation. Prompt: <ic>'agent/rca/hypothesis'</ic>.</td>
+        </tr>
+        <tr>
+          <td>Automated remediation with confidence threshold</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>RemediationAgent</ic><br><ic>app/agents/remediation.py</ic></td>
+          <td>Threshold from env <ic>FACTORY_REMEDIATION_CONFIDENCE_THRESHOLD</ic> (default 0.8). Uses <ic>ConfidenceRemediationService</ic> + <ic>RCAService.record_remediation()</ic> from <ic>app/services/enterprise_v5.py</ic> / <ic>app/services/rca.py</ic>. Prompt: <ic>'agent/remediation/patch-plan'</ic>.</td>
+        </tr>
+        <tr>
+          <td>Artefact knowledge indexing and semantic citation</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>KnowledgeEvidenceAgent</ic><br><ic>app/agents/knowledge_evidence.py</ic></td>
+          <td><ic>KnowledgeService</ic> in <ic>app/services/platform_v7.py</ic>. Indexes: intake_manifests, framework_baselines, ace_analyses, migration_specs, migration_plans. Idempotent by (reference, content_hash). Auto-runs after every pipeline step in <ic>MigrationOrchestratorAgent</ic>.</td>
+        </tr>
+        <tr>
+          <td>Governance gate evaluation (G0–G5)</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>GovernanceAgent</ic><br><ic>app/agents/governance.py</ic></td>
+          <td>Reads <ic>GATE_TRANSITIONS</ic> from <ic>app/service.py</ic> and <ic>TRANSITIONS</ic> from <ic>app/domain/state_machine.py</ic>. Evaluates quorum, timeout, artefact-binding validity via <ic>FactoryService._valid_approvals()</ic>. Writes audit via <ic>AuditLedger.append()</ic> from <ic>app/services/factory_v3.py</ic>.</td>
+        </tr>
+        <tr>
+          <td>Autonomous lifecycle orchestration</td>
+          <td><span class="badge badge-green">✓ Available</span></td>
+          <td><ic>MigrationOrchestratorAgent</ic><br><ic>app/agents/orchestrator.py</ic></td>
+          <td><ic>PIPELINE</ic> dict maps each state to its agents. <ic>GATE_FIRST = {'ACE_ANALYSED', 'PLAN_APPROVED'}</ic> — these states require gate approval before agents run. <ic>WorkflowOrchestrator</ic> from <ic>app/services/factory_v3.py</ic> manages checkpoints and queue.</td>
+        </tr>
+        <tr>
+          <td>IIB mandatory rules enforcement (13 rules)</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/priority1.py</ic><br><ic>PriorityOneService</ic></td>
+          <td>Rules in <ic>references/mandatory-migration-rules.md</ic> not wired into <ic>analyze_ace()</ic>. Must add <ic>_check_mandatory_rules()</ic> — violations become BLOCKING clarifications with <ic>stage='ACE_ANALYSIS'</ic>, <ic>owner='JAVA_ARCHITECT'</ic>.</td>
+        </tr>
+        <tr>
+          <td>Gap checklist validation (B1–B6, H1–H15, M1–M25)</td>
+          <td><span class="badge badge-amber">~ Partial</span></td>
+          <td><ic>app/services/priority1.py</ic><br><ic>PriorityOneService</ic></td>
+          <td>Generic gap detection exists in <ic>RepositoryIntakeAgent</ic> OUTPUTS (<ic>'gaps'</ic>). IIB-specific checklist items from <ic>references/gap-checklist.md</ic> must be added to <ic>analyze_ace()</ic> semantic model construction as a new <ic>_check_gap_checklist()</ic> method.</td>
+        </tr>
+        <tr>
+          <td>CVS Dockerfile (ubi9 base image)</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/enterprise_v5.py</ic><br><ic>SpringProjectGenerator</ic></td>
+          <td>Generator class exists but CVS Dockerfile with base image <ic>quay-registry.aetna.com/cvs-base-images/os-eng/redhat/ubi9/openjdk-micro:21</ic> not in templates. Must add to <ic>generate_cvs_scaffold()</ic>.</td>
+        </tr>
+        <tr>
+          <td>10-environment config-map generation</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/enterprise_v5.py</ic><br><ic>SpringProjectGenerator</ic></td>
+          <td>dev1–dev4, test1–test4, stage, prod config maps with <ic>SPRING_CONFIG_LOCATION</ic> override not generated. Must add using <ic>config-map-baseline.properties</ic> as the base.</td>
+        </tr>
+        <tr>
+          <td>Helm chart family (RICH / SIMPLE)</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/enterprise_v5.py</ic><br><ic>SpringProjectGenerator</ic></td>
+          <td>Helm RICH (full HPA, resource limits) and SIMPLE (minimal values.yaml) families from <ic>references/fixed-file-templates.md</ic> not in generator. Flat SCREAMING_SNAKE_CASE Helm values required by skill.</td>
+        </tr>
+        <tr>
+          <td>Akeyless secrets wiring (Form 1 / Form 2)</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/enterprise_v5.py</ic><br><ic>SpringProjectGenerator</ic></td>
+          <td>Form 1 (creds-only) for REST/SOAP and Form 2 (creds+certs) for QL_CICS, RXCLAIM_SBO, IBM_MQ. Deployment annotations from <ic>references/fixed-file-templates.md</ic> not in generator.</td>
+        </tr>
+        <tr>
+          <td>GitHub Actions reusable workflow CI config</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td><ic>app/services/enterprise_v5.py</ic><br><ic>SpringProjectGenerator</ic></td>
+          <td>CI YAML calling CVS shared workflow referencing Quay registry not generated. Template is in <ic>references/fixed-file-templates.md</ic> — must add to <ic>generate_cvs_scaffold()</ic>.</td>
+        </tr>
+        <tr>
+          <td>HANDOFF-C smoke test (POST deployment health check)</td>
+          <td><span class="badge badge-amber">~ Partial</span></td>
+          <td><ic>TestEngineeringAgent</ic><br><ic>app/agents/test_engineering.py</ic></td>
+          <td>Differential test execution exists. HANDOFF-C (<ic>GET /actuator/health</ic> on deployed service) not a named step. Must extend <ic>execute()</ic> to produce <ic>EvidenceRef('HANDOFF_SMOKE', ...)</ic> when <ic>context.param('smoke_base_url', None)</ic> is present.</td>
+        </tr>
+        <tr>
+          <td>state.json mandatory INTAKE field validation</td>
+          <td><span class="badge badge-amber">~ Partial</span></td>
+          <td><ic>IntakeService</ic><br><ic>app/services/factory_v3.py</ic></td>
+          <td><ic>AgentContext.param()</ic> carries job parameters but 5 mandatory IIB inputs (connector_type, service_name, source_path, framework_version, package_name) are not validated in <ic>IntakeService.scan()</ic>.</td>
+        </tr>
+        <tr>
+          <td>Karate regression test scaffolding</td>
+          <td><span class="badge badge-red">✗ Missing</span></td>
+          <td>No agent</td>
+          <td>Karate .feature file templates referenced in HANDOFF stage not in any agent. Lower priority — can be added to <ic>TestEngineeringAgent</ic> outputs in a later iteration.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-tile"><div class="stat-val" style="color:var(--green)">11</div><div class="stat-lbl">Fully Available</div></div>
+    <div class="stat-tile"><div class="stat-val" style="color:var(--amber)">4</div><div class="stat-lbl">Partially Available</div></div>
+    <div class="stat-tile"><div class="stat-val" style="color:var(--red)">7</div><div class="stat-lbl">Missing</div></div>
+  </div>
+
+  <div class="alert alert-warn">
+    <span class="alert-icon">⚠</span>
+    <span class="alert-body"><strong>Key finding:</strong> All 7 missing capabilities are templates or rule checks inside two service files — <ic>SpringProjectGenerator</ic> in <ic>app/services/enterprise_v5.py</ic> and <ic>PriorityOneService.analyze_ace()</ic> in <ic>app/services/priority1.py</ic>. The governance model, agent registry, lifecycle state machine, approval gates, and database schema require zero changes.</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 4 ═══════════════════════ -->
+<section class="section" id="s4">
+  <div class="section-header">
+    <span class="section-num">04</span>
+    <h2 class="section-title">Skill-to-Agent Mapping</h2>
+  </div>
+
+  <p>The skill's 4-stage workflow maps directly onto ACE's lifecycle. The <ic>PIPELINE</ic> dict in <ic>app/agents/orchestrator.py</ic> governs which agents run at each state.</p>
+
+  <h3>ACE Lifecycle Pipeline (from <ic>app/agents/orchestrator.py:PIPELINE</ic>)</h3>
+  <div class="pipeline">
+    <div class="pipe-step"><div class="pipe-state">CREATED</div><div class="pipe-agents">repository-intake</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">INTAKE_VALIDATED</div><div class="pipe-agents">dormancy-intelligence</div><div class="pipe-gate">↳ G0 gate</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">DORMANCY_ASSESSED</div><div class="pipe-agents">framework-baseline</div><div class="pipe-gate">↳ G1 gate</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">FRAMEWORK_BASELINED</div><div class="pipe-agents">ace-analysis<br>migration-specification</div><div class="pipe-gate">↳ G2 gate</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">ACE_ANALYSED ★</div><div class="pipe-agents">planning</div><div class="pipe-gate">↳ G3 gate</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">PLAN_APPROVED ★</div><div class="pipe-agents">code-generation</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">BUILD_VALIDATED</div><div class="pipe-agents">test-engineering</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">DIFFERENTIAL_TESTING</div><div class="pipe-agents">variance-analysis</div><div class="pipe-gate">↳ G4 gate</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">VARIANCE_REVIEW</div><div class="pipe-agents">rca → remediation</div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step"><div class="pipe-state">READY_FOR_PROMOTION</div><div class="pipe-agents">(G5 gate)</div><div class="pipe-gate">↳ COMPLETED</div></div>
+  </div>
+  <p style="font-size:.74rem;color:var(--fg-muted)">★ GATE_FIRST states — gate must be approved before agents run (from <ic>app/agents/orchestrator.py:GATE_FIRST</ic>).</p>
+
+  <h3>Full Skill Stage → Agent Mapping</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Skill Stage</th><th>ACE State</th><th>AGENT_ID</th><th>Class Name</th><th>File</th><th>Primary Service Call</th></tr></thead>
+      <tbody>
+        <tr>
+          <td rowspan="2"><strong>INTAKE</strong></td>
+          <td><ic>CREATED</ic></td>
+          <td><ic>repository-intake</ic></td>
+          <td><ic>RepositoryIntakeAgent</ic></td>
+          <td><ic>app/agents/repository_intake.py</ic></td>
+          <td><ic>IntakeService(repo).scan(job_id, path, branch, revision)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>INTAKE_VALIDATED</ic></td>
+          <td><ic>dormancy-intelligence</ic></td>
+          <td><ic>DormancyIntelligenceAgent</ic></td>
+          <td><ic>app/agents/dormancy_intelligence.py</ic></td>
+          <td><ic>DormancyService(repo).assess(job_id, traffic_count, last_seen_days, deployed, already_migrated)</ic></td>
+        </tr>
+        <tr>
+          <td><strong>SCAFFOLD</strong></td>
+          <td><ic>DORMANCY_ASSESSED</ic></td>
+          <td><ic>framework-baseline</ic></td>
+          <td><ic>FrameworkBaselineAgent</ic></td>
+          <td><ic>app/agents/framework_baseline.py</ic></td>
+          <td><ic>PriorityOneService(repo).baseline_framework(job_id, path, version, effective_from, golden_path)</ic></td>
+        </tr>
+        <tr>
+          <td rowspan="4"><strong>GENERATE</strong></td>
+          <td><ic>FRAMEWORK_BASELINED</ic></td>
+          <td><ic>ace-analysis</ic></td>
+          <td><ic>ACEAnalysisAgent</ic></td>
+          <td><ic>app/agents/ace_analysis.py</ic></td>
+          <td><ic>PriorityOneService(repo).analyze_ace(job_id, path, version)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>FRAMEWORK_BASELINED</ic></td>
+          <td><ic>migration-specification</ic></td>
+          <td><ic>MigrationSpecificationAgent</ic></td>
+          <td><ic>app/agents/migration_specification.py</ic></td>
+          <td><ic>SpecificationService(repo, SCHEMA).save(job_id, version, text)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>ACE_ANALYSED</ic></td>
+          <td><ic>planning</ic></td>
+          <td><ic>PlanningAgent</ic></td>
+          <td><ic>app/agents/planning.py</ic></td>
+          <td><ic>MappingAndPlanningService.create_mapping_catalogue(job_id, framework_id, analysis_id, specification_id, version, overrides)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>PLAN_APPROVED</ic></td>
+          <td><ic>code-generation</ic></td>
+          <td><ic>CodeGenerationAgent</ic></td>
+          <td><ic>app/agents/code_generation.py</ic></td>
+          <td><ic>MappingAndPlanningService.generate_spring(job_id, plan_id, output_root, service_name, package_name)</ic></td>
+        </tr>
+        <tr>
+          <td rowspan="4"><strong>HANDOFF</strong></td>
+          <td><ic>BUILD_VALIDATED</ic></td>
+          <td><ic>test-engineering</ic></td>
+          <td><ic>TestEngineeringAgent</ic></td>
+          <td><ic>app/agents/test_engineering.py</ic></td>
+          <td><ic>MappingAndPlanningService.prepare_differential(job_id, plan_id, cases, policy)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>DIFFERENTIAL_TESTING</ic></td>
+          <td><ic>variance-analysis</ic></td>
+          <td><ic>VarianceAnalysisAgent</ic></td>
+          <td><ic>app/agents/variance_analysis.py</ic></td>
+          <td><ic>DifferentialService.compare()</ic> + <ic>MappingAndPlanningService.record_differential()</ic></td>
+        </tr>
+        <tr>
+          <td><ic>VARIANCE_REVIEW</ic></td>
+          <td><ic>rca</ic></td>
+          <td><ic>RCAAgent</ic></td>
+          <td><ic>app/agents/rca.py</ic></td>
+          <td><ic>RCAService.record_root_cause(job_id, variance_ids, statement, score, evidence, gaps, paths)</ic></td>
+        </tr>
+        <tr>
+          <td><ic>REMEDIATING</ic></td>
+          <td><ic>remediation</ic></td>
+          <td><ic>RemediationAgent</ic></td>
+          <td><ic>app/agents/remediation.py</ic></td>
+          <td><ic>ConfidenceRemediationService.apply()</ic> + <ic>RCAService.record_remediation()</ic></td>
+        </tr>
+        <tr>
+          <td><strong>Cross-cutting</strong><br><small>(every state)</small></td>
+          <td>All states</td>
+          <td><ic>governance</ic> / <ic>knowledge-evidence</ic> / <ic>migration-orchestrator</ic></td>
+          <td><ic>GovernanceAgent</ic> / <ic>KnowledgeEvidenceAgent</ic> / <ic>MigrationOrchestratorAgent</ic></td>
+          <td><ic>app/agents/governance.py</ic> / <ic>app/agents/knowledge_evidence.py</ic> / <ic>app/agents/orchestrator.py</ic></td>
+          <td><ic>FactoryService</ic> (<ic>app/service.py</ic>) · <ic>KnowledgeService</ic> (<ic>app/services/platform_v7.py</ic>) · <ic>AgentRegistry</ic> (<ic>app/services/agents.py</ic>)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Gate Transitions (from <ic>app/service.py:GATE_TRANSITIONS</ic>)</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Gate</th><th>Transition</th><th>Allowed Decision</th><th>Approver Role</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-amber">G0</span></td><td><ic>DORMANCY_ASSESSED → FRAMEWORK_BASELINED</ic><br><ic>INTAKE_VALIDATED → FRAMEWORK_BASELINED</ic></td><td><ic>PROCEED</ic></td><td>Migration Owner</td></tr>
+        <tr><td><span class="badge badge-amber">G1</span></td><td><ic>FRAMEWORK_BASELINED → ACE_ANALYSED</ic></td><td><ic>APPROVE</ic></td><td>Java Architect</td></tr>
+        <tr><td><span class="badge badge-amber">G2</span></td><td><ic>ACE_ANALYSED → PLAN_APPROVED</ic></td><td><ic>APPROVE</ic></td><td>Solution Architect</td></tr>
+        <tr><td><span class="badge badge-amber">G3</span></td><td><ic>PLAN_APPROVED → IMPLEMENTING</ic></td><td><ic>APPROVE</ic></td><td>Solution Architect</td></tr>
+        <tr><td><span class="badge badge-amber">G4</span></td><td><ic>VARIANCE_REVIEW → REMEDIATING</ic><br><ic>VARIANCE_REVIEW → READY_FOR_PROMOTION</ic></td><td><ic>CONTINUE_FEEDBACK</ic> / <ic>ACCEPT_EXCEPTION</ic></td><td>Test Lead</td></tr>
+        <tr><td><span class="badge badge-amber">G5</span></td><td><ic>READY_FOR_PROMOTION → COMPLETED</ic></td><td><ic>PROMOTE</ic></td><td>Release Manager</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 5 ═══════════════════════ -->
+<section class="section" id="s5">
+  <div class="section-header">
+    <span class="section-num">05</span>
+    <h2 class="section-title">Usability Assessment</h2>
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">Modular Agent Design — Independently Testable</div>
+      <div class="card-body">Each agent inherits from <ic>BaseAgent</ic> (<ic>app/agents/base.py</ic>) with declared <ic>AGENT_ID</ic>, <ic>TOOLS</ic>, <ic>OUTPUTS</ic>, and optional <ic>PROMPT</ic>. Any agent runs standalone via <ic>python -m app.agents.&lt;module&gt; --help</ic>. The <ic>IMPLEMENTATIONS</ic> dict in <ic>app/agents/__init__.py</ic> maps all 14 agent IDs to their classes; adding IIB-specific logic to a service does not require touching any other agent.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Artefact-Bound Approvals</div>
+      <div class="card-body">Every gate approval in <ic>FactoryService._valid_approvals()</ic> binds to artefact <ic>content_hash</ic> values via <ic>artifact_bindings</ic>. An approval cannot be reused against a different version of an artefact. The <ic>EvidenceRef</ic> dataclass in <ic>app/agents/base.py</ic> computes <ic>content_hash = digest(content)</ic> — the hash is what the gate approves, making every approval traceable to a specific artefact state.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Connector Type Overrides Already Supported</div>
+      <div class="card-body"><ic>MappingAndPlanningService.create_mapping_catalogue()</ic> in <ic>app/services/migration_lifecycle_v6.py</ic> accepts an <ic>overrides</ic> dict that merges with <ic>DEFAULT_MAPPINGS</ic>. The skill's 5 IIB connector types can be registered as additional mapping keys without modifying any file — just pass them via <ic>context.param('overrides')</ic> from <ic>MigrationOrchestratorAgent._params('planning', ...)</ic>.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Clarification Blocking Already Wired</div>
+      <div class="card-body">Open clarifications block lifecycle advancement via <ic>validate_transition()</ic> in <ic>app/domain/state_machine.py</ic>. <ic>FrameworkBaselineAgent</ic> already creates <ic>Clarification(stage='FRAMEWORK_BASELINE', owner='JAVA_ARCHITECT')</ic> per conflict. Adding IIB mandatory rule violations as clarifications requires only calling <ic>repo.insert()</ic> into the <ic>clarifications</ic> table — the blocking mechanism is already in place.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">LLM Reasoning via ReasoningGateway</div>
+      <div class="card-body">Agents needing model reasoning call <ic>ReasoningGateway(repo).reason(context, prompt_name, payload)</ic>. The deterministic classification is always authoritative; model output is a second opinion in metrics. Prompt names are stable governed strings. A disagreement between model and deterministic result is recorded in run metrics for auditability.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">WAITING_G0–G5 Gate-Hold States</div>
+      <div class="card-body">The state machine in <ic>app/domain/state_machine.py</ic> has explicit <ic>WAITING_Gx</ic> states for every gate. A job that requires a human to sign a gate transitions to <ic>WAITING_G2</ic> etc., then resumes to the post-gate target when the approval is granted. The orchestrator's <ic>GATE_FIRST</ic> set uses these states to avoid running agents before the gate is satisfied.</div>
+    </div>
+  </div>
+
+  <h3>Usability Gaps</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Gap</th><th>Impact</th><th>Fix Location</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>CVS Dockerfile, 10 config maps, Helm, Akeyless, GitHub Actions not in generator</td>
+          <td>Generated project missing all CVS deployment scaffolding</td>
+          <td><ic>SpringProjectGenerator</ic> in <ic>app/services/enterprise_v5.py</ic></td>
+        </tr>
+        <tr>
+          <td>13 mandatory rules not enforced at analysis time</td>
+          <td>Code generation can produce rule-violating output (RestTemplate, wrong timeout code)</td>
+          <td><ic>PriorityOneService.analyze_ace()</ic> in <ic>app/services/priority1.py</ic></td>
+        </tr>
+        <tr>
+          <td>state.json 5 mandatory INTAKE inputs not validated</td>
+          <td>Missing connector_type or framework_version silently defaults rather than blocking</td>
+          <td><ic>IntakeService.scan()</ic> in <ic>app/services/factory_v3.py</ic></td>
+        </tr>
+        <tr>
+          <td>HANDOFF-C smoke test not a named evidence step</td>
+          <td>/actuator/health post-deployment check not artefact-bound — cannot be referenced in G5 approval</td>
+          <td><ic>TestEngineeringAgent.execute()</ic> in <ic>app/agents/test_engineering.py</ic></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 6 ═══════════════════════ -->
+<section class="section" id="s6">
+  <div class="section-header">
+    <span class="section-num">06</span>
+    <h2 class="section-title">Implementation Impact</h2>
+  </div>
+
+  <p>All changes are additive. Nothing in the governance model, agent registry, lifecycle state machine, approval gates, or database schema requires modification.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File</th><th>Change</th><th>What Changes</th><th>Effort</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><ic>app/services/enterprise_v5.py</ic></td>
+          <td><span class="badge badge-red">New Templates</span></td>
+          <td>Add <ic>generate_cvs_scaffold(project_root, service_name, connector_type)</ic> to <ic>SpringProjectGenerator</ic>. Produces: CVS Dockerfile (ubi9 base), 10 config-map files, Helm RICH/SIMPLE values.yaml, Akeyless Form 1/2, GitHub Actions CI YAML</td>
+          <td><strong>Large</strong></td>
+        </tr>
+        <tr>
+          <td><ic>app/services/priority1.py</ic></td>
+          <td><span class="badge badge-amber">Extend Method</span></td>
+          <td>Add <ic>_check_mandatory_rules(job_id, analysis_md)</ic> and <ic>_check_gap_checklist(job_id, semantic_model)</ic> to <ic>PriorityOneService</ic>. Call both at end of <ic>analyze_ace()</ic>. BLOCKING items → clarifications table; HIGH items → <ic>migration_risks</ic></td>
+          <td><strong>Medium</strong></td>
+        </tr>
+        <tr>
+          <td><ic>app/services/factory_v3.py</ic></td>
+          <td><span class="badge badge-amber">Extend Method</span></td>
+          <td>Add <ic>iib_params</ic> optional dict to <ic>IntakeService.scan()</ic>. Validate 5 mandatory fields: <ic>connector_type</ic>, <ic>service_name</ic>, <ic>source_path</ic>, <ic>framework_version</ic>, <ic>package_name</ic>. Raise <ic>ValueError</ic> for missing or invalid values</td>
+          <td><strong>Small</strong></td>
+        </tr>
+        <tr>
+          <td><ic>app/agents/test_engineering.py</ic></td>
+          <td><span class="badge badge-amber">Extend Agent</span></td>
+          <td>After differential execution block: if <ic>context.param('smoke_base_url', None)</ic> is present, hit <ic>GET /actuator/health</ic> and produce <ic>EvidenceRef('HANDOFF_SMOKE', '1.0.0', 'smoke://&lt;package_id&gt;', ...)</ic></td>
+          <td><strong>Small</strong></td>
+        </tr>
+        <tr>
+          <td><ic>app/agents/orchestrator.py</ic></td>
+          <td><span class="badge badge-blue">Minor Extension</span></td>
+          <td>In <ic>_params('planning', ...)</ic>, pass <ic>CONNECTOR_OVERRIDES</ic> dict as the <ic>overrides</ic> key so connector-type mappings reach <ic>MappingAndPlanningService.create_mapping_catalogue()</ic></td>
+          <td><strong>Trivial</strong></td>
+        </tr>
+        <tr>
+          <td><ic>app/agents/__init__.py</ic></td>
+          <td><span class="badge badge-green">No Change</span></td>
+          <td><ic>IMPLEMENTATIONS</ic> dict already declares all 14 agents with correct module paths and class names</td>
+          <td>None</td>
+        </tr>
+        <tr>
+          <td><ic>app/domain/state_machine.py</ic></td>
+          <td><span class="badge badge-green">No Change</span></td>
+          <td><ic>STATES</ic> and <ic>TRANSITIONS</ic> cover the full IIB lifecycle including <ic>WAITING_G0</ic>–<ic>WAITING_G5</ic> gate-hold states</td>
+          <td>None</td>
+        </tr>
+        <tr>
+          <td><ic>app/service.py</ic></td>
+          <td><span class="badge badge-green">No Change</span></td>
+          <td><ic>GATE_TRANSITIONS</ic> G0–G5 already map every approval gate the skill requires</td>
+          <td>None</td>
+        </tr>
+        <tr>
+          <td>Database schema (<ic>factory-v2.db</ic>)</td>
+          <td><span class="badge badge-green">No Change</span></td>
+          <td>All required tables exist: jobs, approvals, clarifications, evidence, agent_runs, validation_reports, root_causes, remediations, knowledge_index, mapping_catalogues, migration_plans, migration_risks</td>
+          <td>None</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 7 ═══════════════════════ -->
+<section class="section" id="s7">
+  <div class="section-header">
+    <span class="section-num">07</span>
+    <h2 class="section-title">Implementation Approach per Skill Stage</h2>
+  </div>
+
+  <h3>Stage 1 — INTAKE: state.json Validation in <ic>IntakeService.scan()</ic></h3>
+  <p>File: <ic>app/services/factory_v3.py</ic>, class <ic>IntakeService</ic>, method <ic>scan()</ic> starting at line 74.</p>
+  <div class="code-label">Extend IntakeService.scan() — add iib_params validation</div>
+  <div class="code-block"><span class="hl-comment"># Add at top of factory_v3.py:</span>
+<span class="hl-key">IIB_REQUIRED</span> = (<span class="hl-str">'connector_type'</span>, <span class="hl-str">'service_name'</span>, <span class="hl-str">'source_path'</span>, <span class="hl-str">'framework_version'</span>, <span class="hl-str">'package_name'</span>)
+<span class="hl-key">VALID_CONNECTORS</span> = {<span class="hl-str">'QL_CICS'</span>, <span class="hl-str">'RXCLAIM_SBO'</span>, <span class="hl-str">'REST'</span>, <span class="hl-str">'IBM_MQ'</span>, <span class="hl-str">'SOAP'</span>}
+
+<span class="hl-comment"># Change signature of scan():</span>
+<span class="hl-key">def</span> <span class="hl-class">scan</span>(self, job_id, path, branch=<span class="hl-str">'main'</span>, revision=<span class="hl-str">''</span>, iib_params=<span class="hl-key">None</span>):
+    <span class="hl-key">if</span> iib_params:
+        missing = [k <span class="hl-key">for</span> k <span class="hl-key">in</span> IIB_REQUIRED <span class="hl-key">if not</span> str(iib_params.get(k, <span class="hl-str">''</span>)).strip()]
+        <span class="hl-key">if</span> missing:
+            <span class="hl-key">raise</span> ValueError(<span class="hl-str">'missing_iib_intake_inputs:'</span> + <span class="hl-str">','</span>.join(missing))
+        ct = iib_params[<span class="hl-str">'connector_type'</span>]
+        <span class="hl-key">if</span> ct <span class="hl-key">not in</span> VALID_CONNECTORS:
+            <span class="hl-key">raise</span> ValueError(<span class="hl-str">'invalid_connector_type:'</span> + ct)
+    <span class="hl-comment"># ... rest of existing scan logic unchanged ...</span></div>
+
+  <h3>Stage 2 — SCAFFOLD: CVS Templates in <ic>SpringProjectGenerator</ic></h3>
+  <p>File: <ic>app/services/enterprise_v5.py</ic>. Add a new <ic>generate_cvs_scaffold()</ic> method. Content comes verbatim from <ic>references/fixed-file-templates.md</ic>, <ic>references/structural-conventions.md</ic>, and <ic>references/templates/config-map-baseline.properties</ic>.</p>
+  <div class="code-label">SpringProjectGenerator.generate_cvs_scaffold() — new method</div>
+  <div class="code-block"><span class="hl-comment"># Environments from references/structural-conventions.md</span>
+CVS_ENVIRONMENTS = [<span class="hl-str">'dev1'</span>,<span class="hl-str">'dev2'</span>,<span class="hl-str">'dev3'</span>,<span class="hl-str">'dev4'</span>,<span class="hl-str">'test1'</span>,<span class="hl-str">'test2'</span>,<span class="hl-str">'test3'</span>,<span class="hl-str">'test4'</span>,<span class="hl-str">'stage'</span>,<span class="hl-str">'prod'</span>]
+
+<span class="hl-comment"># Dockerfile template from references/fixed-file-templates.md</span>
+CVS_DOCKERFILE = (
+    <span class="hl-str">"FROM quay-registry.aetna.com/cvs-base-images/os-eng/redhat/ubi9/openjdk-micro:21\n"</span>
+    <span class="hl-str">"COPY target/*.jar app.jar\n"</span>
+    <span class="hl-str">'ENTRYPOINT ["java","-jar","/app.jar"]\n'</span>
+)
+
+<span class="hl-key">def</span> <span class="hl-class">generate_cvs_scaffold</span>(self, project_root, service_name, connector_type):
+    root = Path(project_root)
+    (root / <span class="hl-str">'Dockerfile'</span>).write_text(CVS_DOCKERFILE)
+    cfg_dir = root / <span class="hl-str">'config'</span>; cfg_dir.mkdir(exist_ok=<span class="hl-key">True</span>)
+    <span class="hl-key">for</span> env <span class="hl-key">in</span> CVS_ENVIRONMENTS:
+        <span class="hl-comment"># SPRING_CONFIG_LOCATION replaces defaults — structural-conventions.md</span>
+        (cfg_dir / f<span class="hl-str">'application-{env}.properties'</span>).write_text(
+            CONFIG_MAP_BASELINE + f<span class="hl-str">'\nspring.profiles.active={env}\n'</span>)
+    helm_family = <span class="hl-str">'RICH'</span> <span class="hl-key">if</span> connector_type <span class="hl-key">in</span> {<span class="hl-str">'QL_CICS'</span>, <span class="hl-str">'RXCLAIM_SBO'</span>} <span class="hl-key">else</span> <span class="hl-str">'SIMPLE'</span>
+    akeyless_form = <span class="hl-str">'FORM_2'</span> <span class="hl-key">if</span> connector_type <span class="hl-key">in</span> {<span class="hl-str">'QL_CICS'</span>,<span class="hl-str">'RXCLAIM_SBO'</span>,<span class="hl-str">'IBM_MQ'</span>} <span class="hl-key">else</span> <span class="hl-str">'FORM_1'</span>
+    self._write_helm(root, service_name, helm_family)
+    self._write_akeyless(root, akeyless_form)
+    self._write_github_actions(root, service_name)</div>
+
+  <h3>Stage 3 — GENERATE: Mandatory Rule Checks in <ic>PriorityOneService</ic></h3>
+  <p>File: <ic>app/services/priority1.py</ic>, class <ic>PriorityOneService</ic>. Add two methods called at end of <ic>analyze_ace()</ic>.</p>
+  <div class="code-label">PriorityOneService — _check_mandatory_rules() new method</div>
+  <div class="code-block"><span class="hl-comment"># 13 rules from references/mandatory-migration-rules.md</span>
+MANDATORY_RULE_VIOLATIONS = {
+    <span class="hl-str">r'QLRequest\.builder\(\)'</span>:     <span class="hl-str">'Use qlCicsClient.execute() — no builder pattern (Rule R1)'</span>,
+    <span class="hl-str">r'new RestTemplate'</span>:           <span class="hl-str">'Use framework-restclient WebClient, never RestTemplate (Rule R2)'</span>,
+    <span class="hl-str">r'KongTokenValidator'</span>:         <span class="hl-str">'Use framework-oauth — no Kong token-validator (Rule R3)'</span>,
+    <span class="hl-str">r'class\s+\w+Exception\b'</span>:    <span class="hl-str">'Use CVS standard exception hierarchy (Rule R4)'</span>,
+    <span class="hl-str">r'HttpStatus\.INTERNAL_SERVER'</span>:<span class="hl-str">'Timeout must return 408 NOT 500 (Rule R5)'</span>,
+    <span class="hl-str">r'\.getAccessToken\(\)'</span>:       <span class="hl-str">'Use EieHeader real accessor methods only (Rule R8)'</span>,
+}
+
+<span class="hl-key">def</span> <span class="hl-class">_check_mandatory_rules</span>(self, job_id, analysis_md, ts):
+    <span class="hl-key">for</span> pattern, message <span class="hl-key">in</span> MANDATORY_RULE_VIOLATIONS.items():
+        <span class="hl-key">if</span> re.search(pattern, analysis_md):
+            <span class="hl-key">with</span> self.repo.connect() <span class="hl-key">as</span> c:
+                self.repo.insert(c, <span class="hl-str">'clarifications'</span>, {
+                    <span class="hl-str">'id'</span>: uid(), <span class="hl-str">'job_id'</span>: job_id, <span class="hl-str">'stage'</span>: <span class="hl-str">'ACE_ANALYSIS'</span>,
+                    <span class="hl-str">'question'</span>: f<span class="hl-str">'Mandatory rule violation: {message}'</span>,
+                    <span class="hl-str">'owner'</span>: <span class="hl-str">'JAVA_ARCHITECT'</span>, <span class="hl-str">'impact'</span>: <span class="hl-str">'Implementation blocked'</span>,
+                    <span class="hl-str">'status'</span>: <span class="hl-str">'OPEN'</span>, <span class="hl-str">'answer'</span>: <span class="hl-str">''</span>,
+                    <span class="hl-str">'created_at'</span>: ts, <span class="hl-str">'answered_at'</span>: <span class="hl-str">''</span>, <span class="hl-str">'answered_by'</span>: <span class="hl-str">''</span>,
+                    <span class="hl-str">'evidence_ref'</span>: <span class="hl-str">'analysis://'</span> + job_id
+                })</div>
+
+  <h3>Stage 4 — HANDOFF: HANDOFF-C Smoke Test in <ic>TestEngineeringAgent</ic></h3>
+  <p>File: <ic>app/agents/test_engineering.py</ic>. Extend <ic>execute()</ic> after the differential execution block.</p>
+  <div class="code-label">TestEngineeringAgent.execute() — HANDOFF-C evidence block</div>
+  <div class="code-block"><span class="hl-comment"># After the differential execution block, before return AgentResult(...):</span>
+smoke_url = context.param(<span class="hl-str">'smoke_base_url'</span>, <span class="hl-key">None</span>)
+smoke_evidence = <span class="hl-key">None</span>
+<span class="hl-key">if</span> smoke_url <span class="hl-key">and</span> spring <span class="hl-key">is not None</span>:
+    health = spring.invoke({<span class="hl-str">'path'</span>: <span class="hl-str">'/actuator/health'</span>, <span class="hl-str">'method'</span>: <span class="hl-str">'GET'</span>,
+                            <span class="hl-str">'headers'</span>: {}, <span class="hl-str">'body'</span>: {}})
+    smoke_payload = json.dumps({<span class="hl-str">'step'</span>: <span class="hl-str">'HANDOFF-C'</span>, <span class="hl-str">'url'</span>: smoke_url,
+                                <span class="hl-str">'status'</span>: health.get(<span class="hl-str">'status'</span>), <span class="hl-str">'body'</span>: health},
+                               sort_keys=<span class="hl-key">True</span>)
+    smoke_evidence = EvidenceRef(<span class="hl-str">'HANDOFF_SMOKE'</span>, <span class="hl-str">'1.0.0'</span>,
+                                  <span class="hl-str">'smoke://'</span> + package[<span class="hl-str">'package_id'</span>],
+                                  smoke_payload,
+                                  {<span class="hl-str">'http_status'</span>: health.get(<span class="hl-str">'status'</span>),
+                                   <span class="hl-str">'step'</span>: <span class="hl-str">'HANDOFF-C'</span>, <span class="hl-str">'smoke_url'</span>: smoke_url})
+
+<span class="hl-comment"># In return statement, extend evidence tuple:</span>
+base_evidence = EvidenceRef(<span class="hl-str">'RUNTIME_EXECUTION'</span>, <span class="hl-str">'1.0.0'</span>, ...)
+evidence = (base_evidence,) + ((smoke_evidence,) <span class="hl-key">if</span> smoke_evidence <span class="hl-key">else</span> ())</div>
+
+  <h3>Connector-Type Overrides (no file change — pass via params)</h3>
+  <div class="code-label">Pass in MigrationOrchestratorAgent._params('planning', ...) — app/agents/orchestrator.py</div>
+  <div class="code-block">CONNECTOR_OVERRIDES = {
+  <span class="hl-comment"># QL/CICS — Camel Bindy (mandatory per Rule R1)</span>
+  <span class="hl-str">'QLCICSRequest'</span>: {<span class="hl-str">'pattern'</span>:<span class="hl-str">'CAMEL_BINDY_FIXED_LENGTH'</span>,<span class="hl-str">'module'</span>:<span class="hl-str">'messaging'</span>,
+                     <span class="hl-str">'generated'</span>:<span class="hl-key">True</span>,<span class="hl-str">'tests'</span>:[<span class="hl-str">'bindy_encoding'</span>,<span class="hl-str">'signed_decimal_N_plus_1'</span>]},
+  <span class="hl-comment"># RxClaim SBO — XML/JAXB</span>
+  <span class="hl-str">'RxClaimSBO'</span>:    {<span class="hl-str">'pattern'</span>:<span class="hl-str">'JAXB_XML_ADAPTER'</span>,<span class="hl-str">'module'</span>:<span class="hl-str">'claims'</span>,
+                     <span class="hl-str">'generated'</span>:<span class="hl-key">True</span>,<span class="hl-str">'tests'</span>:[<span class="hl-str">'schema_validation'</span>,<span class="hl-str">'null_coalesce'</span>]},
+  <span class="hl-comment"># REST — framework-restclient, never RestTemplate (Rule R2)</span>
+  <span class="hl-str">'RESTRequest'</span>:   {<span class="hl-str">'pattern'</span>:<span class="hl-str">'FRAMEWORK_REST_CLIENT'</span>,<span class="hl-str">'module'</span>:<span class="hl-str">'integration'</span>,
+                     <span class="hl-str">'generated'</span>:<span class="hl-key">True</span>,<span class="hl-str">'tests'</span>:[<span class="hl-str">'circuit_breaker'</span>,<span class="hl-str">'timeout_408'</span>]},
+  <span class="hl-comment"># IBM MQ + COBOL Copybook</span>
+  <span class="hl-str">'MQCOBOLMessage'</span>:{<span class="hl-str">'pattern'</span>:<span class="hl-str">'JMS_COBOL_COPYBOOK'</span>,<span class="hl-str">'module'</span>:<span class="hl-str">'messaging'</span>,
+                     <span class="hl-str">'generated'</span>:<span class="hl-key">False</span>,<span class="hl-str">'tests'</span>:[<span class="hl-str">'cobol_encoding'</span>,<span class="hl-str">'signed_decimal_N_plus_1'</span>]},
+  <span class="hl-comment"># SOAP</span>
+  <span class="hl-str">'SOAPService'</span>:   {<span class="hl-str">'pattern'</span>:<span class="hl-str">'SPRING_WS_ENDPOINT'</span>,<span class="hl-str">'module'</span>:<span class="hl-str">'soap'</span>,
+                     <span class="hl-str">'generated'</span>:<span class="hl-key">True</span>,<span class="hl-str">'tests'</span>:[<span class="hl-str">'wsdl_contract'</span>,<span class="hl-str">'soap_fault'</span>]},
+}</div>
+</section>
+
+<!-- ═══════════════════════ PART 8 ═══════════════════════ -->
+<section class="section" id="s8">
+  <div class="section-header">
+    <span class="section-num">08</span>
+    <h2 class="section-title">Major Changes Assessment</h2>
+  </div>
+
+  <p>Four files require changes. All are additive. Zero governance or schema changes.</p>
+
+  <h3>1 · <ic>app/services/enterprise_v5.py</ic> — <ic>SpringProjectGenerator</ic> · <span class="badge badge-red">Large</span></h3>
+  <div class="card">
+    <div class="card-body">
+      <p>New method <ic>generate_cvs_scaffold(project_root, service_name, connector_type)</ic> that writes:</p>
+      <ul>
+        <li><strong>Dockerfile</strong> — base image: <ic>quay-registry.aetna.com/cvs-base-images/os-eng/redhat/ubi9/openjdk-micro:21</ic></li>
+        <li><strong>10 config-map files</strong> — <ic>application-dev1.properties</ic> through <ic>application-prod.properties</ic> — each starting from the 16-line canonical baseline including mandatory <ic>management.endpoints.web.exposure.include=health,info</ic></li>
+        <li><strong>Helm values.yaml</strong> — RICH family (HPA, resource limits, liveness/readiness probes) for <ic>QL_CICS</ic> and <ic>RXCLAIM_SBO</ic>; SIMPLE family for <ic>REST</ic>, <ic>IBM_MQ</ic>, <ic>SOAP</ic>. All env var names in SCREAMING_SNAKE_CASE per <ic>references/structural-conventions.md</ic></li>
+        <li><strong>GitHub Actions CI YAML</strong> — <ic>.github/workflows/ci.yml</ic> calling CVS shared reusable workflow, referencing <ic>quay-registry.aetna.com</ic></li>
+        <li><strong>Akeyless wiring</strong> — Form 1 (creds-only deployment annotations) for <ic>REST</ic> and <ic>SOAP</ic>; Form 2 (creds+certs) for <ic>QL_CICS</ic>, <ic>RXCLAIM_SBO</ic>, <ic>IBM_MQ</ic></li>
+      </ul>
+      <p>Called from <ic>MappingAndPlanningService.generate_spring()</ic> which already instantiates <ic>SpringProjectGenerator()</ic> — no call site change needed.</p>
+    </div>
+  </div>
+
+  <h3>2 · <ic>app/services/priority1.py</ic> — <ic>PriorityOneService</ic> · <span class="badge badge-amber">Medium</span></h3>
+  <div class="card">
+    <div class="card-body">
+      <p>Two new methods called at end of <ic>analyze_ace()</ic>:</p>
+      <ul>
+        <li><ic>_check_mandatory_rules(job_id, analysis_md, ts)</ic> — regex-scans generated analysis for 13 rule violations. Each match inserts a BLOCKING clarification (<ic>stage='ACE_ANALYSIS'</ic>, <ic>owner='JAVA_ARCHITECT'</ic>, <ic>status='OPEN'</ic>) into the <ic>clarifications</ic> table. Open clarifications block all transitions via <ic>validate_transition()</ic> in <ic>app/domain/state_machine.py</ic> — no extra wiring needed.</li>
+        <li><ic>_check_gap_checklist(job_id, semantic_model, ts)</ic> — evaluates 25+ gap items against the parsed semantic model. BLOCKING items (B1–B6) → clarifications table. HIGH items (H1–H15) → <ic>migration_risks</ic> table with <ic>severity='HIGH'</ic>. MEDIUM items (M1–M25) → <ic>migration_risks</ic> table with <ic>severity='MEDIUM'</ic>.</li>
+      </ul>
+      <p>The <ic>EvidenceRef('ACE_ANALYSIS', ...)</ic> metadata dict gains <ic>'rule_violation_count'</ic> and <ic>'gap_blocking_count'</ic> keys so approvers see the counts at G1 review without reading raw clarifications.</p>
+    </div>
+  </div>
+
+  <h3>3 · <ic>app/services/factory_v3.py</ic> — <ic>IntakeService.scan()</ic> · <span class="badge badge-green">Small</span></h3>
+  <div class="card">
+    <div class="card-body">
+      <p>Accept optional <ic>iib_params</ic> dict. Before scanning begins, validate:</p>
+      <ul>
+        <li>All 5 mandatory keys present and non-empty: <ic>connector_type</ic>, <ic>service_name</ic>, <ic>source_path</ic>, <ic>framework_version</ic>, <ic>package_name</ic></li>
+        <li><ic>connector_type</ic> is one of <ic>{QL_CICS, RXCLAIM_SBO, REST, IBM_MQ, SOAP}</ic></li>
+        <li>Invalid values raise <ic>ValueError('missing_iib_intake_inputs:...')</ic> which <ic>MigrationOrchestratorAgent</ic> catches at line 247 and converts to a <ic>Clarification(stage='ORCHESTRATION', owner='ORCHESTRATOR')</ic></li>
+      </ul>
+      <p>IIB params stored in <ic>intake_manifests.inventory</ic> JSON so later agents can read <ic>connector_type</ic> without re-parsing state.json.</p>
+    </div>
+  </div>
+
+  <h3>4 · <ic>app/agents/test_engineering.py</ic> — <ic>TestEngineeringAgent.execute()</ic> · <span class="badge badge-green">Small</span></h3>
+  <div class="card">
+    <div class="card-body">
+      <p>After the differential execution block (approximately line 95), add:</p>
+      <ul>
+        <li>Read <ic>context.param('smoke_base_url', None)</ic></li>
+        <li>If present and <ic>spring</ic> adapter is not None: invoke <ic>GET /actuator/health</ic> via <ic>SpringBootRuntimeAdapter</ic></li>
+        <li>Create <ic>EvidenceRef('HANDOFF_SMOKE', '1.0.0', 'smoke://&lt;package_id&gt;', smoke_payload, {'step': 'HANDOFF-C', ...})</ic></li>
+        <li>Append to the evidence tuple returned in <ic>AgentResult</ic></li>
+      </ul>
+      <p>The <ic>HANDOFF_SMOKE</ic> evidence can then be listed in a G5 gate's <ic>artifact_bindings</ic>, making smoke test passage a precondition for the PROMOTE decision.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 9 ═══════════════════════ -->
+<section class="section" id="s9">
+  <div class="section-header">
+    <span class="section-num">09</span>
+    <h2 class="section-title">Benefit Analysis</h2>
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">Rules Enforced Before Code Is Written</div>
+      <div class="card-body">13 mandatory rules checked in <ic>PriorityOneService.analyze_ace()</ic> at state <ic>FRAMEWORK_BASELINED</ic> — before <ic>PlanningAgent</ic> runs and before any Spring Boot code is generated. A RestTemplate or wrong timeout code blocks the job at G1, not in production code review.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">16 Defect Patterns as Test Cases</div>
+      <div class="card-body">The 16 verified defect patterns in <ic>references/common-patterns-and-gotchas.md</ic> (COBOL signed-decimal, COALESCE null literal, circuit breaker, etc.) are added directly to <ic>TestEngineeringAgent._cases()</ic> as named differential test inputs. Each becomes a reproducible test case the <ic>variance-analysis</ic> agent evaluates.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Consistent CVS Deployment Scaffolding</div>
+      <div class="card-body">Every migrated service gets the same ubi9 Dockerfile, identical 10-environment config-map structure, standard Helm chart family, and correct Akeyless form. Replaces per-project scaffolding decisions. <ic>SPRING_CONFIG_LOCATION</ic> override behaviour is enforced by the generated template, not per-developer convention.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Dormancy Gate Prevents Wasted Effort</div>
+      <div class="card-body"><ic>DormancyIntelligenceAgent</ic> runs at <ic>INTAKE_VALIDATED</ic> before the framework baseline or any code generation begins. A dormant service stops at G0 (<ic>PROCEED</ic> decision required). Without this gate, framework baseline and mapping catalogue work is spent on services that are never deployed.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Artefact-Bound Smoke Test Evidence</div>
+      <div class="card-body">HANDOFF-C produces <ic>EvidenceRef('HANDOFF_SMOKE', ...)</ic> bound to the G5 <ic>PROMOTE</ic> approval via <ic>artifact_bindings</ic>. A promotion decision cannot be granted without evidence that the service's /actuator/health endpoint returned UP after deployment — enforced by the artefact-binding invariant in <ic>FactoryService._valid_approvals()</ic>.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">No New Architecture Required</div>
+      <div class="card-body">Zero changes to the governance model, agent contracts, lifecycle states, approval gates, or database schema. The IIB skill slots into existing hooks: <ic>overrides</ic> param on <ic>create_mapping_catalogue()</ic>, <ic>iib_params</ic> on <ic>scan()</ic>, and the existing clarifications blocking mechanism. The implementation is additive in every file it touches.</div>
+    </div>
+  </div>
+
+  <h3>Risks</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>CVS base images or Helm conventions change but templates in <ic>enterprise_v5.py</ic> are not updated</td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td><ic>FrameworkBaselineAgent</ic> produces a versioned <ic>EvidenceRef('FRAMEWORK_TEMPLATE', ...)</ic>. A new framework version creates a new hash that invalidates existing G1 approvals, forcing re-baseline. Template version is tied to framework version.</td>
+        </tr>
+        <tr>
+          <td>Mandatory rule regex matches false positives in Java comments or string literals</td>
+          <td><span class="badge badge-green">Low</span></td>
+          <td>Apply checks only to .java source files. Each violation creates a clarification that a Java Architect can answer DISMISSED if it is a false positive — the clarification mechanism already supports this pattern in <ic>FrameworkBaselineAgent</ic>.</td>
+        </tr>
+        <tr>
+          <td>HANDOFF-C smoke test requires a live deployed service URL not always available</td>
+          <td><span class="badge badge-green">Handled</span></td>
+          <td><ic>TestEngineeringAgent</ic> already handles absent adapters gracefully (lines 87–105). If <ic>smoke_base_url</ic> is absent, no <ic>HANDOFF_SMOKE</ic> evidence is produced. The G5 gate policy can be configured to require or waive this evidence kind.</td>
+        </tr>
+        <tr>
+          <td>25+ gap items create excessive clarifications for large IIB services</td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td>Only BLOCKING items (B1–B6) create clarifications. HIGH and MEDIUM items are recorded as risk entries in the <ic>migration_risks</ic> table — visible at G2 and G3 review but not blocking. Approvers see risk counts without needing to resolve each one as a clarification.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 10 ═══════════════════════ -->
+<section class="section" id="s10">
+  <div class="section-header">
+    <span class="section-num">10</span>
+    <h2 class="section-title">Decision &amp; Recommendation</h2>
+  </div>
+
+  <div class="decision-box">
+    <div class="decision-title">✓ Strongly Recommend Adoption</div>
+    <p>The ACE Migration Factory's 14-agent architecture, 6-gate approval model, artefact-bound evidence framework, and clarification blocking mechanism are a direct match for the IIB-to-MS skill's 4-stage workflow. Eleven of the skill's 22 required capabilities are fully available today with no changes. The 7 missing capabilities are all template content inside one service class — <ic>SpringProjectGenerator</ic> in <ic>app/services/enterprise_v5.py</ic> — not governance logic, not lifecycle states, not agent interfaces. Those do not need to be designed; the templates already exist in <ic>references/fixed-file-templates.md</ic> and <ic>references/structural-conventions.md</ic> and need only to be written into the generator.</p>
+  </div>
+
+  <h3>What to Do Next — in order</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Action</th><th>File</th><th>Method</th><th>Template Source</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Add CVS Dockerfile, 10 config maps, Helm RICH/SIMPLE, Akeyless Form 1/2, GitHub Actions to generator</td>
+          <td><ic>app/services/enterprise_v5.py</ic></td>
+          <td><ic>SpringProjectGenerator.generate_cvs_scaffold()</ic></td>
+          <td><ic>references/fixed-file-templates.md</ic>, <ic>references/structural-conventions.md</ic>, <ic>references/templates/config-map-baseline.properties</ic></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Add 13 mandatory rule violation checks to ACE analysis</td>
+          <td><ic>app/services/priority1.py</ic></td>
+          <td><ic>PriorityOneService._check_mandatory_rules()</ic></td>
+          <td><ic>references/mandatory-migration-rules.md</ic></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Add 25+ gap checklist items to ACE analysis</td>
+          <td><ic>app/services/priority1.py</ic></td>
+          <td><ic>PriorityOneService._check_gap_checklist()</ic></td>
+          <td><ic>references/gap-checklist.md</ic></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>Add state.json INTAKE field validation</td>
+          <td><ic>app/services/factory_v3.py</ic></td>
+          <td><ic>IntakeService.scan(iib_params=None)</ic></td>
+          <td><ic>references/workflow-and-state.md</ic> (5 mandatory inputs)</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Add HANDOFF-C smoke test evidence</td>
+          <td><ic>app/agents/test_engineering.py</ic></td>
+          <td><ic>TestEngineeringAgent.execute()</ic></td>
+          <td><ic>SKILL.md</ic> HANDOFF-C step definition</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Register 5 connector-type overrides in orchestrator params</td>
+          <td><ic>app/agents/orchestrator.py</ic></td>
+          <td><ic>MigrationOrchestratorAgent._params('planning', ...)</ic></td>
+          <td><ic>CONNECTOR_OVERRIDES</ic> dict (Part 7 of this document)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>What Does NOT Need to Change</h3>
+  <ul>
+    <li><ic>app/agents/__init__.py</ic> — <ic>IMPLEMENTATIONS</ic> dict already lists all 14 agents with correct module paths; no new agent class needed</li>
+    <li><ic>app/domain/state_machine.py</ic> — <ic>STATES</ic> (22 states) and <ic>TRANSITIONS</ic> already cover the complete IIB migration lifecycle including <ic>WAITING_G0</ic>–<ic>WAITING_G5</ic> gate-hold states</li>
+    <li><ic>app/service.py</ic> — <ic>GATE_TRANSITIONS</ic> G0–G5 already map every approval gate the skill requires, with correct allowed decisions</li>
+    <li><ic>app/agents/base.py</ic> — <ic>BaseAgent</ic>, <ic>AgentContext</ic>, <ic>AgentResult</ic>, <ic>EvidenceRef</ic>, <ic>Clarification</ic> are a direct fit for the skill's artefact model</li>
+    <li>Database (<ic>factory-v2.db</ic>) — all tables exist: jobs, approvals, clarifications, evidence, agent_runs, validation_reports, root_causes, remediations, knowledge_index, mapping_catalogues, migration_plans, migration_risks, approval_packages</li>
+  </ul>
+
+  <div class="alert alert-success">
+    <span class="alert-icon">✓</span>
+    <span class="alert-body"><strong>Bottom line:</strong> ACE Migration Factory already implements the governance, lifecycle, artefact binding, LLM reasoning, clarification blocking, and differential testing infrastructure the IIB skill requires. Adoption means writing CVS deployment templates into <ic>SpringProjectGenerator</ic> and wiring IIB rule and gap validation into <ic>PriorityOneService.analyze_ace()</ic>. The architecture does not change. The template library does.</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════ PART 11 ═══════════════════════ -->
+<section class="section" id="s11">
+  <div class="section-header">
+    <span class="section-num">11</span>
+    <h2 class="section-title">LLM Provider Integration — Anthropic API Key, End to End</h2>
+  </div>
+
+  <p>Every agent in the Factory currently runs in deterministic mode. No real Claude call ever happens, even though the skill files contain the prompts and the <ic>ReasoningGateway</ic> is wired in. This part explains exactly why, what must be built to activate it, and how to wire the CVS Anthropic key so the Factory produces model-assisted results for every agent that benefits from reasoning.</p>
+
+  <div class="alert alert-amber" style="margin-bottom:1.5rem;">
+    <span class="alert-icon">⚠</span>
+    <span class="alert-body"><strong>Current state:</strong> <ic>AgentContext.provider = None</ic> for every agent (see <ic>app/agents/base.py:108</ic>). Until you complete all three steps in this part, no agent ever calls Claude — not even partially.</span>
+  </div>
+
+  <h3>Why the Factory Runs Deterministically Today</h3>
+  <p>There are three independent blockers, all of which must be cleared before a real API call can complete. <ic>ReasoningGateway.reason()</ic> checks them in order and short-circuits at the first failure.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Blocker</th><th>Location in Code</th><th>How It Manifests</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>No APPROVED prompt or model in DB</td>
+          <td><ic>app/agents/reasoning.py:90–93</ic></td>
+          <td><ic>provenance.reason = 'no_approved_prompt_or_model'</ic>; returns <ic>(None, provenance)</ic> immediately</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>DLP policy refuses the payload</td>
+          <td><ic>app/agents/reasoning.py:94–103</ic></td>
+          <td><ic>AIRegistryService.gateway_request()</ic> raises <ic>ValueError</ic>; provenance records <ic>'gateway_refused:…'</ic></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><ic>context.provider is None</ic></td>
+          <td><ic>app/agents/reasoning.py:108–110</ic></td>
+          <td><ic>provenance.reason = 'no_provider_execution_adapter'</ic>; returns <ic>(None, provenance)</ic> — even if blockers 1 and 2 are cleared</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Clearing blocker 3 alone does nothing if blockers 1 or 2 remain. The three steps below address all three in the correct order.</p>
+
+  <h3>Step 1 — Create the <ic>AnthropicProvider</ic> Class</h3>
+  <p>The seam is <ic>ProviderExecutionAdapter</ic> defined in <ic>app/agents/reasoning.py:45–55</ic>. Implement it as a new file <ic>app/providers/anthropic_provider.py</ic>:</p>
+
+  <div class="code-block"><pre><span style="color:var(--fg-muted)"># app/providers/anthropic_provider.py</span>
+import json, os
+import anthropic
+from app.agents.reasoning import ProviderExecutionAdapter
+
+class AnthropicProvider(ProviderExecutionAdapter):
+    <span style="color:var(--fg-muted)">"""Wraps the Anthropic Python SDK.
+
+    template  — the 'template' column from prompt_registry (plain text).
+    payload   — the dict the agent assembled; serialised as user message.
+    Returns a JSON-serialisable dict that ReasoningGateway stores as the
+    completion and passes back to the agent as its 'answer'.
+    """</span>
+    def __init__(self, model: str = "claude-opus-5-5", max_tokens: int = 4096):
+        api_key = os.environ.get("CVS_ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("CVS_ANTHROPIC_KEY env var not set")
+        self.client = anthropic.Anthropic(api_key=api_key)
+        self.model = model
+        self.max_tokens = max_tokens
+
+    def invoke(self, template: str, payload: dict) -> dict:
+        message = self.client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            system=template,
+            messages=[{"role": "user", "content": json.dumps(payload, default=str)}],
+        )
+        text = message.content[0].text
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw": text}</pre></div>
+
+  <p><strong>Install the SDK:</strong></p>
+  <div class="code-block"><pre>pip install anthropic</pre></div>
+
+  <div class="alert alert-blue" style="margin-top:1rem;">
+    <span class="alert-icon">ℹ</span>
+    <span class="alert-body"><strong>Why <ic>system</ic> + <ic>user</ic>?</strong> The <ic>template</ic> column in <ic>prompt_registry</ic> contains the governed prompt text (e.g. "You are given deployment and telemetry evidence…"). Passing it as the <ic>system</ic> message keeps it separate from the payload data, which is the pattern all 8 prompt templates in <ic>config/agent-prompts.v1.json</ic> are designed for.</span>
+  </div>
+
+  <h3>Step 2 — Register and Approve Prompts and a Model</h3>
+  <p>All 8 prompts are already authored in <ic>config/agent-prompts.v1.json</ic>. They are not yet in the database. The Factory ships with a governed endpoint for this; the call requires an <ic>AI_GOVERNANCE_ADMIN</ic> role on the identity making the request.</p>
+
+  <p><strong>2a. Register each prompt</strong> (repeat for all 8, or loop):</p>
+  <div class="code-block"><pre><span style="color:var(--fg-muted)"># Example: register the dormancy-intelligence prompt</span>
+curl -s -X POST http://localhost:5000/api/v7/prompts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":    "agent/dormancy-intelligence/classification-rationale",
+    "version": "1",
+    "template": "You are given deployment and telemetry evidence...",
+    "approved_by": "cvs-ai-admin",
+    "required_role": "AI_GOVERNANCE_ADMIN"
+  }'</pre></div>
+
+  <p><strong>2b. Register a model alias</strong> that matches what you will pass as <ic>effective_model_alias</ic>:</p>
+  <div class="code-block"><pre>curl -s -X POST http://localhost:5000/api/v7/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":    "reasoning-large",
+    "version": "claude-opus-5-5",
+    "status":  "APPROVED"
+  }'</pre></div>
+
+  <p><strong>2c. Approve both rows.</strong> <ic>ReasoningGateway._approved()</ic> (<ic>app/agents/reasoning.py:65–77</ic>) queries <ic>status='APPROVED'</ic> on both tables. Until the rows carry that status the gateway short-circuits at blocker 1.</p>
+
+  <div class="alert alert-amber" style="margin-top:1rem;">
+    <span class="alert-icon">⚠</span>
+    <span class="alert-body"><strong>DLP risk (blocker 2):</strong> <ic>AIRegistryService.gateway_request()</ic> runs the DLP check before writing the request row. The PAN rule (<ic>app/services/platform_v7.py</ic>) rejects any payload containing 13 or more consecutive digits. ACE semantic models and differential test payloads routinely contain long numeric strings. If <ic>gateway_request</ic> raises <ic>ValueError</ic>, the agent falls back to <ic>DETERMINISTIC_FALLBACK</ic> silently. Audit the payload shape for each agent before enabling; consider redacting card-number-length digit runs before they enter the payload.</span>
+  </div>
+
+  <h3>Step 3 — Inject the Provider at Dispatch Time</h3>
+  <p><ic>AgentRegistry.dispatch()</ic> (<ic>app/services/agents.py:85</ic>) already accepts a <ic>provider</ic> keyword argument and passes it straight to <ic>AgentContext</ic>. You only need to build the provider instance and hand it in:</p>
+
+  <div class="code-block"><pre><span style="color:var(--fg-muted)"># Wherever you call dispatch — typically app/routes or a worker</span>
+from app.services.agents import AgentRegistry
+from app.providers.anthropic_provider import AnthropicProvider
+
+provider = AnthropicProvider(model="claude-opus-5-5")
+
+result = AgentRegistry(repo).dispatch(
+    job_id   = job_id,
+    agent_id = "dormancy-intelligence",
+    version  = "1.0.0",
+    roles    = ["MIGRATION_ENGINEER"],
+    identity = "cvs-worker",
+    params   = {"traffic_count": 0, "last_seen_days": 400, "deployed": False},
+    provider = provider,          <span style="color:var(--fg-muted)"># ← this is the only new line</span>
+)</pre></div>
+
+  <p>Nothing else in the execution path changes. <ic>ReasoningGateway</ic> receives <ic>context.provider</ic> and, once blockers 1 and 2 are cleared, calls <ic>provider.invoke(template, payload)</ic> and records the completion via <ic>AIRegistryService.complete_request()</ic>.</p>
+
+  <h3>Which Agents Use the Provider vs Which Are Purely Deterministic</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Agent ID</th><th>Class</th><th>Prompt Name (in catalogue)</th><th>Needs Provider?</th></tr></thead>
+      <tbody>
+        <tr><td><ic>dormancy-intelligence</ic></td><td><ic>DormancyIntelligenceAgent</ic></td><td><ic>agent/dormancy-intelligence/classification-rationale</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>ace-analysis</ic></td><td><ic>ACEAnalysisAgent</ic></td><td><ic>agent/ace-analysis/ambiguity-triage</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>migration-specification</ic></td><td><ic>MigrationSpecificationAgent</ic></td><td><ic>agent/migration-specification/authoring</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>planning</ic></td><td><ic>PlanningAgent</ic></td><td><ic>agent/planning/risk-assessment</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>variance-analysis</ic></td><td><ic>VarianceAnalysisAgent</ic></td><td><ic>agent/variance-analysis/severity-rationale</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>rca</ic></td><td><ic>RCAAgent</ic></td><td><ic>agent/rca/hypothesis</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>remediation</ic></td><td><ic>RemediationAgent</ic></td><td><ic>agent/remediation/patch-plan</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr><td><ic>migration-orchestrator</ic></td><td><ic>MigrationOrchestratorAgent</ic></td><td><ic>agent/migration-orchestrator/next-action</ic></td><td><span class="badge badge-amber">LLM</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>repository-intake</ic></td><td><ic>RepositoryIntakeAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>framework-baseline</ic></td><td><ic>FrameworkBaselineAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>code-generation</ic></td><td><ic>CodeGenerationAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>test-engineering</ic></td><td><ic>TestEngineeringAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>governance</ic></td><td><ic>GovernanceAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+        <tr style="color:var(--fg-muted)"><td><ic>knowledge-evidence</ic></td><td><ic>KnowledgeEvidenceAgent</ic></td><td>—</td><td><span class="badge" style="background:var(--surface-alt);color:var(--fg-muted)">Deterministic</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>All 8 prompts are already in <ic>config/agent-prompts.v1.json</ic>. The 6 deterministic agents have no <ic>PROMPT</ic> constant and do not call <ic>ReasoningGateway</ic>; passing <ic>provider</ic> to them is safe and has no effect.</p>
+
+  <h3>API Key Storage — CVS Akeyless Vault</h3>
+  <p>The CVS standard for secrets is the Akeyless vault. The key must never be checked into source control or hard-coded in config files. The recommended injection path:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>What Happens</th></tr></thead>
+      <tbody>
+        <tr><td>Akeyless vault</td><td>Store the Anthropic key as a static secret, e.g. <ic>/cvs/ace-factory/anthropic-key</ic></td></tr>
+        <tr><td>OpenShift / pod spec</td><td>Inject the vault secret as env var <ic>CVS_ANTHROPIC_KEY</ic> via the Akeyless Secrets Injector sidecar or an ExternalSecret CR</td></tr>
+        <tr><td>Local dev</td><td>Export <ic>CVS_ANTHROPIC_KEY=sk-ant-…</ic> in your shell before starting the Flask app; <ic>AnthropicProvider</ic> reads it via <ic>os.environ.get("CVS_ANTHROPIC_KEY")</ic></td></tr>
+        <tr><td>CI / GitHub Actions</td><td>Map the vault secret to the <ic>CVS_ANTHROPIC_KEY</ic> env var in the workflow YAML; the existing <ic>.github/workflows/</ic> pattern applies</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>How Skill Files Become Prompt Text</h3>
+  <p>This is the connection between the <ic>external-skills/iib-to-ms-migration/SKILL.md</ic> file and the Anthropic API call:</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">1. Skill file = authoring source</div>
+      <div class="card-body"><ic>SKILL.md</ic> is the human-readable specification that was used to author the 8 prompt templates in <ic>config/agent-prompts.v1.json</ic>. It is not loaded at runtime by the Factory's code.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">2. Prompt templates = governed text</div>
+      <div class="card-body">Each template is the distilled, governed version of the skill's intent for one agent step. It is stored in <ic>prompt_registry.template</ic> after registration and approval.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">3. Payload = agent-assembled data</div>
+      <div class="card-body">Each agent builds a <ic>payload</ic> dict from its job context (evidence, ACE model, test results, etc.) and passes it to <ic>ReasoningGateway.reason(context, prompt_name, payload)</ic>.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">4. API call = template + payload → Claude</div>
+      <div class="card-body"><ic>AnthropicProvider.invoke(template, payload)</ic> sends the template as the <ic>system</ic> message and the serialised payload as the <ic>user</ic> message. Claude's JSON response becomes the agent's <ic>answer</ic>.</div>
+    </div>
+  </div>
+
+  <h3>End-to-End Verification</h3>
+  <p>After completing all three steps, run this sequence to confirm a real Claude call occurred:</p>
+
+  <p><strong>1. Create a job and dispatch the dormancy-intelligence agent:</strong></p>
+  <div class="code-block"><pre><span style="color:var(--fg-muted)"># Python snippet — run from the project root with CVS_ANTHROPIC_KEY set</span>
+from app.repository import Repository
+from app.services.agents import AgentRegistry
+from app.service import FactoryService
+from app.providers.anthropic_provider import AnthropicProvider
+
+repo = Repository("factory-v2.db")
+svc  = FactoryService(repo)
+job  = svc.create_job(
+    {"service": "test-iib-svc", "owner": "dev", "sourceRevision": "abc123"},
+    actor="dev"
+)
+
+<span style="color:var(--fg-muted)"># Advance to INTAKE_VALIDATED first (repository-intake agent — deterministic)</span>
+AgentRegistry(repo).dispatch(
+    job_id="..." , agent_id="repository-intake", version="1.0.0",
+    roles=["MIGRATION_ENGINEER"], identity="dev"
+)
+
+<span style="color:var(--fg-muted)"># Now dispatch dormancy-intelligence with the provider</span>
+result = AgentRegistry(repo).dispatch(
+    job_id   = job["id"],
+    agent_id = "dormancy-intelligence",
+    version  = "1.0.0",
+    roles    = ["MIGRATION_ENGINEER"],
+    identity = "dev",
+    params   = {"traffic_count": 0, "last_seen_days": 400,
+                "deployed": False, "already_migrated": False},
+    provider = AnthropicProvider(model="claude-opus-5-5"),
+)
+print(result["reasoning"])</pre></div>
+
+  <p><strong>2. Confirm the mode in the <ic>agent_runs</ic> table:</strong></p>
+  <div class="code-block"><pre><span style="color:var(--fg-muted)"># SQLite shell</span>
+sqlite3 factory-v2.db \
+  "SELECT reasoning FROM agent_runs WHERE agent_id='dormancy-intelligence' ORDER BY started_at DESC LIMIT 1;"</pre></div>
+
+  <p>A successful Claude call records <strong><ic>mode = "MODEL_GATEWAY"</ic></strong> in the <ic>reasoning</ic> JSON column. A deterministic fallback records <ic>mode = "DETERMINISTIC_FALLBACK"</ic> with a <ic>reason</ic> field naming which blocker fired. The two are unambiguous: check <ic>mode</ic> first, then <ic>reason</ic> if it reads <ic>DETERMINISTIC_FALLBACK</ic>.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field in <ic>agent_runs.reasoning</ic></th><th>Value when Claude answered</th><th>Value when deterministic</th></tr></thead>
+      <tbody>
+        <tr><td><ic>mode</ic></td><td><ic>MODEL_GATEWAY</ic></td><td><ic>DETERMINISTIC_FALLBACK</ic></td></tr>
+        <tr><td><ic>prompt_name</ic></td><td>e.g. <ic>agent/dormancy-intelligence/classification-rationale</ic></td><td>same (recorded regardless)</td></tr>
+        <tr><td><ic>prompt_version</ic></td><td>version string from registry</td><td>absent (short-circuited before lookup)</td></tr>
+        <tr><td><ic>model_version</ic></td><td>e.g. <ic>claude-opus-5-5</ic></td><td>absent</td></tr>
+        <tr><td><ic>response_hash</ic></td><td>SHA-256 of the raw response</td><td>absent</td></tr>
+        <tr><td><ic>reason</ic></td><td>absent</td><td>e.g. <ic>no_approved_prompt_or_model</ic> / <ic>no_provider_execution_adapter</ic></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Complete Three-Step Checklist</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Step</th><th>Action</th><th>File / Location</th><th>Done When…</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1a</td>
+          <td>Create <ic>app/providers/anthropic_provider.py</ic> (code in Step 1 above)</td>
+          <td>New file; no existing file changes</td>
+          <td>Class instantiates without error; <ic>CVS_ANTHROPIC_KEY</ic> env var is set</td>
+        </tr>
+        <tr>
+          <td>1b</td>
+          <td>Add <ic>anthropic</ic> to <ic>requirements.txt</ic></td>
+          <td><ic>requirements.txt</ic></td>
+          <td><ic>pip install -r requirements.txt</ic> succeeds</td>
+        </tr>
+        <tr>
+          <td>2a</td>
+          <td>Register all 8 prompts from <ic>config/agent-prompts.v1.json</ic> via <ic>POST /api/v7/prompts</ic></td>
+          <td>DB: <ic>prompt_registry</ic> table</td>
+          <td>8 rows with <ic>status='APPROVED'</ic> exist</td>
+        </tr>
+        <tr>
+          <td>2b</td>
+          <td>Register model alias <ic>reasoning-large</ic> pointing to <ic>claude-opus-5-5</ic> via <ic>POST /api/v7/models</ic></td>
+          <td>DB: <ic>model_registry</ic> table</td>
+          <td>1 row with <ic>name='reasoning-large'</ic>, <ic>status='APPROVED'</ic></td>
+        </tr>
+        <tr>
+          <td>2c</td>
+          <td>Audit payloads for DLP triggers (13+ digit sequences in ACE models)</td>
+          <td><ic>app/services/platform_v7.py</ic> DLP_RULES</td>
+          <td>Test dispatch returns <ic>mode=MODEL_GATEWAY</ic>, not <ic>gateway_refused</ic></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Pass <ic>provider=AnthropicProvider()</ic> to every <ic>AgentRegistry.dispatch()</ic> call</td>
+          <td><ic>app/services/agents.py:85</ic> — the <ic>provider=</ic> kwarg already exists</td>
+          <td><ic>agent_runs.reasoning</ic> shows <ic>mode=MODEL_GATEWAY</ic> for at least one run</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-success" style="margin-top:1.5rem;">
+    <span class="alert-icon">✓</span>
+    <span class="alert-body"><strong>Summary:</strong> The entire LLM integration seam already exists in the codebase — <ic>ProviderExecutionAdapter</ic>, <ic>ReasoningGateway</ic>, and the <ic>provider=</ic> param on <ic>dispatch()</ic>. You only need to write one new file (<ic>app/providers/anthropic_provider.py</ic>), register and approve 8 prompts plus 1 model in the database, and pass the provider instance at dispatch time. No existing class changes. No architecture changes. The skill file prompts are already translated into governed templates in <ic>config/agent-prompts.v1.json</ic>.</span>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+function navClick(el, id) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  el.classList.add('active');
+  const sec = document.getElementById(id);
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function toggleTheme() {
+  const root = document.documentElement;
+  root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+const sections = document.querySelectorAll('.section');
+const navItems = document.querySelectorAll('.nav-item');
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      const i = Array.from(sections).indexOf(e.target);
+      navItems.forEach((n, j) => n.classList.toggle('active', i === j));
+    }
+  });
+}, { threshold: 0.25 });
+sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>
