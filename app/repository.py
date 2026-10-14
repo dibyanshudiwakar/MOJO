@@ -62,6 +62,10 @@ create table if not exists pipelines(id text primary key,job_id text not null,na
 create table if not exists pipeline_steps(id text primary key,pipeline_id text not null,sequence integer default 0,kind text not null,agent_id text default '',version text default '1.0.0',depends_on text default '[]',status text default 'PENDING',agent_run_id text default '',queue_id text default '',params text default '{}',outputs text default '{}',started_at text default '',completed_at text default '',error text default '',created_at text,updated_at text);
 create table if not exists agent_llm_bindings(id text primary key,agent_id text not null unique,binding_mode text not null default 'DEFAULT',gateway_model_alias text default '',model_id text default '',status text not null default 'ACTIVE',created_by text default '',created_at text,updated_at text);
 create table if not exists agent_llm_binding_history(id text primary key,agent_id text not null,action text not null,binding_mode text default '',gateway_model_alias text default '',model_id text default '',model_revision text default '',provider_type text default '',reason_for_change text default '',status text default '',actor text default '',created_at text);
+create table if not exists agent_templates(id text primary key,name text not null unique,description text default '',agent_ids text not null default '[]',created_by text not null,created_at text not null,updated_at text not null);
+create table if not exists skill_runtimes(id text primary key,name text not null unique,display_name text default '',language text not null,language_version text default '',framework text default '',framework_version_range text default '',build_tool text default '',base_image text default '',config text default '{}',enabled integer default 1,created_at text,updated_at text,created_by text default '');
+create table if not exists skills(id text primary key,skill_key text not null,version text not null,display_name text default '',description text default '',target_runtime_id text not null,toolchain_runtime_id text default '',source_path text default '',content_hash text default '',accepted_source_types text default '[]',produced_artifact_types text default '[]',backend_types text default '[]',status text default 'DRAFT',approved_by text default '',approved_at text default '',deprecated_by text default '',deprecated_at text default '',superseded_by_id text default '',created_at text,updated_at text,created_by text default '',unique(skill_key,version));
+create table if not exists skill_agent_bindings(id text primary key,skill_id text not null,agent_id text not null,binding_type text default 'PRIMARY',created_at text,updated_at text,created_by text default '',unique(skill_id,agent_id));
 """
 def now(): return datetime.now(timezone.utc).isoformat()
 def uid(): return str(uuid.uuid4())
@@ -83,6 +87,8 @@ class Repository:
    self._upgrade_connector_profiles(c)
    self._upgrade_governance(c)
    self._upgrade_agent_llm_bindings(c)
+   self._upgrade_skill_registry(c)
+   self._seed_skill_runtimes(c)
  def _catalogue(self):
   p=Path(__file__).resolve().parents[1]/'config'/'agent-catalogue.v1.json'
   return json.loads(p.read_text(encoding='utf-8'))['agents']
@@ -162,6 +168,23 @@ class Repository:
   existing={r[1] for r in c.execute('pragma table_info(agent_llm_bindings)').fetchall()}
   for col,typ in {'model_revision':"text default ''",'provider_type':"text default 'litellm_alias'",'reason_for_change':"text default ''",'activated_by':"text default ''",'capabilities':"text default ''",'licence_id':"text default ''",'data_region':"text default ''",'data_classification_allowed':"text default ''",'context_limit':"integer default 0",'output_limit':"integer default 0"}.items():
    if col not in existing:c.execute(f'alter table agent_llm_bindings add column {col} {typ}')
+ def _upgrade_skill_registry(self,c):
+  for col,typ in {'display_name':"text default ''",'language_version':"text default ''",'framework':"text default ''",'framework_version_range':"text default ''",'build_tool':"text default ''",'base_image':"text default ''",'created_by':"text default ''"}.items():
+   if col not in {r[1] for r in c.execute('pragma table_info(skill_runtimes)').fetchall()}:c.execute(f'alter table skill_runtimes add column {col} {typ}')
+  for col,typ in {'toolchain_runtime_id':"text default ''",'source_path':"text default ''",'content_hash':"text default ''",'accepted_source_types':"text default '[]'",'produced_artifact_types':"text default '[]'",'backend_types':"text default '[]'",'deprecated_by':"text default ''",'deprecated_at':"text default ''",'superseded_by_id':"text default ''",'updated_at':"text default ''",'created_by':"text default ''",'approved_at':"text default ''"}.items():
+   if col not in {r[1] for r in c.execute('pragma table_info(skills)').fetchall()}:c.execute(f'alter table skills add column {col} {typ}')
+  for col,typ in {'updated_at':"text default ''",'created_by':"text default ''"}.items():
+   if col not in {r[1] for r in c.execute('pragma table_info(skill_agent_bindings)').fetchall()}:c.execute(f'alter table skill_agent_bindings add column {col} {typ}')
+ def _seed_skill_runtimes(self,c):
+  defaults=[
+   {'name':'java-21-spring-boot','display_name':'Java Runtime','language':'java','language_version':'21','framework':'spring-boot','framework_version_range':'3.2.x','build_tool':'maven','base_image':'eclipse-temurin:21-jre-alpine','config':'{"jvm_flags":"-XX:+UseContainerSupport","framework_starter":"3.2.2","cvs_phases":["1","2"]}'},
+   {'name':'python-311-fastapi','display_name':'Python Runtime','language':'python','language_version':'3.11','framework':'fastapi','framework_version_range':'>=0.104.0','build_tool':'pip','base_image':'python:3.11-slim','config':'{}'},
+   {'name':'nodejs-20-express','display_name':'Node.js Runtime','language':'nodejs','language_version':'20','framework':'express','framework_version_range':'>=4.18.0','build_tool':'npm','base_image':'node:20-alpine','config':'{}'},
+  ]
+  ts=now()
+  for r in defaults:
+   if not c.execute('select id from skill_runtimes where name=?',(r['name'],)).fetchone():
+    self.insert(c,'skill_runtimes',{'id':uid(),'name':r['name'],'display_name':r['display_name'],'language':r['language'],'language_version':r['language_version'],'framework':r['framework'],'framework_version_range':r['framework_version_range'],'build_tool':r['build_tool'],'base_image':r['base_image'],'config':r['config'],'enabled':1,'created_at':ts,'updated_at':ts,'created_by':'system'})
  def event(self,c,job_id,actor,event_type,from_state='',to_state='',details=None,policy='{}',correlation=None):
   """Write one domain event on an existing transaction.
 

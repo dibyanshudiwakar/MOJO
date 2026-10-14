@@ -133,7 +133,7 @@ class KnowledgeService:
 class ApprovalWorkspaceService:
  def __init__(self,repo):self.repo=repo
  def inbox(self,role,identity=''):
-  q="select p.*,j.service,j.state from approval_packages p join jobs j on j.id=p.job_id where p.status='PENDING_APPROVAL'"
+  q="select p.*,j.service,j.state from approval_packages p join jobs j on j.id=p.job_id where p.status='PENDING_APPROVAL' order by p.created_at desc"
   rows=self.repo.rows(q);out=[]
   for x in rows:
    policy=self.repo.one('select required_role from approval_policies where gate=?',(x['gate'],))
@@ -146,7 +146,7 @@ class ApprovalWorkspaceService:
   and environment scope, rather than trusting a caller-supplied role.
   """
   q=("select p.*,j.service,j.state,j.project_scope,j.environment from approval_packages p "
-     "join jobs j on j.id=p.job_id where p.status='PENDING_APPROVAL'")
+     "join jobs j on j.id=p.job_id where p.status='PENDING_APPROVAL' order by p.created_at desc")
   roles=set(principal.roles);scopes=set(principal.project_scopes);envs=set(principal.environments);out=[]
   for x in self.repo.rows(q):
    policy=self.repo.one('select required_role from approval_policies where gate=?',(x['gate'],))
@@ -225,3 +225,95 @@ class ObservabilityService:
   return {'id':i,'status':'RECORDED'}
  def summary(self):
   return {'signals':self.repo.rows('select signal_type,count(*) count from observability_events group by signal_type'),'delivery':self.repo.rows('select status,count(*) count from delivery_operations group by status'),'notifications':self.repo.rows('select status,count(*) count from notifications group by status')}
+
+class SkillRegistryService:
+ APPROVER_ROLES={'AI_GOVERNANCE_ADMIN','GOVERNANCE_ADMIN','AGENT_REGISTRY_ADMIN'}
+ VALID_STATUSES=('DRAFT','APPROVED','DEPRECATED')
+ VALID_LANGUAGES=('java','python','nodejs')
+ def __init__(self,repo):self.repo=repo
+ def _resolve_status(self,d,principal):
+  requested=str(d.get('status','DRAFT')).upper()
+  if requested not in self.VALID_STATUSES:raise ValueError('invalid_status')
+  roles=set(getattr(principal,'roles',()) or ())
+  if requested=='APPROVED' and not (self.APPROVER_ROLES & roles):raise PermissionError('skill_approver_role_required')
+  approver=getattr(principal,'identity','') if requested=='APPROVED' else ''
+  approved_at=now() if requested=='APPROVED' else ''
+  return requested,approver,approved_at
+ def register_runtime(self,d,principal):
+  name=str(d.get('name','')).strip()
+  if not name:raise ValueError('missing_name')
+  if not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}',name):raise ValueError('invalid_runtime_name')
+  lang=str(d.get('language','')).strip().lower()
+  if lang not in self.VALID_LANGUAGES:raise ValueError('invalid_language:must_be_java_python_or_nodejs')
+  ts=now();existing=self.repo.one('select id,created_at from skill_runtimes where name=?',(name,))
+  i=existing['id'] if existing else uid();created=existing['created_at'] if existing else ts
+  with self.repo.connect() as c:
+   c.execute('delete from skill_runtimes where id=?',(i,))
+   self.repo.insert(c,'skill_runtimes',{'id':i,'name':name,'display_name':d.get('display_name','') or name,'language':lang,'language_version':d.get('language_version',''),'framework':d.get('framework',''),'framework_version_range':d.get('framework_version_range',''),'build_tool':d.get('build_tool',''),'base_image':d.get('base_image',''),'config':json.dumps(d.get('config',{})) if isinstance(d.get('config'),dict) else (d.get('config') or '{}'),'enabled':1 if d.get('enabled',True) else 0,'created_at':created,'updated_at':ts,'created_by':getattr(principal,'identity','')})
+  return self.repo.one('select * from skill_runtimes where id=?',(i,))
+ def update_runtime(self,d,principal):
+  i=d.get('id','')
+  row=self.repo.one('select * from skill_runtimes where id=?',(i,))
+  if not row:return None
+  ts=now()
+  with self.repo.connect() as c:
+   c.execute('update skill_runtimes set display_name=?,language_version=?,framework=?,framework_version_range=?,build_tool=?,base_image=?,config=?,enabled=?,updated_at=? where id=?',(d.get('display_name',row['display_name']),d.get('language_version',row['language_version']),d.get('framework',row['framework']),d.get('framework_version_range',row['framework_version_range']),d.get('build_tool',row['build_tool']),d.get('base_image',row['base_image']),json.dumps(d.get('config',{})) if isinstance(d.get('config'),dict) else (d.get('config') or row['config']),1 if d.get('enabled',bool(row['enabled'])) else 0,ts,i))
+  return self.repo.one('select * from skill_runtimes where id=?',(i,))
+ def list_runtimes(self):
+  rows=self.repo.rows('select * from skill_runtimes order by language,name')
+  for r in rows:r['skill_count']=self.repo.one('select count(*) n from skills where target_runtime_id=?',(r['id'],))['n']
+  return rows
+ def register_skill(self,d,principal):
+  for k in ('skill_key','version','target_runtime_id'):
+   if not str(d.get(k,'')).strip():raise ValueError('missing_'+k)
+  skill_key=str(d['skill_key']).strip();version=str(d['version']).strip()
+  if not self.repo.one('select id from skill_runtimes where id=?',(d['target_runtime_id'],)):raise ValueError('target_runtime_not_found')
+  if self.repo.one('select id from skills where skill_key=? and version=?',(skill_key,version)):raise ValueError('skill_version_already_exists')
+  status,approved_by,approved_at=self._resolve_status(d,principal)
+  source_path=d.get('source_path','');content_hash=digest(skill_key+version+(source_path or ''))
+  i=uid();ts=now()
+  with self.repo.connect() as c:
+   self.repo.insert(c,'skills',{'id':i,'skill_key':skill_key,'version':version,'display_name':d.get('display_name','') or skill_key,'description':d.get('description',''),'target_runtime_id':d['target_runtime_id'],'toolchain_runtime_id':d.get('toolchain_runtime_id',''),'source_path':source_path,'content_hash':content_hash,'accepted_source_types':json.dumps(d.get('accepted_source_types',[])) if isinstance(d.get('accepted_source_types'),list) else (d.get('accepted_source_types') or '[]'),'produced_artifact_types':json.dumps(d.get('produced_artifact_types',[])) if isinstance(d.get('produced_artifact_types'),list) else (d.get('produced_artifact_types') or '[]'),'backend_types':json.dumps(d.get('backend_types',[])) if isinstance(d.get('backend_types'),list) else (d.get('backend_types') or '[]'),'status':status,'approved_by':approved_by,'approved_at':approved_at,'deprecated_by':'','deprecated_at':'','superseded_by_id':'','created_at':ts,'updated_at':ts,'created_by':getattr(principal,'identity','')})
+  return self.repo.one('select * from skills where id=?',(i,))
+ def update_skill_status(self,skill_id,status,principal):
+  if status not in self.VALID_STATUSES:raise ValueError('invalid_status')
+  roles=set(getattr(principal,'roles',()) or ())
+  if status=='APPROVED' and not (self.APPROVER_ROLES & roles):raise PermissionError('skill_approver_role_required')
+  row=self.repo.one('select * from skills where id=?',(skill_id,))
+  if not row:raise ValueError('skill_not_found')
+  ts=now()
+  approved_by=getattr(principal,'identity','') if status=='APPROVED' else row['approved_by']
+  approved_at=ts if status=='APPROVED' else row['approved_at']
+  deprecated_by=getattr(principal,'identity','') if status=='DEPRECATED' else row['deprecated_by']
+  deprecated_at=ts if status=='DEPRECATED' else row['deprecated_at']
+  with self.repo.connect() as c:c.execute('update skills set status=?,approved_by=?,approved_at=?,deprecated_by=?,deprecated_at=?,updated_at=? where id=?',(status,approved_by,approved_at,deprecated_by,deprecated_at,ts,skill_id))
+  return self.repo.one('select * from skills where id=?',(skill_id,))
+ def list_skills(self,runtime_id=None,status=None):
+  q='select s.*,r.display_name as runtime_display_name,r.language as runtime_language,r.language_version as runtime_language_version from skills s left join skill_runtimes r on s.target_runtime_id=r.id'
+  params=[];wheres=[]
+  if runtime_id:wheres.append('s.target_runtime_id=?');params.append(runtime_id)
+  if status:wheres.append('s.status=?');params.append(status)
+  if wheres:q+=' where '+' and '.join(wheres)
+  q+=' order by s.created_at desc'
+  return self.repo.rows(q,params)
+ def bind_skill_to_agent(self,d,principal):
+  for k in ('skill_id','agent_id'):
+   if not str(d.get(k,'')).strip():raise ValueError('missing_'+k)
+  if not self.repo.one('select id from skills where id=?',(d['skill_id'],)):raise ValueError('skill_not_found')
+  if not self.repo.one('select agent_id from agent_registry where agent_id=?',(d['agent_id'],)):raise ValueError('agent_not_found')
+  binding_type=str(d.get('binding_type','PRIMARY')).upper()
+  if binding_type not in ('PRIMARY','ALTERNATE'):raise ValueError('invalid_binding_type')
+  existing=self.repo.one('select id from skill_agent_bindings where skill_id=? and agent_id=?',(d['skill_id'],d['agent_id']))
+  ts=now()
+  if existing:
+   with self.repo.connect() as c:c.execute('update skill_agent_bindings set binding_type=?,updated_at=? where id=?',(binding_type,ts,existing['id']))
+   return self.repo.one('select * from skill_agent_bindings where id=?',(existing['id'],))
+  i=uid()
+  with self.repo.connect() as c:self.repo.insert(c,'skill_agent_bindings',{'id':i,'skill_id':d['skill_id'],'agent_id':d['agent_id'],'binding_type':binding_type,'created_at':ts,'updated_at':ts,'created_by':getattr(principal,'identity','')})
+  return self.repo.one('select * from skill_agent_bindings where id=?',(i,))
+ def list_bindings(self,skill_id=None,agent_id=None):
+  q='select * from skill_agent_bindings';params=[];wheres=[]
+  if skill_id:wheres.append('skill_id=?');params.append(skill_id)
+  if agent_id:wheres.append('agent_id=?');params.append(agent_id)
+  if wheres:q+=' where '+' and '.join(wheres)
+  return self.repo.rows(q+' order by created_at desc',params)

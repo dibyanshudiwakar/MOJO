@@ -99,6 +99,60 @@ def test_clone_rejects_nonempty_destination(env, monkeypatch, tmp_path):
         svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
 
 
+def test_clone_idempotent_when_same_url_already_cloned(env, monkeypatch):
+    """Retry after a partial clone (files written, DB record not) must succeed.
+
+    If the destination is non-empty AND already points at the same remote URL,
+    treat it as a completed clone and return the existing HEAD -- do not raise.
+    This covers the race where git clone succeeds at the filesystem level but
+    the worker crashes before writing the completion record, causing the queue
+    to retry and find a populated directory.
+    """
+    repo, github, svc, uid = env
+    _configure_github(github, uid)
+
+    calls = []
+
+    def fake_run(cmd, cwd=None, env=None, **kwargs):
+        calls.append(cmd)
+        if 'remote' in cmd and 'get-url' in cmd:
+            return _FakeCompleted(0, stdout='https://github.com/org/repo.git\n')
+        if 'rev-parse' in cmd:
+            return _FakeCompleted(0, stdout='abc123def456\n')
+        return _FakeCompleted(0, stdout='ok')
+
+    monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
+
+    dest = workspace.resolve('ace-repo', must_exist=False, create=True)
+    (dest / 'existing.txt').write_text('already here')
+
+    result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+
+    assert result['commit'] == 'abc123def456'
+    assert result['path'].endswith('ace-repo')
+    # Must not have attempted a fresh git clone
+    assert not any('clone' in c for c in calls)
+
+
+def test_clone_rejects_nonempty_destination_with_different_remote(env, monkeypatch):
+    """Non-empty directory pointing at a DIFFERENT repo must still be rejected."""
+    repo, github, svc, uid = env
+    _configure_github(github, uid)
+
+    def fake_run(cmd, cwd=None, env=None, **kwargs):
+        if 'remote' in cmd and 'get-url' in cmd:
+            return _FakeCompleted(0, stdout='https://github.com/org/OTHER-repo.git\n')
+        return _FakeCompleted(0, stdout='ok')
+
+    monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
+
+    dest = workspace.resolve('ace-repo', must_exist=False, create=True)
+    (dest / 'existing.txt').write_text('already here')
+
+    with pytest.raises(RepoCloneError, match='clone_destination_not_empty'):
+        svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+
+
 def test_clone_surfaces_git_failure_detail(env, monkeypatch):
     repo, github, svc, uid = env
     _configure_github(github, uid)

@@ -463,17 +463,18 @@ class PipelineService:
         moment any step fails, since nothing ever advances a blocked step out
         of PENDING.
 
-        A pipeline already PAUSED/CANCELLED/COMPLETED/FAILED must not be
-        touched here: a step that was RUNNING when ``cancel()`` (Stop) was
-        called cannot be preempted and keeps executing, and the worker calls
-        this same method once it finishes -- without this guard that late
-        completion would resurrect an already-stopped pipeline back to
-        COMPLETED/FAILED, and a PAUSED pipeline would get re-finalized instead
-        of waiting for an explicit ``resume()``.
+        PAUSED/CANCELLED/COMPLETED pipelines must not be touched here: a step
+        that was RUNNING when cancel() was called cannot be preempted, and a
+        PAUSED pipeline must wait for an explicit resume(). FAILED pipelines are
+        an exception: if every step has since recovered via retry (no step
+        remains FAILED and no work is still in flight), the pipeline is upgraded
+        to COMPLETED so the UI does not permanently show FAILED after a
+        successful retry resolves all errors.
         """
         p = self.repo.one('select status from pipelines where id=?', (pipeline_id,))
-        if not p or p['status'] in ('PAUSED', 'CANCELLED', 'COMPLETED', 'FAILED'):
+        if not p or p['status'] in ('PAUSED', 'CANCELLED', 'COMPLETED'):
             return
+        recovering = p['status'] == 'FAILED'
         self._schedule_ready(pipeline_id, workflow)
         _, rows = self._ready_steps(pipeline_id)
         blocked = self._blocked(rows)
@@ -482,6 +483,8 @@ class PipelineService:
         if still_active:
             return
         failed = any(r['status'] == 'FAILED' for r in rows)
+        if recovering and failed:
+            return  # Still genuinely failed; leave the FAILED status in place.
         with self.repo.connect() as c:
             c.execute("update pipelines set status=?,completed_at=?,updated_at=? where id=?",
                       ('FAILED' if failed else 'COMPLETED', now(), now(), pipeline_id))
@@ -787,8 +790,13 @@ class PipelineService:
             _log.debug('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
         tag = 'gate_retry:' + gate if needs_retry else 'gate_blocked:' + gate
         with self.repo.connect() as c:
+            # Only park the step if it has not already completed — a step that
+            # ran successfully and then triggered a gate-blocked lifecycle advance
+            # must stay COMPLETED so the lifecycle query can still count it as a
+            # waypoint after the gate is approved.
             c.execute(
-                "update pipeline_steps set status='WAITING_APPROVAL',error=?,updated_at=? where id=?",
+                "update pipeline_steps set status='WAITING_APPROVAL',error=?,updated_at=? "
+                "where id=? and status!='COMPLETED'",
                 (tag, now(), step_id),
             )
 
@@ -810,19 +818,29 @@ class PipelineService:
         Finds the WAITING_APPROVAL step for the running pipeline of this job,
         marks it COMPLETED (or PENDING for a step that needs to re-run), and
         triggers advance() so downstream steps get scheduled.
+
+        If no RUNNING pipeline exists (the pipeline already finished before the
+        gate approval arrived) fall back to re-walking the lifecycle by job_id
+        so the job still advances past the gate.
         """
         pl = self.repo.one(
             "select id from pipelines where job_id=? and status='RUNNING' order by created_at desc limit 1",
             (job_id,),
         )
         if not pl:
-            return False
+            # Pipeline already completed before the gate was approved — re-walk
+            # the lifecycle from the current job state so it advances now.
+            self.resume_after_clarification(job_id)
+            return True
         step = self.repo.one(
             "select * from pipeline_steps where pipeline_id=? and status='WAITING_APPROVAL' limit 1",
             (pl['id'],),
         )
         if not step:
-            return False
+            # No parked step (e.g. the triggering step stayed COMPLETED due to
+            # Fix 1 above) — still re-walk the lifecycle to advance the job.
+            self.resume_after_clarification(job_id)
+            return True
         needs_retry = str(step['error'] or '').startswith('gate_retry:')
         with self.repo.connect() as c:
             if needs_retry:

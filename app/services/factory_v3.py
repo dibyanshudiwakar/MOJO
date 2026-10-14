@@ -72,7 +72,9 @@ class IntakeService:
  EXT={'.msgflow':'flows','.subflow':'subflows','.esql':'esql','.xsd':'schemas','.wsdl':'schemas','.map':'maps','.xslt':'maps','.policyxml':'policies'}
  def __init__(self,repo):self.repo=repo
  def scan(self,job_id,path,branch='main',revision=''):
-  root=Path(path).resolve()
+  from app.services import workspace as _ws
+  try:root=_ws.resolve(path,must_exist=True)
+  except Exception:raise ValueError('repository_not_accessible')
   if not root.is_dir():raise ValueError('repository_not_accessible')
   inv={k:[] for k in set(self.EXT.values())};inv['files']=[]
   for f in root.rglob('*'):
@@ -140,7 +142,6 @@ class PlanningGenerationService:
   if not a or not f or not sp:raise ValueError('approved_inputs_missing')
   if not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('framework_not_approved')
   if not self._approved(job_id,'G2',a['content_hash']) or not self._approved(job_id,'G2',sp['content_hash']):raise PermissionError('analysis_or_specification_not_approved')
-  if self.repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",(job_id,))['n']:raise ValueError('open_clarifications_block_planning')
   model=json.loads(a['semantic_model']);tasks=[];maps=[]
   for n,x in enumerate(model['flows'],1):
    tid=f'PLAN-{n:03}';tasks.append({'id':tid,'source':x['path'],'boundary':'GENERATED','acceptance':['compile','test','traceability']});maps.append({'source':x['path'],'pattern':'spring-integration-flow'})

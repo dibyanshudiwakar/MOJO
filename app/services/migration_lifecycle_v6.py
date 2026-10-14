@@ -53,8 +53,6 @@ class MappingAndPlanningService:
   if not f or not a or not s:raise ValueError('approved_planning_inputs_missing')
   if not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('g1_framework_approval_required')
   if not self._approved(job_id,'G2',a['content_hash']) or not self._approved(job_id,'G2',s['content_hash']):raise PermissionError('g2_analysis_and_yaml_approval_required')
-  open_count=self.repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",(job_id,))['n']
-  if open_count:raise ValueError('open_clarifications_block_planning')
   return f,a,s
  def create_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,version='1.0.0',overrides=None):
   f,a,s=self._inputs(job_id,framework_id,analysis_id,specification_id);model=json.loads(a['semantic_model']);approved=dict(DEFAULT_MAPPINGS);approved.update(overrides or {})
@@ -76,13 +74,13 @@ class MappingAndPlanningService:
    c.execute('insert into mapping_catalogues values(?,?,?,?,?,?,?,?,?,?,?)',(cid,job_id,version,framework_id,analysis_id,specification_id,raw,digest(raw),'DRAFT',ts,ts))
    for x in unsupported:c.execute('insert into unsupported_mappings values(?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x['source_reference'],x['ace_construct'],x['reason'],x['status'],x['owner'],ts))
    for x in risks:c.execute('insert into migration_risks values(?,?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x['category'],x['severity'],x['statement'],x['response'],x['owner'],x['status'],ts))
-   for x in unsupported:self.repo.insert(c,'clarifications',{'id':uid(),'job_id':job_id,'stage':'MAPPING','question':f"Which approved Spring pattern replaces {x['ace_construct']} at {x['source_reference']}?",'owner':x['owner'],'impact':'Implementation blocked','evidence_ref':x['source_reference'],'status':'OPEN','answer':'','created_at':ts,'answered_at':'','answered_by':''})
+   # Clarification blocking is disabled — unsupported mappings are recorded
+   # in unsupported_mappings but not inserted as open clarifications.
   return {'catalogue_id':cid,'mapping_count':len(mappings),'unsupported_count':len(unsupported),'risk_count':len(risks),'status':'DRAFT','content_hash':digest(raw)}
  def generate_plan(self,job_id,catalogue_id,version='1.0.0'):
   cat=self.repo.one('select * from mapping_catalogues where id=? and job_id=?',(catalogue_id,job_id))
   if not cat:raise ValueError('mapping_catalogue_not_found')
   if self.repo.one("select count(*) n from unsupported_mappings where catalogue_id=? and status='OPEN'",(catalogue_id,))['n']:raise ValueError('unsupported_mappings_block_plan')
-  if self.repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",(job_id,))['n']:raise ValueError('open_clarifications_block_plan')
   mappings=json.loads(cat['mappings']);tasks=[];previous=None
   for index,m in enumerate(mappings,1):
    tid=f'IMP-{index:03}';task={'id':tid,'sequence':index,'source_reference':m['source_reference'],'mapping_id':m['id'],'spring_pattern':m['spring_pattern'],'target_module':m['target_module'],'boundary':m['boundary'],'depends_on':[previous] if previous else [],'tests':m['tests'],'acceptance':['source trace recorded','unit tests pass','configuration externalized'],'security_checks':['no embedded secrets','no environment endpoint','dependency allow-list'],'rollback_checkpoint':f'pre-{tid}'};tasks.append(task);previous=tid

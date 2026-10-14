@@ -61,10 +61,6 @@ class GovernanceAgent(BaseAgent):
             out['satisfied'] = False
             out['evidence_bundle'] = {}
             out['reasons'].append(str(exc))
-        opens = c.execute("select count(*) from clarifications where job_id=? and status='OPEN'", (job['id'],)).fetchone()[0]
-        if opens and target not in ('STOPPED', 'FAILED', 'ROLLED_BACK') and not target.startswith('WAITING_'):
-            out['satisfied'] = False
-            out['reasons'].append('open_clarification_blocks_transition:%d' % opens)
         out['decision'] = 'ALLOW' if out['satisfied'] else 'DENY'
         return out
 

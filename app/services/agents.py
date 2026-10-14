@@ -139,10 +139,8 @@ class AgentRegistry:
    meta=dict(ref.metadata or {});meta.update({'agent_id':agent_id,'agent_version':version,'run_id':run['id'],'model_provenance':result.reasoning or {}})
    registered.append(self.evidence.register(job_id,ref.kind,ref.version,ref.uri,ref.content,agent_id,meta))
   opened=[]
-  for q in result.clarifications:
-   cid=uid()
-   with self.repo.connect() as c:self.repo.insert(c,'clarifications',{'id':cid,'job_id':job_id,'stage':q.stage,'question':q.question,'owner':q.owner,'impact':q.impact,'evidence_ref':q.evidence_ref,'status':'OPEN','answer':'','created_at':now(),'answered_at':'','answered_by':''})
-   opened.append(cid)
+  # Clarification blocking is disabled — agents may still return
+  # clarifications in their result but they are not persisted or acted on.
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,result.reasoning,(result.reasoning or {}).get('mode',''))
   detail={'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence_ids':evidence_ids,'clarification_ids':opened,'requested_tools':sorted(impl.TOOLS),'params_hash':context.params_hash,'reasoning':result.reasoning,'channel':channel,'contract_hash':a['contract_hash'],'effective_model_alias':effective_alias,'binding_source':binding_source}

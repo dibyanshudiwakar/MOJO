@@ -197,5 +197,51 @@
     </div>
   </form>
 </dialog>
+<dialog id="skillRuntimeDialog">
+  <h2 id="skillRuntimeDialogTitle">Add Runtime</h2>
+  <p class="authhint dlg-sub">Runtimes define the target language and toolchain for migration Skills.</p>
+  <form id="skillRuntimeForm">
+    <label>Name <small>(slug: e.g. java-21-spring-boot)</small><input name="name" required placeholder="java-21-spring-boot" spellcheck="false" autocomplete="off"></label>
+    <label>Display name<input name="display_name" placeholder="Java Runtime" spellcheck="false" autocomplete="off"></label>
+    <div class="formgrid">
+      <label>Language<select name="language" required><option value="java">Java</option><option value="python">Python</option><option value="nodejs">Node.js</option></select></label>
+      <label>Language version<input name="language_version" placeholder="21" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <div class="formgrid">
+      <label>Framework<input name="framework" placeholder="spring-boot" spellcheck="false" autocomplete="off"></label>
+      <label>Framework version range<input name="framework_version_range" placeholder="3.2.x" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <div class="formgrid">
+      <label>Build tool<input name="build_tool" placeholder="maven" spellcheck="false" autocomplete="off"></label>
+      <label>Base image<input name="base_image" placeholder="eclipse-temurin:21-jre-alpine" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <p class="authhint bad" id="skillRuntimeError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="skillRuntimeCancel">Cancel</button>
+      <button id="skillRuntimeSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="skillDialog">
+  <h2 id="skillDialogTitle">Register Skill</h2>
+  <p class="authhint dlg-sub">A Skill is a versioned migration procedure. Once approved it can be invoked by a bound Agent.</p>
+  <form id="skillForm">
+    <label>Skill key <small>(stable identifier, e.g. iib-to-ms-migration)</small><input name="skill_key" required placeholder="iib-to-ms-migration" spellcheck="false" autocomplete="off"></label>
+    <div class="formgrid">
+      <label>Version<input name="version" required placeholder="1.0.0" spellcheck="false" autocomplete="off"></label>
+      <label>Status<select name="status"><option value="DRAFT">DRAFT</option><option value="APPROVED">APPROVED</option><option value="DEPRECATED">DEPRECATED</option></select></label>
+    </div>
+    <label>Display name <small>(optional)</small><input name="display_name" placeholder="IIB → Spring Boot Migration" spellcheck="false" autocomplete="off"></label>
+    <label>Target runtime<select name="target_runtime_id" id="skillRuntimeSelect" required><option value="">Loading…</option></select></label>
+    <label>Description <small>(optional)</small><input name="description" placeholder="Migrates IIB/ACE services to Spring Boot microservices" spellcheck="false" autocomplete="off"></label>
+    <label>Source path <small>(optional, path to SKILL.md)</small><input name="source_path" placeholder="external-skills/iib-to-ms-migration/SKILL.md" spellcheck="false" autocomplete="off"></label>
+    <label>Backend types <small>(comma-separated, optional)</small><input name="backend_types" placeholder="QL_CICS, RXCLAIM_SBO, MQ_COBOL, SOAP, REST" spellcheck="false" autocomplete="off"></label>
+    <p class="authhint bad" id="skillError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="skillCancel">Cancel</button>
+      <button id="skillSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
 <script>try{const t=localStorage.getItem('theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
 <script src="/static/app.js"></script></body></html>

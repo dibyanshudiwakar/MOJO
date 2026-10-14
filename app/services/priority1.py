@@ -56,8 +56,8 @@ class PriorityOneService:
   with self.repo.connect() as c:
    c.execute('insert into ace_analyses values(?,?,?,?,?,?,?,?,?)',(analysis_id,job_id,version,raw,analysis_md,json.dumps(model.get('ambiguities',[])),json.dumps(model.get('dependencies',[])),digest(raw),ts))
    for x in unsupported:c.execute('insert into unsupported_constructs values(?,?,?,?,?,?,?,?,?,?,?)',(x['id'],job_id,analysis_id,x['source_path'],x['node_id'],x['construct_type'],x['classification'],x['impact'],x['status'],x['owner'],x['evidence_ref']))
-   for a in model.get('ambiguities',[]):
-    self.repo.insert(c,'clarifications',{'id':uid(),'job_id':job_id,'stage':'ACE_ANALYSIS','question':a.get('question','Unknown ACE behavior'),'owner':a.get('owner','ACE_SME'),'impact':a.get('impact','Analysis incomplete'),'evidence_ref':a.get('evidenceReference',''),'status':'OPEN','answer':'','created_at':ts,'answered_at':'','answered_by':''})
+   # Clarification blocking is disabled — ambiguities are stored in the
+   # analysis record itself but not inserted as open clarifications.
    report_id=uid();c.execute('insert into validation_reports values(?,?,?,?,?,?,?,?,?)',(report_id,job_id,'PARSER_COVERAGE',version,json.dumps({'score':score,'items':coverage}),digest(json.dumps(coverage,sort_keys=True)), 'PASS' if score==100 else 'REVIEW_REQUIRED',ts,analysis_id))
   return {'analysis_id':analysis_id,'coverage_report_id':report_id,'coverage_score':score,'unsupported_count':len(unsupported),'ambiguity_count':len(model.get('ambiguities',[])),'status':'REVIEW_REQUIRED'}
  def validate_specification(self,job_id,analysis_id,specification_id):
@@ -85,8 +85,7 @@ class PriorityOneService:
    a=self.repo.one('select * from ace_analyses where id=? and job_id=?',(analysis_id,job_id));s=self.repo.one('select * from migration_specs where id=? and job_id=?',(specification_id,job_id))
    if not a or not s:raise ValueError('analysis_or_specification_not_found')
    items=[{'kind':'ACE_ANALYSIS','id':a['id'],'version':a['version'],'hash':a['content_hash']},{'kind':'MIGRATION_SPECIFICATION','id':s['id'],'version':s['version'],'hash':s['content_hash']}]
-   opens=self.repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",(job_id,))['n'];unsupported=self.repo.one("select count(*) n from unsupported_constructs where job_id=? and status='OPEN'",(job_id,))['n']
-   if opens:conditions.append('Resolve open clarifications before approval')
+   unsupported=self.repo.one("select count(*) n from unsupported_constructs where job_id=? and status='OPEN'",(job_id,))['n']
    if unsupported:conditions.append('Resolve or accept unsupported constructs through governed policy')
    review={'analysis':a,'specification':s,'coverage':self.repo.rows("select * from validation_reports where job_id=? and report_type='PARSER_COVERAGE'",(job_id,)),'consistency':self.repo.rows("select * from validation_reports where job_id=? and report_type='ANALYSIS_YAML_CONSISTENCY'",(job_id,)),'unsupported':self.repo.rows('select * from unsupported_constructs where job_id=?',(job_id,)),'clarifications':self.repo.rows('select * from clarifications where job_id=?',(job_id,))}
   package={'gate':gate,'job':{'id':j['id'],'service':j['service'],'source_revision':j['source_revision']},'artefacts':items,'conditions':conditions,'review':review,'decision':'PENDING_APPROVAL','rollback_pointer':j.get('rollback_pointer') or '','created_at':now()};pid=uid();raw=json.dumps(package,sort_keys=True,default=str)

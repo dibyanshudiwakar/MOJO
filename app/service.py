@@ -6,19 +6,6 @@ from app.domain.preconditions import evidence_bundle
 from app.domain.model import ApprovalRequest
 from app.services.policy import ApprovalPolicyService,PolicyError
 from app.services.factory_v3 import AuditLedger
-# Lifecycle order used to determine stage-aware clarification blocking.
-# Duplicated here to avoid a circular import (pipelines.py imports FactoryService).
-_LIFECYCLE_ORDER_SVC=['CREATED','INTAKE_VALIDATED','DORMANCY_ASSESSED','FRAMEWORK_BASELINED','ACE_ANALYSED','PLAN_APPROVED','IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING','READY_FOR_PROMOTION','COMPLETED']
-_LIFECYCLE_IDX_SVC={s:i for i,s in enumerate(_LIFECYCLE_ORDER_SVC)}
-# Maps clarification stage names to the lifecycle state at which they become
-# blocking. A clarification only prevents transitions whose target index is >=
-# the threshold index, allowing earlier lifecycle stages to advance freely.
-_CLARIF_STAGE_THRESHOLD={'INTAKE':'INTAKE_VALIDATED','DORMANCY':'DORMANCY_ASSESSED','FRAMEWORK_BASELINE':'FRAMEWORK_BASELINED','ACE_ANALYSIS':'ACE_ANALYSED','MAPPING':'PLAN_APPROVED','PLAN':'PLAN_APPROVED','IMPLEMENTATION':'IMPLEMENTING','BUILD':'BUILD_VALIDATED','TESTING':'DIFFERENTIAL_TESTING','VARIANCE':'VARIANCE_REVIEW','REMEDIATION':'REMEDIATING'}
-def _count_blocking_clarifs(c,jid,target):
-    """Count open clarifications that actually block the given target transition."""
-    target_idx=_LIFECYCLE_IDX_SVC.get(target,len(_LIFECYCLE_IDX_SVC))
-    rows=c.execute("select stage from clarifications where job_id=? and status='OPEN'",(jid,)).fetchall()
-    return sum(1 for r in rows if _LIFECYCLE_IDX_SVC.get(_CLARIF_STAGE_THRESHOLD.get(r['stage'] if hasattr(r,'keys') else r[0],''),-1)<=target_idx)
 GATE_TRANSITIONS={
  ('DORMANCY_ASSESSED','FRAMEWORK_BASELINED'):('G0',{'PROCEED'}),
  # The state machine also permits skipping the dormancy assessment. Without
@@ -32,6 +19,9 @@ GATE_TRANSITIONS={
  ('READY_FOR_PROMOTION','COMPLETED'):('G5',{'PROMOTE'}),
  # WAITING_Gx → post-gate target: same gate, same allowed decisions.
  ('WAITING_G0','FRAMEWORK_BASELINED'):('G0',{'PROCEED'}),
+ # When framework-baseline was explicitly deselected the job skips
+ # FRAMEWORK_BASELINED and lands directly at ACE_ANALYSED after G0.
+ ('WAITING_G0','ACE_ANALYSED'):('G0',{'PROCEED'}),
  ('WAITING_G1','ACE_ANALYSED'):('G1',{'APPROVE'}),
  ('WAITING_G2','PLAN_APPROVED'):('G2',{'APPROVE'}),
  ('WAITING_G3','IMPLEMENTING'):('G3',{'APPROVE'}),
@@ -40,7 +30,9 @@ GATE_TRANSITIONS={
  ('WAITING_G5','COMPLETED'):('G5',{'PROMOTE'})}
 # Maps each WAITING state to the post-gate targets the approval unlocks.
 _WAITING_TARGETS={
- 'WAITING_G0':['FRAMEWORK_BASELINED'],
+ # FRAMEWORK_BASELINED first; ACE_ANALYSED is the fallback when framework-baseline
+ # was explicitly deselected and the approve() helper detects that.
+ 'WAITING_G0':['FRAMEWORK_BASELINED','ACE_ANALYSED'],
  'WAITING_G1':['ACE_ANALYSED'],
  'WAITING_G2':['PLAN_APPROVED'],
  'WAITING_G3':['IMPLEMENTING'],
@@ -50,6 +42,14 @@ _WAITING_TARGETS={
 # Re-entering implementation is rework: it opens a new iteration, which retires
 # every approval granted against the previous one.
 ITERATION_ADVANCING={'REMEDIATING','BUILD_VALIDATED','FAILED'}
+# Subset of AGENT_LIFECYCLE_TRANSITIONS needed here to avoid a circular import.
+_LIFECYCLE_AGENT_SVC={'FRAMEWORK_BASELINED':'framework-baseline','ACE_ANALYSED':'ace-analysis','PLAN_APPROVED':'planning','IMPLEMENTING':'code-generation'}
+def _explicitly_disabled_agents(repo,job_id):
+ """Return agent IDs that were explicitly deselected in the latest active pipeline for job_id."""
+ pl=repo.one("select id from pipelines where job_id=? and status in ('RUNNING','DRAFT') order by created_at desc limit 1",(job_id,))
+ if not pl:return set()
+ rows=repo.rows("select agent_id,error from pipeline_steps where pipeline_id=? and status='SKIPPED'",(pl['id'],))
+ return {r['agent_id'] for r in rows if 'skip_kind:explicitly_disabled' in str(r['error'] or '')}
 def _col(row,name,default=None):
  return row[name] if name in row.keys() else default
 class FactoryService:
@@ -108,8 +108,7 @@ class FactoryService:
   with self.repo.connect() as c:
    c.execute('begin immediate');j=c.execute('select * from jobs where id=?',(jid,)).fetchone()
    if not j:raise ValueError('job_not_found')
-   opens=_count_blocking_clarifs(c,jid,target)
-   validate_transition(j['state'],target,opens)
+   validate_transition(j['state'],target)
    iteration=int(j['iteration'] or 1)
    decision=self._transition_policy(c,jid,j['state'],target,iteration)
    bundle=evidence_bundle(c,j,target)
@@ -162,7 +161,11 @@ class FactoryService:
   # the gate quorum, auto-advance the lifecycle so the pipeline can resume.
   j2=self.repo.one('select state from jobs where id=?',(r.job_id,))
   if j2 and j2['state'] in _WAITING_TARGETS:
+   disabled=_explicitly_disabled_agents(self.repo,r.job_id)
    for target in _WAITING_TARGETS[j2['state']]:
+    req=_LIFECYCLE_AGENT_SVC.get(target)
+    if req and req in disabled:
+     continue  # agent was explicitly deselected — skip this state
     try:
      self.transition(r.job_id,target,identity,{'source':'auto_advance_after_approval','approval_id':aid})
      break

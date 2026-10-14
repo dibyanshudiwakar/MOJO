@@ -138,6 +138,34 @@ class RepoCloneService:
         ref = workspace.git_ref(branch)
         target = workspace.resolve(dest, must_exist=False, create=False)
         if target.exists() and any(target.iterdir()):
+            # Directory already populated -- could be a previous attempt that
+            # cloned successfully but failed to record completion (the retry
+            # bug: git clone writes the files, then the DB write crashes, so
+            # the queue retries and finds a non-empty directory it created
+            # itself). If the existing clone points at the same remote URL,
+            # treat this as an idempotent success rather than an error.
+            existing_remote = subprocess.run(
+                ['git', 'remote', 'get-url', 'origin'],
+                cwd=str(target), capture_output=True, text=True, timeout=10,
+            )
+            if existing_remote.returncode == 0:
+                existing_url = existing_remote.stdout.strip()
+                # Normalise both URLs for comparison: strip trailing .git and
+                # any embedded credential so a token-bearing URL matches the
+                # bare one stored in the job record.
+                def _normalise(u):
+                    p = urlparse(u)
+                    return p._replace(netloc=p.hostname or '', path=p.path.rstrip('/')).geturl().rstrip('/')
+                if _normalise(existing_url) == _normalise(url):
+                    commit = subprocess.run(
+                        ['git', 'rev-parse', 'HEAD'],
+                        cwd=str(target), capture_output=True, text=True, timeout=10,
+                    )
+                    return {
+                        'path': str(target),
+                        'branch': ref,
+                        'commit': commit.stdout.strip() if commit.returncode == 0 else '',
+                    }
             raise RepoCloneError('clone_destination_not_empty')
         target.parent.mkdir(parents=True, exist_ok=True)
         token = self._credential(user_id, url)

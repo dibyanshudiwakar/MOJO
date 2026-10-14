@@ -147,9 +147,6 @@ class MigrationOrchestratorAgent(BaseAgent):
             return 'cancel_requested'
         return ''
 
-    def _open_clarifications(self, job_id):
-        return self.repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'", (job_id,))['n']
-
     def _completed(self, job_id, iteration):
         """Pipeline agents already completed for this job at this iteration.
 
@@ -203,10 +200,6 @@ class MigrationOrchestratorAgent(BaseAgent):
             halt = self._halted(context.job_id)
             if halt:
                 stop = halt
-                break
-            opens = self._open_clarifications(context.job_id)
-            if opens:
-                stop = 'open_clarification:%d' % opens
                 break
             target = self._target(job)
             if not target:

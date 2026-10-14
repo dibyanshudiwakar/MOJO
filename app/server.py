@@ -17,10 +17,11 @@ from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import PipelineService, PipelineError
 from app.services.agent_admin import AgentAdminService, AgentAdminError
 from app.services.agent_llm_bindings import AgentLLMBindingService, AgentLLMBindingError
+from app.services.agent_templates import AgentTemplateService
 from app.services import workspace
 from app.services.priority1 import PriorityOneService
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
-from app.services.platform_v7 import RegistryService,AIRegistryService,KnowledgeService,ApprovalWorkspaceService,DeliveryAutomationService,NotificationService,ObservabilityService
+from app.services.platform_v7 import RegistryService,AIRegistryService,KnowledgeService,ApprovalWorkspaceService,DeliveryAutomationService,NotificationService,ObservabilityService,SkillRegistryService
 from app.services.factory_v3 import WorkflowOrchestrator,IntakeService,DormancyService,FrameworkService,ACEAnalysisService,PlanningGenerationService,AuditLedger,SecurityService
 from app.services.enterprise_v5 import ConfidenceRemediationService
 
@@ -33,8 +34,8 @@ specs=SpecificationService(repo,ROOT/'schemas/migration-specification.schema.jso
 diff=DifferentialService(repo)
 rca=RCAService(repo)
 agents=AgentRegistry(repo)
-workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity); github=GitHubIntegrationService(repo)
-pipelines=PipelineService(repo); repo_clone=RepoCloneService(repo); agent_admin=AgentAdminService(repo); llm_bindings=AgentLLMBindingService(repo)
+workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); skill7=SkillRegistryService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity); github=GitHubIntegrationService(repo)
+pipelines=PipelineService(repo); repo_clone=RepoCloneService(repo); agent_admin=AgentAdminService(repo); llm_bindings=AgentLLMBindingService(repo); templates_svc=AgentTemplateService(repo)
 # Registration and sign-in cannot require a token, since obtaining one is what
 # they are for. Everything else under /api/ stays authenticated.
 PUBLIC_ROUTES={'/api/v2/health','/api/v2/auth/signup','/api/v2/auth/login','/api/v2/auth/roles'}
@@ -55,7 +56,7 @@ def throttle(key):
 CONFIDENCE_THRESHOLD=float(os.getenv('FACTORY_REMEDIATION_CONFIDENCE_THRESHOLD','0.8'))
 try: connectors.load(ROOT/'config'/'integrations.json')
 except FileNotFoundError: pass
-TABLES={'jobs':'jobs','approvals':'approvals','evidence':'evidence','agents':'agent_runs','agent-registry':'agent_registry','specifications':'migration_specs','comparisons':'comparisons','variances':'variances','rca':'root_causes','remediations':'remediations','events':'workflow_events','versions':'versions','clarifications':'clarifications','checkpoints':'workflow_checkpoints','queue':'workflow_queue','intakes':'intake_manifests','dormancy':'dormancy_assessments','frameworks':'framework_baselines','analyses':'ace_analyses','plans':'migration_plans','generated':'generated_artifacts','audit-ledger':'audit_ledger','security-findings':'security_findings','metrics':'metrics','connectors':'connector_profiles','connector-operations':'connector_operations','routing-policies':'routing_policies','unsupported-constructs':'unsupported_constructs','validation-reports':'validation_reports','approval-packages':'approval_packages','mapping-catalogues':'mapping_catalogues','unsupported-mappings':'unsupported_mappings','migration-risks':'migration_risks','quality-runs':'quality_runs','differential-packages':'differential_packages','differential-evidence':'differential_evidence','service-registry':'service_registry','prompt-registry':'prompt_registry','model-registry':'model_registry','model-requests':'model_requests','knowledge-index':'knowledge_index','gate-controls':'gate_controls','delivery-operations':'delivery_operations','notifications':'notifications','observability-events':'observability_events','retention-policies':'retention_policies'}
+TABLES={'jobs':'jobs','approvals':'approvals','evidence':'evidence','agents':'agent_runs','agent-registry':'agent_registry','specifications':'migration_specs','comparisons':'comparisons','variances':'variances','rca':'root_causes','remediations':'remediations','events':'workflow_events','versions':'versions','clarifications':'clarifications','checkpoints':'workflow_checkpoints','queue':'workflow_queue','intakes':'intake_manifests','dormancy':'dormancy_assessments','frameworks':'framework_baselines','analyses':'ace_analyses','plans':'migration_plans','generated':'generated_artifacts','audit-ledger':'audit_ledger','security-findings':'security_findings','metrics':'metrics','connectors':'connector_profiles','connector-operations':'connector_operations','routing-policies':'routing_policies','unsupported-constructs':'unsupported_constructs','validation-reports':'validation_reports','approval-packages':'approval_packages','mapping-catalogues':'mapping_catalogues','unsupported-mappings':'unsupported_mappings','migration-risks':'migration_risks','quality-runs':'quality_runs','differential-packages':'differential_packages','differential-evidence':'differential_evidence','service-registry':'service_registry','prompt-registry':'prompt_registry','model-registry':'model_registry','model-requests':'model_requests','knowledge-index':'knowledge_index','gate-controls':'gate_controls','delivery-operations':'delivery_operations','notifications':'notifications','observability-events':'observability_events','retention-policies':'retention_policies','skill-registry':'skills','skill-runtimes':'skill_runtimes','skill-agent-bindings':'skill_agent_bindings'}
 
 def _enrich_job_risks(r, items):
     """Compute a per-job risk level from signal tables and write it into each item dict.
@@ -152,8 +153,12 @@ class H(BaseHTTPRequestHandler):
         principal = principal or self.principal()
         if getattr(principal, 'user_id', ''):
             user = accounts.repo.one('select * from users where id=?', (principal.user_id,))
-            if user:
-                return user
+            # user_id and sub must name the same account. A mismatch means the
+            # token was issued for a different identity than it claims — reject it
+            # so audit events cannot be attributed to the wrong email.
+            if user and user['email'] != principal.identity:
+                raise PermissionError('token_identity_mismatch')
+            return user  # None if account deleted (caller handles via stale_session)
         return accounts.by_email(principal.identity)
     def stale_session(self):
         """A cryptographically valid token naming an account that no longer exists.
@@ -329,6 +334,9 @@ class H(BaseHTTPRequestHandler):
             return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.
+        if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})
+        if p=='/api/v2/skill-runtimes':return self.sendj(200,{'items':skill7.list_runtimes()})
+        if p=='/api/v2/skill-agent-bindings':return self.sendj(200,{'items':skill7.list_bindings((q.get('skill_id') or [None])[0],(q.get('agent_id') or [None])[0])})
         if p=='/api/v7/approval-inbox': return self.sendj(200,{'items':approvals7.inbox_for(self.principal())})
         if p=='/api/v7/gates': return self.sendj(200,{'items':approvals7.gates(),'source':'live_database','generated_at':now()})
         if p=='/api/v7/knowledge/search': return self.sendj(200,{'items':knowledge7.search((q.get('q') or [''])[0],(q.get('job_id') or [''])[0])})
@@ -338,6 +346,12 @@ class H(BaseHTTPRequestHandler):
             counts['jobs_by_state']=repo.rows('select state,count(*) count from jobs group by state order by state')
             counts['open_clarifications']=repo.one("select count(*) n from clarifications where status='OPEN'")['n']
             return self.sendj(200,counts)
+        if p=='/api/v2/agent-templates': return self.sendj(200,{'items':templates_svc.list()})
+        m=re.fullmatch(r'/api/v2/agent-templates/([^/]+)',p)
+        if m:
+            t=templates_svc.get(m.group(1))
+            if not t: return self.sendj(404,{'error':'template_not_found'})
+            return self.sendj(200,t)
         if p=='/' or not p.startswith('/api/'): return self.serve_static(p)
         return self.sendj(404,{'error':'not_found'})
     def serve_static(self,p):
@@ -732,6 +746,23 @@ class H(BaseHTTPRequestHandler):
                 return self.sendj(201,agents.start(d['job_id'],d['agent_id'],d['version'],d.get('input_evidence',[]),pr.roles,d.get('requested_tools',[]),pr.identity))
             m=re.fullmatch(r'/api/v2/agents/([^/]+)/complete',p)
             if m: return self.sendj(200,agents.complete(m.group(1),d.get('output_evidence',[]),d.get('error',''),self.actor()))
+            if p=='/api/v2/agent-templates':
+                return self.sendj(201,templates_svc.create(d,self.principal().identity))
+            if p=='/api/v2/skill-runtimes':
+                principal=self.require('AGENT_REGISTRY_ADMIN','AI_GOVERNANCE_ADMIN','GOVERNANCE_ADMIN')
+                result=skill7.register_runtime(d,principal)
+                ledger.append('',principal.identity,'SKILL_RUNTIME_REGISTERED',{'name':result['name'],'language':result['language']})
+                return self.sendj(201,result)
+            if p=='/api/v2/skill-registry':
+                principal=self.require('AGENT_REGISTRY_ADMIN','AI_GOVERNANCE_ADMIN','GOVERNANCE_ADMIN')
+                result=skill7.register_skill(d,principal)
+                ledger.append('',principal.identity,'SKILL_REGISTERED',{'skill_key':result['skill_key'],'version':result['version'],'status':result['status']})
+                return self.sendj(201,result)
+            if p=='/api/v2/skill-agent-bindings':
+                principal=self.require('AGENT_REGISTRY_ADMIN','GOVERNANCE_ADMIN')
+                result=skill7.bind_skill_to_agent(d,principal)
+                ledger.append('',principal.identity,'SKILL_AGENT_BOUND',{'skill_id':result['skill_id'],'agent_id':result['agent_id'],'binding_type':result['binding_type']})
+                return self.sendj(201,result)
             return self.sendj(404,{'error':'not_found'})
         except PermissionError as e: return self.sendj(403,{'error':str(e)})
         # A dependency being unreachable is not the caller's fault; 502 lets the
@@ -749,6 +780,38 @@ class H(BaseHTTPRequestHandler):
             sys.stderr.write('correlation_id=%s path=%s error=%s\n'%(correlation,p,type(e).__name__))
             sys.stderr.flush()
             return self.sendj(500,{'error':'internal_error','correlation_id':correlation})
+    def do_PUT(self):
+        p=urlparse(self.path).path
+        try:
+            d=body(self)
+            m=re.fullmatch(r'/api/v2/agent-templates/([^/]+)',p)
+            if m:
+                t=templates_svc.update(m.group(1),d)
+                if not t: return self.sendj(404,{'error':'template_not_found'})
+                return self.sendj(200,t)
+            m=re.fullmatch(r'/api/v2/skill-registry/([^/]+)',p)
+            if m:
+                principal=self.require('AGENT_REGISTRY_ADMIN','AI_GOVERNANCE_ADMIN','GOVERNANCE_ADMIN')
+                result=skill7.update_skill_status(m.group(1),str(d.get('status','')).upper(),principal)
+                ledger.append('',principal.identity,'SKILL_STATUS_UPDATED',{'id':m.group(1),'status':result['status']})
+                return self.sendj(200,result)
+            m=re.fullmatch(r'/api/v2/skill-runtimes/([^/]+)',p)
+            if m:
+                principal=self.require('AGENT_REGISTRY_ADMIN','AI_GOVERNANCE_ADMIN','GOVERNANCE_ADMIN')
+                d['id']=m.group(1)
+                result=skill7.update_runtime(d,principal)
+                if not result:return self.sendj(404,{'error':'runtime_not_found'})
+                ledger.append('',principal.identity,'SKILL_RUNTIME_UPDATED',{'id':m.group(1),'name':result['name']})
+                return self.sendj(200,result)
+            return self.sendj(404,{'error':'not_found'})
+        except PermissionError as e: return self.sendj(403,{'error':str(e)})
+        except (ValueError,KeyError,json.JSONDecodeError) as e: return self.sendj(422,{'error':str(e)})
+        except (ConnectionError,TimeoutError) as e: return self.disconnected(e)
+        except Exception as e:
+            correlation=uid()
+            traceback.print_exception(type(e),e,e.__traceback__,file=sys.stderr)
+            sys.stderr.write('correlation_id=%s path=%s error=%s\n'%(correlation,p,type(e).__name__)); sys.stderr.flush()
+            return self.sendj(500,{'error':'internal_error','correlation_id':correlation})
     def do_DELETE(self):
         p=urlparse(self.path).path
         try:
@@ -761,6 +824,12 @@ class H(BaseHTTPRequestHandler):
                 llm_bindings.revert(agent_id,principal.identity)
                 ledger.append('',principal.identity,'AGENT_LLM_BINDING_REVERTED',{'agent_id':agent_id})
                 return self.sendj(200,{'agent_id':agent_id,'status':'reverted_to_default'})
+            m=re.fullmatch(r'/api/v2/agent-templates/([^/]+)',p)
+            if m:
+                self.principal()
+                if not templates_svc.get(m.group(1)): return self.sendj(404,{'error':'template_not_found'})
+                templates_svc.delete(m.group(1))
+                return self.sendj(200,{'id':m.group(1),'deleted':True})
             return self.sendj(404,{'error':'not_found'})
         except PermissionError as e: return self.sendj(403,{'error':str(e)})
         except (AgentLLMBindingError,ValueError,KeyError) as e: return self.sendj(422,{'error':str(e)})

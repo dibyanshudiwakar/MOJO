@@ -6,7 +6,7 @@ function progressFillClass(state,pct){const s=String(state||'').toUpperCase();co
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
 function riskBadge(r){const m={high:'error',medium:'warning',low:'success'};const key=r?String(r).toLowerCase():'';if(!key||key==='none'||key==='—')return `<span style="color:var(--text-3);font-size:12px">—</span>`;const cls=m[key]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(String(r).toUpperCase())}</span>`}
-const pages=['dashboard','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies'];
+const pages=['dashboard','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
 let refreshTimer;
 const token=()=>sessionStorage.getItem('access_token')||'';
 function claimsOf(t){try{const s=String(t).split('.');if(s.length!==3)return null;const b=s[1].replace(/-/g,'+').replace(/_/g,'/'),full=b+'='.repeat((4-b.length%4)%4);return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(full),c=>c.charCodeAt(0))))}catch(e){return null}}
@@ -77,7 +77,14 @@ function friendly(code){
 async function afterLogin(){
  // Section 2 of the brief: once signed in, resolve the stored GitHub connection
  // and only prompt when there is nothing usable to verify.
- try{const me=await api('/api/v2/auth/me');session={user:me.user};githubState=me.integrations.github}
+ try{const me=await api('/api/v2/auth/me');
+  // Guard: the decoded token's sub must match the account the server returned.
+  // A mismatch means the token in sessionStorage belongs to a different account
+  // than the one that was just authenticated — force re-login to prevent silent
+  // identity confusion.
+  const c=claimsOf(token());
+  if(c&&c.sub&&me.user&&c.sub!==me.user.email){return signOut('Session identity mismatch. Please sign in again.',true)}
+  session={user:me.user};githubState=me.integrations.github}
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
@@ -162,6 +169,7 @@ const NAV_ICON={
  'security-findings':_I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
  'agent-registry':_I('<rect x="2" y="8" width="20" height="12" rx="2"/><path d="M8 8V5a4 4 0 018 0v3"/><circle cx="12" cy="14" r="2"/>'),
  'agent-health':_I('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'),
+ 'agent-templates':_I('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>'),
  'knowledge-index':_I('<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>'),
  'service-registry':_I('<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'),
  'prompt-registry':_I('<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>'),
@@ -170,14 +178,15 @@ const NAV_ICON={
  notifications:_I('<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>'),
  'observability-events':_I('<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>'),
  'retention-policies':_I('<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>'),
+ 'skill-registry':_I('<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>'),
 };
 const _defIcon=_I('<circle cx="12" cy="12" r="4"/>');
 const NAV_GROUPS=[
  {label:'Overview',items:[{page:'dashboard',label:'Dashboard'},{page:'metrics',label:'Metrics'}]},
- {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'jobs',label:'Jobs'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'}]},
+ {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'jobs',label:'Jobs'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
  {label:'Governance',items:[{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'},{page:'security-findings',label:'Security'}]},
  {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
- {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
+ {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
@@ -286,7 +295,7 @@ function wizardDefault(){
   ace:{repo_url:'',branch:'main'},
   frameworkEnabled:false,framework:{repo_url:'',branch:'main'},
   targetPush:false,target:{repo_url:'',branch:'main'},service_name:'',package_name:'',
-  agents:null,selected:new Set(),impact:null,error:''}}
+  agents:null,selected:new Set(),impact:null,error:'',templateMode:'manual',templateId:null,templateName:'',templateAgentCount:0}}
 function migrationWizard(){
  if(!wizard)wizard=wizardDefault();
  $('#metrics').innerHTML='';$('#title').textContent='New migration';
@@ -325,16 +334,9 @@ function wizardStepWorkspace(body){
     <p class="hint" style="margin:2px 0 0">A subfolder name under the server's workspace root. Do not include a leading <code>workspace/</code> prefix.</p>
    </div>
   </div>
-  <div class="wiz-section">
-   <div class="wiz-section-title">Configuration</div>
-   <div class="formgrid">
-    <label>Environment<select id="wEnv"><option${j.environment==='DEV'?' selected':''}>DEV</option><option${j.environment==='TEST'?' selected':''}>TEST</option><option${j.environment==='STAGE'?' selected':''}>STAGE</option><option${j.environment==='PROD'?' selected':''}>PROD</option></select></label>
-    <label>Project scope<input id="wScope" value="${esc(j.project_scope)}" placeholder="GLOBAL"></label>
-   </div>
-  </div>`;
+  `;
  wizardNav(body,{back:false,onNext:()=>{
   j.service=$('#wService').value.trim();j.owner=$('#wOwner').value.trim();j.workspace_dir=$('#wWorkspace').value.trim().replace(/^\/|\/$/g,'');
-  j.environment=$('#wEnv').value;j.project_scope=$('#wScope').value.trim()||'GLOBAL';
   wizFieldErr('wService','errService',j.service?'':'Service name is required');
   wizFieldErr('wOwner','errOwner',j.owner?'':'Owner is required');
   wizFieldErr('wWorkspace','errWorkspace',j.workspace_dir?'':'Workspace directory is required');
@@ -410,12 +412,18 @@ function wizardStepTarget(body){
   wizard.step++;renderWizardStep()}})}
 function wizardStepReview(body){
  const j=wizard.job,a=wizard.ace,f=wizard.framework,t=wizard.target;
- body.innerHTML=`<h2>Review</h2><p class="hint">Check the details below before selecting which agents run.</p>
-  <div class="reviewsection"><dl class="reviewgrid"><dt>Service</dt><dd>${esc(j.service)}</dd><dt>Owner</dt><dd>${esc(j.owner)}</dd><dt>Workspace</dt><dd>${esc(j.workspace_dir)}</dd><dt>Environment</dt><dd>${esc(j.environment)} &middot; ${esc(j.project_scope)}</dd></dl></div>
+ const hasTmpl=wizard.templateMode==='template'&&wizard.templateId;
+ const hasManual=wizard.agents&&wizard.templateMode==='manual'&&wizard.selected.size>0;
+ const agentCfgSection=hasTmpl
+  ?`<div class="reviewsection"><dl class="reviewgrid"><dt>Agent config</dt><dd><span class="badge badge-info" style="font-size:11px;margin-right:6px">Template</span>${esc(wizard.templateName||wizard.templateId)} &middot; ${wizard.templateAgentCount||wizard.selected.size} agent${(wizard.templateAgentCount||wizard.selected.size)!==1?'s':''}</dd></dl></div>`
+  :hasManual?`<div class="reviewsection"><dl class="reviewgrid"><dt>Agent config</dt><dd><span class="badge badge-neutral" style="font-size:11px;margin-right:6px">Manual</span>${wizard.selected.size} agent${wizard.selected.size!==1?'s':''} selected</dd></dl></div>`:''
+ body.innerHTML=`<h2>Review</h2><p class="hint">Check the details below then configure the agents for this migration.</p>
+  <div class="reviewsection"><dl class="reviewgrid"><dt>Service</dt><dd>${esc(j.service)}</dd><dt>Owner</dt><dd>${esc(j.owner)}</dd><dt>Workspace</dt><dd>${esc(j.workspace_dir)}</dd></dl></div>
   <div class="reviewsection"><dl class="reviewgrid"><dt>ACE repo</dt><dd>${esc(a.repo_url)} @ ${esc(a.branch)}</dd></dl></div>
   <div class="reviewsection"><dl class="reviewgrid"><dt>Framework repo</dt><dd>${wizard.frameworkEnabled?esc(f.repo_url)+' @ '+esc(f.branch):'Not included'}</dd></dl></div>
-  <div class="reviewsection"><dl class="reviewgrid"><dt>Spring output</dt><dd>${wizard.targetPush?'Push to '+esc(t.repo_url)+' @ '+esc(t.branch):'Workspace output folder'}</dd><dt>Service / package</dt><dd>${esc(wizard.service_name)} / ${esc(wizard.package_name)}</dd></dl></div>`;
- wizardNav(body,{back:true,nextLabel:'Continue to agent selection',onNext:()=>{wizard.step++;renderWizardStep()}})}
+  <div class="reviewsection"><dl class="reviewgrid"><dt>Spring output</dt><dd>${wizard.targetPush?'Push to '+esc(t.repo_url)+' @ '+esc(t.branch):'Workspace output folder'}</dd><dt>Service / package</dt><dd>${esc(wizard.service_name)} / ${esc(wizard.package_name)}</dd></dl></div>
+  ${agentCfgSection}`;
+ wizardNav(body,{back:true,nextLabel:'Configure agents →',onNext:showAgentConfigModal})}
 async function wizardLoadAgents(){
  if(wizard.agents)return wizard.agents;
  const r=await api('/api/v2/agent-registry');
@@ -467,7 +475,6 @@ async function wizardStepAgents(body){
  renderAgentCards(body,agents)}
 function renderAgentCards(body,agents){
  const skippedByAgent=Object.fromEntries((wizard.impact?.skipped||[]).map(x=>[x.agent_id,x.reason]));
- // Group agents by lifecycle stage, preserving defined order
  const stageMap={};
  agents.forEach(a=>{
   const stage=AGENT_STAGE_MAP[a.agent_id]||'Other';
@@ -481,18 +488,23 @@ function renderAgentCards(body,agents){
   <p class="hint">Disabling an agent also skips whatever depends on it.</p>
   <div class="ac-toolbar">
    <span class="ac-sel-count"><b>${wizard.selected.size}</b> of ${agents.length} selected</span>
-   <button type="button" id="acSelAll" class="btn-ghost-sm">${allSel?'Deselect all':'Select all'}</button>
+   <div style="display:flex;gap:6px">
+    <button type="button" id="acSelAll" class="btn-ghost-sm">${allSel?'Deselect all':'Select all'}</button>
+    <button type="button" id="acSaveAsTmpl" class="btn-ghost-sm">Save as template</button>
+   </div>
   </div>
   <div class="agent-groups" id="wAgentCards">
    ${groups.map(([stage,g])=>`<div class="agent-group"><div class="group-header"><span class="group-label">${esc(stage)}</span><span class="group-line"></span><span class="group-meta">${g.agents.length} agent${g.agents.length!==1?'s':''}</span></div><div class="group-grid">${g.agents.map(a=>agentCard(a,skippedByAgent[a.agent_id])).join('')}</div></div>`).join('')}
   </div>`;
+ body.querySelector('#acSaveAsTmpl')?.addEventListener('click',()=>{
+  showTemplateModal(null,agents,[...wizard.selected])});
  body.querySelectorAll('.agent-card').forEach(card=>{
   card.onclick=async()=>{
    const id=card.dataset.agent;
    if(wizard.selected.has(id))wizard.selected.delete(id);else wizard.selected.add(id);
-   renderAgentCards(body,agents); // immediate visual update
+   renderAgentCards(body,agents);
    await wizardRefreshImpact();
-   renderAgentCards(body,agents) // update pruned states
+   renderAgentCards(body,agents)
   };
   card.onkeydown=e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();card.onclick()}}
  });
@@ -523,6 +535,177 @@ async function submitPipeline(){
    service_name:wizard.service_name,package_name:wizard.package_name})});
   wizard=null;location.hash='pipelines/'+created.id
  }catch(e){if(btn)btn.disabled=false;wizardError(e.message)}}
+
+// ── Agent Configuration Modal ─────────────────────────────────────────────
+async function showAgentConfigModal(){
+ let mode=wizard.templateMode||'manual';
+ let templates=null; // null = not yet loaded
+ let selTmplId=wizard.templateId||null;
+ const svgTmpl=`<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>`;
+ const svgManual=`<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 19.07a10 10 0 010-14.14"/><path d="M15.54 8.46a5 5 0 010 7.07M8.46 15.54a5 5 0 010-7.07"/></svg>`;
+ const svgChk=`<svg width="13" height="13" fill="none" stroke="#fff" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;
+ const cardHtml=()=>`
+  <div class="acfg-card${mode==='template'?' acfg-card-sel':''}" data-mode="template">
+   <div class="acfg-card-icon acfg-icon-tmpl">${svgTmpl}</div>
+   <div class="acfg-card-content"><div class="acfg-card-title">Use Saved Template</div><div class="acfg-card-desc">Apply a previously saved agent template and skip manual agent selection.</div></div>
+   <div class="acfg-card-check${mode==='template'?'':' acfg-check-hidden'}">${svgChk}</div>
+  </div>
+  <div class="acfg-card${mode==='manual'?' acfg-card-sel':''}" data-mode="manual">
+   <div class="acfg-card-icon acfg-icon-manual">${svgManual}</div>
+   <div class="acfg-card-content"><div class="acfg-card-title">Select Agents Manually</div><div class="acfg-card-desc">Choose agents individually using the existing agent selection experience.</div></div>
+   <div class="acfg-card-check${mode==='manual'?'':' acfg-check-hidden'}">${svgChk}</div>
+  </div>`;
+ const tmplSlotHtml=()=>{
+  if(mode!=='template')return'';
+  if(templates===null)return`<div class="acfg-tmpl-loading"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="acfg-spin"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Loading templates…</div>`;
+  if(!templates.length)return`<div class="acfg-tmpl-empty">No saved templates found. Create one from the Agent Templates page.</div>`;
+  const t=selTmplId?templates.find(x=>x.id===selTmplId):null;
+  return`<div class="acfg-tmpl-pick">
+   <div class="acfg-tmpl-lbl">Select Template</div>
+   <select id="acfgTmplSel" class="acfg-tmpl-sel">
+    <option value="">— choose a template —</option>
+    ${templates.map(tt=>{const cnt=(tt.agent_ids||[]).length;return`<option value="${esc(tt.id)}"${selTmplId===tt.id?' selected':''}>${esc(tt.name)} · ${cnt} agent${cnt!==1?'s':''}</option>`}).join('')}
+   </select>
+   ${t&&t.description?`<div class="acfg-tmpl-tdesc">${esc(t.description)}</div>`:''}
+  </div>`};
+ const dlg=document.createElement('dialog');
+ dlg.id='_agentCfgDlg';
+ dlg.innerHTML=`
+  <div class="acfg-hdr">
+   <div><div class="acfg-title">Agent Configuration</div><div class="acfg-sub">Choose how you would like to configure agents for this migration.</div></div>
+   <button type="button" id="acfgX" class="icon-btn" style="flex-shrink:0"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="acfg-body">
+   <div id="acfgCards">${cardHtml()}</div>
+   <div id="acfgTmplSlot">${tmplSlotHtml()}</div>
+  </div>
+  <div class="acfg-ftr">
+   <button type="button" id="acfgBack" class="btn-secondary">← Back to Review</button>
+   <button type="button" id="acfgContinue" class="btn-primary"${mode==='template'&&!selTmplId?' disabled':''}>Continue →</button>
+  </div>`;
+ document.body.appendChild(dlg);
+ dlg.showModal();
+ const close=()=>{if(dlg.open)dlg.close();dlg.remove()};
+ const updBtn=()=>{
+  const btn=dlg.querySelector('#acfgContinue');if(!btn)return;
+  const ready=mode==='manual'||(mode==='template'&&!!selTmplId);
+  btn.disabled=!ready;
+  btn.textContent=mode==='template'&&selTmplId?'Create Pipeline →':'Continue →'};
+ const rerender=()=>{
+  dlg.querySelector('#acfgCards').innerHTML=cardHtml();
+  dlg.querySelector('#acfgTmplSlot').innerHTML=tmplSlotHtml();
+  attachHandlers();updBtn()};
+ const attachHandlers=()=>{
+  dlg.querySelectorAll('.acfg-card').forEach(card=>{
+   card.addEventListener('click',async()=>{
+    const m=card.dataset.mode;if(m===mode)return;
+    mode=m;selTmplId=mode==='template'?wizard.templateId||null:null;
+    if(mode==='template'&&templates===null){
+     rerender(); // show loading state
+     const td=await api('/api/v2/agent-templates').catch(()=>({items:[]}));
+     templates=td.items||[]}
+    rerender()})});
+  const sel=dlg.querySelector('#acfgTmplSel');
+  if(sel)sel.addEventListener('change',()=>{
+   selTmplId=sel.value||null;
+   const t=templates&&selTmplId?templates.find(x=>x.id===selTmplId):null;
+   let descEl=dlg.querySelector('.acfg-tmpl-tdesc');
+   if(!descEl&&t&&t.description){
+    const pick=dlg.querySelector('.acfg-tmpl-pick');
+    if(pick){descEl=document.createElement('div');descEl.className='acfg-tmpl-tdesc';pick.appendChild(descEl)}}
+   if(descEl)descEl.textContent=t&&t.description?t.description:'';
+   updBtn()})};
+ attachHandlers();
+ dlg.querySelector('#acfgX').onclick=close;
+ dlg.querySelector('#acfgBack').onclick=close;
+ dlg.querySelector('#acfgContinue').onclick=async()=>{
+  wizard.templateMode=mode;
+  if(mode==='manual'){
+   wizard.templateId=null;wizard.templateName='';wizard.templateAgentCount=0;
+   close();wizard.step=5;renderWizardStep()
+  }else{
+   if(!selTmplId)return;
+   const t=(templates||[]).find(x=>x.id===selTmplId);if(!t)return;
+   const btn=dlg.querySelector('#acfgContinue');
+   if(btn){btn.disabled=true;btn.textContent='Creating pipeline…'}
+   const agents=await wizardLoadAgents().catch(()=>[]);
+   wizard.templateId=t.id;wizard.templateName=t.name;
+   wizard.templateAgentCount=(t.agent_ids||[]).length;
+   wizard.selected=new Set((t.agent_ids||[]).filter(id=>agents.find(a=>a.agent_id===id)));
+   close();renderWizardStep();submitPipeline()}};
+ // If returning to this modal already in template mode, load templates straight away
+ if(mode==='template'){
+  const td=await api('/api/v2/agent-templates').catch(()=>({items:[]}));
+  templates=td.items||[];rerender()}}
+
+// ── Template Picker Modal ─────────────────────────────────────────────────
+async function showTemplatePickerModal(templates){
+ const agents=await wizardLoadAgents().catch(()=>[]);
+ const agentMap=Object.fromEntries((agents||[]).map(a=>[a.agent_id,a]));
+ let selTmpl=templates.find(t=>t.id===wizard.templateId)||templates[0]||null;
+ const stageOrder=['Setup','Analysis','Generation','Quality Assurance','Governance & Platform'];
+ const renderList=()=>!templates.length
+  ?'<div class="tpick-empty">No saved templates found.<br>Create one from the Agent Templates page.</div>'
+  :templates.map(t=>{
+   const cnt=(t.agent_ids||[]).length;
+   const isSel=selTmpl&&selTmpl.id===t.id;
+   return`<div class="tpick-row${isSel?' tpick-row-sel':''}" data-tid="${esc(t.id)}">
+    <div class="tpick-row-info"><div class="tpick-name">${esc(t.name)}</div>${t.description?`<div class="tpick-rdesc">${esc(t.description)}</div>`:''}</div>
+    <span class="tpick-cnt">${cnt} agent${cnt!==1?'s':''}</span>
+   </div>`}).join('');
+ const renderDetail=()=>{
+  if(!selTmpl)return'<div class="tpick-empty">Select a template to preview its agents.</div>';
+  const ids=selTmpl.agent_ids||[];
+  const groups={};
+  ids.forEach(id=>{const s=AGENT_STAGE_MAP[id]||'Other';if(!groups[s])groups[s]=[];groups[s].push(id)});
+  const sorted=stageOrder.filter(s=>groups[s]).concat(Object.keys(groups).filter(s=>!stageOrder.includes(s)));
+  return`<div class="tpick-detail-name">${esc(selTmpl.name)}</div>
+   ${selTmpl.description?`<div class="tpick-detail-sub">${esc(selTmpl.description)}</div>`:''}
+   <div class="tpick-agent-count">${ids.length} agent${ids.length!==1?'s':''} included</div>
+   <div class="tpick-agents">
+    ${sorted.map(s=>`<div class="tpick-group-lbl">${esc(s)}</div>
+     ${groups[s].map(id=>{const a=agentMap[id];return`<div class="tpick-agent-row">
+      <span class="tpick-agent-ic">${AGENT_ICONS_MAP[id]||AC_ICON_FALLBACK}</span>
+      <span class="tpick-agent-name">${esc(a?a.display_name:id)}</span>
+     </div>`}).join('')}`).join('')}
+   </div>`};
+ const dlg=document.createElement('dialog');
+ dlg.id='_tmplPickDlg';
+ dlg.innerHTML=`
+  <div class="tpick-hdr">
+   <div><div class="tpick-title">Select Agent Template</div><div class="tpick-sub">${templates.length} template${templates.length!==1?'s':''} available</div></div>
+   <button type="button" id="tpickX" class="icon-btn" style="flex-shrink:0"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="tpick-body">
+   <div class="tpick-list" id="tpickList">${renderList()}</div>
+   <div class="tpick-detail" id="tpickDetail">${renderDetail()}</div>
+  </div>
+  <div class="tpick-ftr">
+   <button type="button" id="tpickBack" class="btn-secondary">← Back</button>
+   <button type="button" id="tpickUse" class="btn-primary"${!selTmpl||!templates.length?' disabled':''}>Use Template →</button>
+  </div>`;
+ document.body.appendChild(dlg);
+ dlg.showModal();
+ const close=()=>{if(dlg.open)dlg.close();dlg.remove()};
+ const rerender=()=>{
+  dlg.querySelector('#tpickList').innerHTML=renderList();
+  dlg.querySelector('#tpickDetail').innerHTML=renderDetail();
+  dlg.querySelector('#tpickUse').disabled=!selTmpl;
+  attachHandlers()};
+ const attachHandlers=()=>{
+  dlg.querySelectorAll('.tpick-row').forEach(row=>{
+   row.addEventListener('click',()=>{selTmpl=templates.find(t=>t.id===row.dataset.tid)||null;rerender()})})};
+ attachHandlers();
+ dlg.querySelector('#tpickX').onclick=close;
+ dlg.querySelector('#tpickBack').onclick=()=>{close();showAgentConfigModal()};
+ dlg.querySelector('#tpickUse').onclick=()=>{
+  if(!selTmpl)return;
+  wizard.templateMode='template';
+  wizard.templateId=selTmpl.id;
+  wizard.templateName=selTmpl.name;
+  wizard.templateAgentCount=(selTmpl.agent_ids||[]).length;
+  wizard.selected=new Set((selTmpl.agent_ids||[]).filter(id=>!!(agentMap[id])));
+  close();renderWizardStep();submitPipeline()}}
 
 // ---- Agent registry: read-only list, live CRUD for admins -----------------
 function canManageAgents(){const r=(session&&session.user&&session.user.roles)||[];return r.includes('AGENT_REGISTRY_ADMIN')||r.includes('GOVERNANCE_ADMIN')}
@@ -562,6 +745,227 @@ async function agentRegistryPage(){
   document.querySelectorAll('[data-edit-agent]').forEach(b=>b.onclick=()=>{
    const row=items.find(x=>x.agent_id===b.dataset.editAgent&&x.version===b.dataset.editVersion);
    if(row)openAgentDialog(row)})}}
+// ---- Agent Templates page -------------------------------------------------
+async function agentTemplatesPage(){
+ const [td,ad]=await Promise.all([api('/api/v2/agent-templates'),api('/api/v2/agent-registry')]);
+ const items=td.items||[];
+ const allAgents=(ad.items||[]).filter(x=>x.agent_id!=='migration-orchestrator'&&x.enabled&&x.status==='APPROVED');
+ const agentById=Object.fromEntries(allAgents.map(a=>[a.agent_id,a]));
+ const rows=!items.length
+  ?`<tr><td colspan="5" class="empty">No templates yet — create one to reuse agent selections across migrations.</td></tr>`
+  :items.map(t=>{
+   const ids=t.agent_ids||[];
+   const preview=ids.slice(0,3).map(id=>{const a=agentById[id];return esc(a?a.display_name:id)}).join(', ')+(ids.length>3?` +${ids.length-3} more`:'');
+   return `<tr>
+    <td class="td-name">${esc(t.name)}</td>
+    <td style="font-size:12px;color:var(--text-2);max-width:260px">${esc(t.description||'—')}</td>
+    <td><span class="badge badge-info">${ids.length} agent${ids.length!==1?'s':''}</span><div style="font-size:11px;color:var(--text-3);margin-top:3px">${preview}</div></td>
+    <td class="td-date">${esc(fmtDt(t.created_at))}</td>
+    <td style="white-space:nowrap">
+     <button class="btn-sm" data-edit-tmpl="${esc(t.id)}">Edit</button>
+     <button class="btn-sm" style="margin-left:4px;color:var(--error)" data-del-tmpl="${esc(t.id)}" data-del-name="${esc(t.name)}">Delete</button>
+    </td>
+   </tr>`;}).join('');
+ $('#view').innerHTML=`
+  <div class="page-header page-header-row">
+   <div><div class="page-title">Agent Templates</div><div class="page-sub">${items.length} template${items.length!==1?'s':''} · reusable agent selections for new migrations</div></div>
+   <button id="btnNewTmpl" class="btn-primary"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Template</button>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><div class="card-title">All Templates</div><div class="card-sub">Saved agent selections for the migration wizard</div></div><span class="live-dot">LIVE</span></div>
+   <div class="card-body"><div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Description</th><th>Agents</th><th>Created</th><th>Actions</th></tr></thead>
+    <tbody>${rows}</tbody>
+   </table></div></div>
+  </div>`;
+ $('#btnNewTmpl').onclick=()=>showTemplateModal(null,allAgents);
+ document.querySelectorAll('[data-edit-tmpl]').forEach(btn=>{
+  const t=items.find(x=>x.id===btn.dataset.editTmpl);
+  if(t)btn.onclick=()=>showTemplateModal(t,allAgents)});
+ document.querySelectorAll('[data-del-tmpl]').forEach(btn=>{
+  btn.onclick=async()=>{
+   if(!confirm(`Delete template "${btn.dataset.delName}"? This cannot be undone.`))return;
+   try{await api('/api/v2/agent-templates/'+btn.dataset.delTmpl,{method:'DELETE'});notice('Template deleted');agentTemplatesPage()}
+   catch(e){notice(e.message,true)}}})}
+
+function computeTemplatePruned(selectedSet,allAgents){
+ const depMap={};
+ allAgents.forEach(a=>{
+  let deps=[];
+  try{deps=Array.isArray(a.dependencies)?a.dependencies:JSON.parse(a.dependencies||'[]')}catch{}
+  depMap[a.agent_id]=deps.filter(d=>allAgents.some(x=>x.agent_id===d));
+ });
+ const runnable=new Set(selectedSet);
+ let changed=true;
+ while(changed){
+  changed=false;
+  for(const a of allAgents){
+   if(!runnable.has(a.agent_id))continue;
+   const miss=(depMap[a.agent_id]||[]).find(d=>!runnable.has(d));
+   if(miss){runnable.delete(a.agent_id);changed=true}
+  }
+ }
+ const pruned={};
+ for(const a of allAgents){
+  if(selectedSet.has(a.agent_id)&&!runnable.has(a.agent_id)){
+   const miss=(depMap[a.agent_id]||[]).find(d=>!runnable.has(d));
+   if(miss){const da=allAgents.find(x=>x.agent_id===miss);pruned[a.agent_id]=da?.display_name||miss}
+  }
+ }
+ return{runnable,pruned}}
+async function showTemplateModal(template,allAgents,preselectedIds){
+ const isEdit=!!(template&&template.id);
+ const sortedAgents=allAgents.slice().sort((a,b)=>{
+  const sa=AGENT_STAGE_MAP[a.agent_id]||'Other',sb=AGENT_STAGE_MAP[b.agent_id]||'Other';
+  const oa=AGENT_STAGE_ORDER[sa]??99,ob=AGENT_STAGE_ORDER[sb]??99;
+  if(oa!==ob)return oa-ob;
+  return (a.display_name||'').localeCompare(b.display_name||'');});
+ const selectedSet=new Set(preselectedIds!==undefined?preselectedIds:(template?template.agent_ids||[]:[]));
+ const agentMap=Object.fromEntries(allAgents.map(a=>[a.agent_id,a]));
+ const tbodyRows=sortedAgents.map(a=>{
+  const sel=selectedSet.has(a.agent_id);
+  const aid=esc(a.agent_id);
+  const stage=AGENT_STAGE_MAP[a.agent_id]||'Other';
+  const desc=esc(a.description||'');
+  return `<tr class="ta-row${sel?' tmpl-sel':''}" data-aid="${aid}">
+   <td class="ta-c-chk"><input type="checkbox" name="agent_ids" value="${aid}" tabindex="0"${sel?' checked':''}></td>
+   <td class="ta-c-name"><span class="ta-ni"><span class="ic">${AGENT_ICONS_MAP[a.agent_id]||AC_ICON_FALLBACK}</span>${esc(a.display_name)}</span></td>
+   <td class="ta-c-desc">${desc||'<em style="color:var(--text-3)">—</em>'}<em class="ta-prune-reason" style="display:none"></em></td>
+   <td class="ta-c-stage"><span class="ta-stage-badge">${esc(stage)}</span></td>
+  </tr>`;
+ }).join('');
+ const initPruned=computeTemplatePruned(selectedSet,allAgents).pruned;
+ const initCount=[...selectedSet].filter(id=>!initPruned[id]).length;
+ const dlg=document.createElement('dialog');
+ dlg.id='_tmplDlg';
+ dlg.innerHTML=`
+  <div class="dlg-tmpl-hdr">
+   <div>
+    <div style="font-size:15px;font-weight:600;color:var(--text)">${isEdit?'Edit Template':'New Template'}</div>
+    <div style="font-size:12px;color:var(--text-3);margin-top:2px">${isEdit?'Update the name, description, or agent selection':'Define a reusable agent selection for the migration wizard'}</div>
+   </div>
+   <button type="button" id="tmplX" class="icon-btn" style="flex-shrink:0">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+   </button>
+  </div>
+  <form id="tmplForm">
+   <div id="_tmplInner">
+    <div class="dlg-tmpl-body">
+     <p id="tmplErr" class="authhint bad" style="display:none;margin-bottom:14px"></p>
+     <div class="tmpl-top-grid">
+      <div><span class="dlg-tmpl-lbl">Template Name <span style="color:var(--error);text-transform:none">*</span></span><input name="name" required maxlength="120" placeholder="e.g. Full Migration Suite" value="${esc(template?.name||'')}"></div>
+      <div><span class="dlg-tmpl-lbl">Description</span><input name="description" maxlength="300" placeholder="Optional — what this template is for" value="${esc(template?.description||'')}"></div>
+     </div>
+    </div>
+    <div class="dlg-tmpl-scroll">
+     <div class="tmpl-agents-hdr">
+      <span class="dlg-tmpl-lbl" style="margin:0">Available Agents (${allAgents.length})</span>
+      <button type="button" id="tmplSelAll" class="btn-ghost-sm">${selectedSet.size===allAgents.length?'Deselect all':'Select all'}</button>
+     </div>
+     <table class="tmpl-agent-tbl">
+      <thead><tr><th></th><th>Agent</th><th>Description</th><th>Stage</th></tr></thead>
+      <tbody>${tbodyRows}</tbody>
+     </table>
+    </div>
+    <div class="dlg-tmpl-ftr">
+     <span id="tmplSelCount" style="font-size:12px;color:var(--text-2);font-weight:500">Selected: <strong style="color:var(--primary)">${initCount}</strong> of ${allAgents.length} agents</span>
+     <div style="display:flex;gap:8px">
+      <button type="button" id="tmplCancel" class="btn-secondary">Cancel</button>
+      <button type="submit" id="tmplSubmit" class="btn-primary">${isEdit?'Save Changes':'Create Template'}</button>
+     </div>
+    </div>
+   </div>
+  </form>`;
+ document.body.appendChild(dlg);
+ dlg.showModal();
+ const tip=document.createElement('div');
+ tip.className='ta-tooltip';
+ tip.hidden=true;
+ document.body.appendChild(tip);
+ const applyPruning=()=>{
+  const{pruned}=computeTemplatePruned(selectedSet,allAgents);
+  dlg.querySelectorAll('tr.ta-row').forEach(row=>{
+   const cb=row.querySelector('input[type=checkbox]');
+   const aid=row.dataset.aid;
+   const isPruned=!!pruned[aid];
+   row.classList.toggle('tmpl-pruned',isPruned);
+   row.classList.toggle('tmpl-sel',!isPruned&&selectedSet.has(aid));
+   if(isPruned){cb.checked=false;cb.disabled=true}else{cb.disabled=false;cb.checked=selectedSet.has(aid)}
+   const re=row.querySelector('.ta-prune-reason');
+   if(re){if(isPruned){re.textContent='Skipped: depends on '+pruned[aid];re.style.display=''}else{re.textContent='';re.style.display='none'}}
+  });
+  const allSel=selectedSet.size===allAgents.length;
+  const sb=dlg.querySelector('#tmplSelAll');
+  if(sb)sb.textContent=allSel?'Deselect all':'Select all';
+  const{pruned:p2}=computeTemplatePruned(selectedSet,allAgents);
+  const n=[...selectedSet].filter(id=>!p2[id]).length;
+  const el=dlg.querySelector('#tmplSelCount');
+  if(el)el.innerHTML='Selected: <strong style="color:var(--primary)">'+n+'</strong> of '+allAgents.length+' agents'};
+ dlg.querySelectorAll('tr.ta-row').forEach(row=>{
+  const cb=row.querySelector('input[type=checkbox]');
+  const a=agentMap[row.dataset.aid];
+  row.addEventListener('click',e=>{
+   if(e.target.closest('.ta-c-chk'))return;
+   if(row.classList.contains('tmpl-pruned'))return;
+   const aid=row.dataset.aid;
+   if(selectedSet.has(aid))selectedSet.delete(aid);else selectedSet.add(aid);
+   applyPruning();});
+  cb.addEventListener('change',()=>{
+   const aid=row.dataset.aid;
+   if(cb.checked)selectedSet.add(aid);else selectedSet.delete(aid);
+   applyPruning()});
+  row.addEventListener('mouseenter',()=>{
+   if(!a)return;
+   const safeList=v=>{if(!v)return null;if(Array.isArray(v))return v.map(x=>esc(String(x)));try{const p=JSON.parse(v);return Array.isArray(p)?p.map(x=>esc(String(x))):[esc(String(v))];}catch{return[esc(String(v))];} };
+   const fmtList=arr=>arr&&arr.length?arr.map(x=>`<li>${x}</li>`).join(''):'<li style="color:rgba(255,255,255,.45)">None specified</li>';
+   const stage=AGENT_STAGE_MAP[a.agent_id]||'Other';
+   tip.innerHTML=`<div class="ta-tooltip-arr"></div>
+    <div class="ta-tooltip-name">${esc(a.display_name)}</div>
+    <div class="ta-tooltip-row"><span class="ta-tooltip-lbl">Purpose</span><span>${esc(a.description||'—')}</span></div>
+    <div class="ta-tooltip-section"><div class="ta-tooltip-lbl">Inputs</div><ul class="ta-tooltip-list">${fmtList(safeList(a.accepted_inputs))}</ul></div>
+    <div class="ta-tooltip-section"><div class="ta-tooltip-lbl">Outputs</div><ul class="ta-tooltip-list">${fmtList(safeList(a.produced_outputs))}</ul></div>
+    <div class="ta-tooltip-section"><div class="ta-tooltip-lbl">Dependencies</div><ul class="ta-tooltip-list">${fmtList(safeList(a.dependencies))}</ul></div>
+    <div class="ta-tooltip-row"><span class="ta-tooltip-lbl">Stage</span><span class="ta-stage-tip">${esc(stage)}</span></div>`;
+   tip.hidden=false;
+   const r=row.getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight;
+   const w=tip.offsetWidth,h=tip.offsetHeight;
+   let left=r.left+40,top=r.bottom+8;
+   if(left+w+8>vw)left=vw-w-8;
+   if(top+h+8>vh)top=r.top-h-8;
+   tip.style.left=Math.max(8,left)+'px';
+   tip.style.top=Math.max(8,top)+'px';
+  });
+  row.addEventListener('mouseleave',()=>{tip.hidden=true});});
+ dlg.querySelector('#tmplSelAll')?.addEventListener('click',()=>{
+  const allSel=selectedSet.size===allAgents.length;
+  if(allSel)selectedSet.clear();else allAgents.forEach(a=>selectedSet.add(a.agent_id));
+  applyPruning()});
+ applyPruning();
+ const close=()=>{if(dlg.open)dlg.close();tip.remove();dlg.remove()};
+ dlg.querySelector('#tmplX').onclick=close;
+ dlg.querySelector('#tmplCancel').onclick=close;
+ dlg.addEventListener('close',()=>{tip.remove();dlg.remove()});
+ dlg.querySelector('#tmplForm').onsubmit=async e=>{
+  e.preventDefault();
+  const btn=dlg.querySelector('#tmplSubmit'),err=dlg.querySelector('#tmplErr');
+  const f=new FormData(e.target);
+  const name=(f.get('name')||'').trim();
+  const description=(f.get('description')||'').trim();
+  const{pruned}=computeTemplatePruned(selectedSet,allAgents);
+  const agent_ids=[...selectedSet].filter(id=>!pruned[id]);
+  if(!agent_ids.length){err.style.display='';err.textContent='Select at least one agent.';return}
+  btn.disabled=true;err.style.display='none';
+  try{
+   if(isEdit){
+    await api('/api/v2/agent-templates/'+template.id,{method:'PUT',body:JSON.stringify({name,description,agent_ids})});
+    notice('Template updated')
+   }else{
+    await api('/api/v2/agent-templates',{method:'POST',body:JSON.stringify({name,description,agent_ids})});
+    notice('Template created')
+   }
+   close();agentTemplatesPage()
+  }catch(x){err.style.display='';err.textContent=friendly(x.message);btn.disabled=false}}}
+
 async function modelRegistryPage(){
  const items=(await api('/api/v2/model-registry')).items||[];
  const canManage=canManageAgents();
@@ -607,6 +1011,129 @@ async function openModelDialog(row){
   f.region.value=row.region||'';
  }else{f.name.readOnly=false;}
  $('#modelDialog').showModal()}
+function skillStatusBadge(s){const m={APPROVED:'badge-success',DRAFT:'badge-warning',DEPRECATED:'badge-neutral'};return`<span class="badge ${m[s]||'badge-neutral'}"><span class="badge-dot"></span>${esc(s||'—')}</span>`}
+async function skillRegistryPage(){
+ const canManage=canManageAgents();
+ const [skillsRes,runtimesRes]=await Promise.all([api('/api/v2/skill-registry'),api('/api/v2/skill-runtimes')]);
+ const skills=skillsRes.items||[];
+ const runtimes=runtimesRes.items||[];
+ const runtimeMap=Object.fromEntries(runtimes.map(r=>[r.id,r]));
+ const plusSvg=`<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+ const runtimeRows=!runtimes.length?`<tr><td colspan="${canManage?7:6}" class="empty">No runtimes configured</td></tr>`
+  :runtimes.map(r=>`<tr>
+   <td style="font-family:ui-monospace,monospace;font-weight:600">${esc(r.display_name||r.name)}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(r.language)} ${esc(r.language_version||'')}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(r.framework||'—')} ${esc(r.framework_version_range||'')}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(r.build_tool||'—')}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(r.base_image||'—')}</td>
+   <td><span class="badge ${r.enabled?'badge-success':'badge-neutral'}"><span class="badge-dot"></span>${r.enabled?'Enabled':'Disabled'}</span> <span style="font-size:11px;color:var(--text-3)">${r.skill_count||0} skill${r.skill_count!==1?'s':''}</span></td>
+   ${canManage?`<td><button class="btn-sm" data-edit-runtime="${esc(r.id)}">Edit</button></td>`:''}</tr>`).join('');
+ const skillRows=!skills.length?`<tr><td colspan="${canManage?7:6}" class="empty">No skills registered yet. Use Register Skill to add one.</td></tr>`
+  :skills.map(x=>{const rt=runtimeMap[x.target_runtime_id]||{};return`<tr>
+   <td style="font-family:ui-monospace,monospace;font-weight:600">${esc(x.skill_key)}<div class="td-svc-id">v${esc(x.version)}</div></td>
+   <td style="font-size:12px">${esc(x.display_name||'—')}</td>
+   <td>${skillStatusBadge(x.status)}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(rt.display_name||rt.name||'—')}</td>
+   <td style="font-size:12px;color:var(--text-2)">${esc(x.source_path||'—')}</td>
+   <td style="font-size:12px;color:var(--text-3)">${fmtDt(x.created_at)||'—'}</td>
+   ${canManage?`<td><button class="btn-sm" data-edit-skill="${esc(x.id)}">Edit</button></td>`:''}</tr>`}).join('');
+ $('#view').innerHTML=`
+  <div class="page-header">
+   <div class="page-title">Skill Registry</div>
+   <div class="page-sub">${skills.length} skill${skills.length!==1?'s':''} registered · ${runtimes.length} runtime${runtimes.length!==1?'s':''} configured</div>
+  </div>
+  <div class="card" style="margin-bottom:20px">
+   <div class="card-head">
+    <div><div class="card-title">Target Runtimes</div><div class="card-sub">Execution environments available for skill targeting</div></div>
+    <div style="display:flex;align-items:center;gap:12px"><span class="live-dot">LIVE</span>${canManage?`<button id="addRuntime" class="btn-secondary">${plusSvg}Add Runtime</button>`:''}</div>
+   </div>
+   <div class="card-body"><div class="table-wrap"><table>
+    <thead><tr><th>Runtime</th><th>Language</th><th>Framework</th><th>Build Tool</th><th>Base Image</th><th>Status</th>${canManage?'<th></th>':''}</tr></thead>
+    <tbody>${runtimeRows}</tbody>
+   </table></div></div>
+  </div>
+  <div class="card">
+   <div class="card-head">
+    <div><div class="card-title">Registered Skills</div><div class="card-sub">Versioned migration procedures paired to target runtimes</div></div>
+    <div style="display:flex;align-items:center;gap:12px"><span class="live-dot">LIVE</span>${canManage?`<button id="addSkill" class="btn-primary">${plusSvg}Register Skill</button>`:''}</div>
+   </div>
+   <div class="card-body"><div class="table-wrap"><table>
+    <thead><tr><th>Skill Key / Version</th><th>Display Name</th><th>Status</th><th>Target Runtime</th><th>Source Path</th><th>Created</th>${canManage?'<th></th>':''}</tr></thead>
+    <tbody>${skillRows}</tbody>
+   </table></div></div>
+  </div>`;
+ if(canManage){
+  $('#addSkill').onclick=()=>openSkillDialog(null,runtimes);
+  $('#addRuntime').onclick=()=>openRuntimeDialog(null);
+  document.querySelectorAll('[data-edit-skill]').forEach(b=>b.onclick=()=>{
+   const row=skills.find(x=>x.id===b.dataset.editSkill);
+   if(row)openSkillDialog(row,runtimes)});
+  document.querySelectorAll('[data-edit-runtime]').forEach(b=>b.onclick=()=>{
+   const row=runtimes.find(x=>x.id===b.dataset.editRuntime);
+   if(row)openRuntimeDialog(row)})}}
+async function openSkillDialog(row,runtimes){
+ const f=$('#skillForm');
+ $('#skillDialogTitle').textContent=row?'Edit Skill Status':'Register Skill';
+ $('#skillError').textContent='';
+ f.reset();
+ const sel=$('#skillRuntimeSelect');
+ sel.innerHTML=(runtimes||[]).map(r=>`<option value="${esc(r.id)}">${esc(r.display_name||r.name)}</option>`).join('');
+ if(row){
+  f.skill_key.value=row.skill_key;f.skill_key.readOnly=true;
+  f.version.value=row.version;f.version.readOnly=true;
+  f.display_name.value=row.display_name||'';
+  f.description.value=row.description||'';
+  f.status.value=row.status||'DRAFT';
+  f.target_runtime_id.value=row.target_runtime_id||'';
+  f.source_path.value=row.source_path||'';
+  f.backend_types.value=row.backend_types?JSON.parse(row.backend_types||'[]').join(', '):'';
+ }else{
+  f.skill_key.readOnly=false;
+  f.version.readOnly=false;}
+ const dlg=$('#skillDialog');
+ dlg.showModal();
+ f.onsubmit=async e=>{
+  e.preventDefault();
+  const btn=$('#skillSubmit');btn.disabled=true;
+  try{
+   const vals=Object.fromEntries(new FormData(f));
+   if(vals.backend_types)vals.backend_types=JSON.stringify(vals.backend_types.split(',').map(v=>v.trim()).filter(Boolean));
+   if(row){
+    await api('/api/v2/skill-registry/'+row.id,{method:'PUT',body:JSON.stringify({status:vals.status})});
+    notice('Skill status updated');
+   }else{
+    await api('/api/v2/skill-registry',{method:'POST',body:JSON.stringify(vals)});
+    notice('Skill registered');
+   }
+   dlg.close();skillRegistryPage();
+  }catch(err){$('#skillError').textContent=err.message||'Error';btn.disabled=false;}}}
+async function openRuntimeDialog(row){
+ const f=$('#skillRuntimeForm');
+ $('#skillRuntimeDialogTitle').textContent=row?'Edit Runtime':'Add Runtime';
+ $('#skillRuntimeError').textContent='';
+ f.reset();
+ if(row){
+  f.name.value=row.name;f.name.readOnly=true;
+  f.display_name.value=row.display_name||'';
+  f.language.value=row.language||'java';
+  f.language_version.value=row.language_version||'';
+  f.framework.value=row.framework||'';
+  f.framework_version_range.value=row.framework_version_range||'';
+  f.build_tool.value=row.build_tool||'';
+  f.base_image.value=row.base_image||'';
+ }else{f.name.readOnly=false;}
+ const dlg=$('#skillRuntimeDialog');
+ dlg.showModal();
+ f.onsubmit=async e=>{
+  e.preventDefault();
+  const btn=$('#skillRuntimeSubmit');btn.disabled=true;
+  try{
+   const vals=Object.fromEntries(new FormData(f));
+   if(row){vals.id=row.id;await api('/api/v2/skill-runtimes/'+row.id,{method:'PUT',body:JSON.stringify(vals)});}
+   else{await api('/api/v2/skill-runtimes',{method:'POST',body:JSON.stringify(vals)});}
+   notice(row?'Runtime updated':'Runtime added');
+   dlg.close();skillRegistryPage();
+  }catch(err){$('#skillRuntimeError').textContent=err.message||'Error';btn.disabled=false;}}}
 async function openAgentDialog(row){
  const dlg=$('#agentDialog'),f=$('#agentForm');
  $('#agentDialogTitle').textContent=row?'Edit agent':'Add agent';$('#agentError').textContent='';const _sub=$('#agentDialog').querySelector('.dlg-sub');if(_sub)_sub.hidden=!!row;
@@ -702,6 +1229,8 @@ async function openAgentDialog(row){
  dlg.showModal()}
 $('#agentCancel').onclick=()=>$('#agentDialog').close();
 $('#modelCancel').onclick=()=>$('#modelDialog').close();
+$('#skillCancel').onclick=()=>$('#skillDialog').close();
+$('#skillRuntimeCancel').onclick=()=>$('#skillRuntimeDialog').close();
 $('#modelForm').onsubmit=async e=>{
  e.preventDefault();const btn=$('#modelSubmit'),err=$('#modelError'),f=e.target;btn.disabled=true;err.textContent='';
  try{
@@ -1131,7 +1660,9 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p==='approval-governance'){await approvalGovernance();refreshTimer=setInterval(approvalGovernance,5000);return}
  if(p==='approval-inbox'){await approvalInbox();refreshTimer=setInterval(approvalInbox,5000);return}
  if(p==='agent-registry')return agentRegistryPage();
+ if(p==='agent-templates')return agentTemplatesPage();
  if(p==='model-registry')return modelRegistryPage();
+ if(p==='skill-registry')return skillRegistryPage();
  if(p==='dashboard'){
   const [jobs,approvals,pipelines]=await Promise.all([api('/api/v2/jobs'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/pipelines').catch(()=>({items:[]}))]);
 
@@ -1139,7 +1670,9 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
   const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${esc(x.service||x.workspace_dir||x.id)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
   const pendingCount=(approvals.items||[]).length;
-  const appRows=(approvals.items||[]).slice(0,5).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
+  const APPR_LIMIT=5;
+  const appRows=(approvals.items||[]).slice(0,APPR_LIMIT).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
+  const appOverflow=pendingCount>APPR_LIMIT?`<div style="padding:10px 20px 14px"><button id="dashViewAllApprovals2" class="btn-ghost" style="width:100%;justify-content:center;font-size:12px;color:var(--text-2)">+${pendingCount-APPR_LIMIT} more · View all →</button></div>`:'';
   const totalJobs=d.jobs||0;const pendingByGate={};(approvals.items||[]).forEach(x=>{if(x.gate)pendingByGate[x.gate]=(pendingByGate[x.gate]||0)+1});
   const stepCards=plSteps.slice(0,12).map(s=>{const st=s.status||'PENDING';const dot=`<div class="stepdot"></div>`;const time=s.finished_at?'Finished '+fmtTime(s.finished_at):s.started_at?'Running…':'Waiting';return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
   const pipelineTitle=runPl?(runPl.workspace_dir||runPl.id||'Pipeline'):'Recent Pipeline';
@@ -1156,12 +1689,13 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   const completedJobs=stageCounts[LC_STAGES.length-1].count;
   const lcSummary=jobList.length?`<span class="lifecycle-summary"><strong>${jobList.length}</strong> jobs &middot; <strong>${completedJobs}</strong> complete</span>`:`<span class="lifecycle-summary">No jobs yet</span>`;
   const inboxCard=pendingCount>0
-    ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">${pendingCount} Pending Approval${pendingCount>1?'s':''}</div><div class="card-sub">${pendingCount} action${pendingCount>1?'s':''} required to unblock pipelines</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div>${appRows}</div>`
+    ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">${pendingCount} Pending Approval${pendingCount>1?'s':''}</div><div class="card-sub">${pendingCount} action${pendingCount>1?'s':''} required to unblock pipelines</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div>${appRows}${appOverflow}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
   $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Command Center</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state</div></div><button id="dashViewAllJobs" class="btn-ghost">View all →</button></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   $('#dashViewAllJobs')?.addEventListener('click',()=>{location.hash='jobs';});
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
+  $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   return}
  if(p==='clarifications'){await clarificationsPage();return}
  if(p==='agent-health'){
