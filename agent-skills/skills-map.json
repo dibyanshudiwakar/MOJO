@@ -1,0 +1,683 @@
+{
+  "source_skill": "external-skills/iib-to-ms-migration",
+  "catalogue": "config/agent-catalogue.v1.json",
+  "note": "One self-contained skill per agent. Each reference file has one owner; other skills hold byte-identical copies (kind=copy). Regenerate with scripts/sync_agent_skills.py.",
+  "agents": [
+    {
+      "agent_id": "migration-orchestrator",
+      "skill_name": "iib-to-ms-migration-orchestrator",
+      "skill_path": "iib-to-ms-migration-orchestrator/SKILL.md",
+      "skill_sha256": "a5116a7a06969e7e6730b0b567070e95612e31233f41f22cdbb527a444d67be9",
+      "required_role": "ORCHESTRATOR",
+      "depends_on": [],
+      "references": [
+        {
+          "path": "references/definition-of-done.md",
+          "sha256": "15493b884c51f41bc142cd273197d5d073e91d587b677c67d96da24f15902ceb",
+          "kind": "owned",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/handoff-and-action-items.md",
+          "sha256": "f90bc908574b4ca5303ef8db3a02243db4c563b357a2ad39e5b78ea278ed745a",
+          "kind": "owned",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/hard-constraints.md",
+          "sha256": "91cad8a622ef939986e955b8a76df2d9a203ced12fa1183933f4af6cb8751a16",
+          "kind": "copy",
+          "owner": "iib-to-ms-governance"
+        },
+        {
+          "path": "references/scope-boundary.md",
+          "sha256": "18b907fe90de43f3a659e8cdf32e06b4a380e9392eee5def4623990281a4e138",
+          "kind": "owned",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/state-file-and-resumption.md",
+          "sha256": "359298b41ba77e925bb9efb60b98de2f9547dd8281cf492a2ae8019b382f7358",
+          "kind": "owned",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/verification-checklists.md",
+          "sha256": "020f5eea4d42237b90acecdb054f5d56cb8e11c6b1ff547c761e709a66ee4e86",
+          "kind": "copy",
+          "owner": "iib-to-ms-governance"
+        }
+      ]
+    },
+    {
+      "agent_id": "repository-intake",
+      "skill_name": "iib-to-ms-repository-intake",
+      "skill_path": "iib-to-ms-repository-intake/SKILL.md",
+      "skill_sha256": "f7013618959c726c4f288f5a3e14cf6951ca5d7e083c4014c5ed2d666acd6793",
+      "required_role": "REPOSITORY_INTAKE",
+      "depends_on": [],
+      "references": [
+        {
+          "path": "references/backend-type-detection.md",
+          "sha256": "f61b0ca8bba40bef7489cb770e29ea5b6e930b8afc55e19a7539d4b4ac78b4a9",
+          "kind": "copy",
+          "owner": "iib-to-ms-ace-analysis"
+        },
+        {
+          "path": "references/intake-procedure.md",
+          "sha256": "203bf2b2e4603b66b0c7f0a6bfa556d286da076f6b1a5bce5b51439f91772ae8",
+          "kind": "owned",
+          "owner": "iib-to-ms-repository-intake"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/state-file-and-resumption.md",
+          "sha256": "359298b41ba77e925bb9efb60b98de2f9547dd8281cf492a2ae8019b382f7358",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        }
+      ]
+    },
+    {
+      "agent_id": "ace-analysis",
+      "skill_name": "iib-to-ms-ace-analysis",
+      "skill_path": "iib-to-ms-ace-analysis/SKILL.md",
+      "skill_sha256": "f53fc70721573486d60fc5ce72780c2be8a564e3e262ca7c1c8ef955b1ec5459",
+      "required_role": "ACE_ANALYST",
+      "depends_on": [
+        "repository-intake"
+      ],
+      "references": [
+        {
+          "path": "references/backend-type-detection.md",
+          "sha256": "f61b0ca8bba40bef7489cb770e29ea5b6e930b8afc55e19a7539d4b4ac78b4a9",
+          "kind": "owned",
+          "owner": "iib-to-ms-ace-analysis"
+        },
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "copy",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/construct-mapping.md",
+          "sha256": "e03d9f2217d2764cd73b4f9034ded8f43b035d2260d87c648c5ffc4afb59a162",
+          "kind": "copy",
+          "owner": "iib-to-ms-planning"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        }
+      ]
+    },
+    {
+      "agent_id": "framework-baseline",
+      "skill_name": "iib-to-ms-framework-baseline",
+      "skill_path": "iib-to-ms-framework-baseline/SKILL.md",
+      "skill_sha256": "e06a00b4e0376225049e1ccccc8a414e74d24e08bc3000880b9ca4d517a82d14",
+      "required_role": "FRAMEWORK_ANALYST",
+      "depends_on": [
+        "repository-intake"
+      ],
+      "references": [
+        {
+          "path": "references/evidence-hierarchy.md",
+          "sha256": "56404c34eef2c1a1492c296331d066a6c30c9462f4c2468f57a01914ab4ef9bf",
+          "kind": "copy",
+          "owner": "iib-to-ms-knowledge-evidence"
+        },
+        {
+          "path": "references/fixed-file-templates.md",
+          "sha256": "629c55c840ff2036e35fe4950badd38cf11c629691707cc46c6336ccb3b40330",
+          "kind": "owned",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/structural-conventions.md",
+          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "kind": "owned",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/templates/config-map-baseline.properties",
+          "sha256": "71247065bfe449aa8f5baa4e2cbfef774375df1b05d18663d9ad7568255bc6fe",
+          "kind": "owned",
+          "owner": "iib-to-ms-framework-baseline"
+        }
+      ]
+    },
+    {
+      "agent_id": "migration-specification",
+      "skill_name": "iib-to-ms-migration-specification",
+      "skill_path": "iib-to-ms-migration-specification/SKILL.md",
+      "skill_sha256": "6c7d67bed6f85286dddf4ca39ac0de7d49f9cb26d5ae80f02f534fa75280349a",
+      "required_role": "SPECIFICATION_AUTHOR",
+      "depends_on": [
+        "ace-analysis"
+      ],
+      "references": [
+        {
+          "path": "references/backend-type-detection.md",
+          "sha256": "f61b0ca8bba40bef7489cb770e29ea5b6e930b8afc55e19a7539d4b4ac78b4a9",
+          "kind": "copy",
+          "owner": "iib-to-ms-ace-analysis"
+        },
+        {
+          "path": "references/construct-mapping.md",
+          "sha256": "e03d9f2217d2764cd73b4f9034ded8f43b035d2260d87c648c5ffc4afb59a162",
+          "kind": "copy",
+          "owner": "iib-to-ms-planning"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/state-file-and-resumption.md",
+          "sha256": "359298b41ba77e925bb9efb60b98de2f9547dd8281cf492a2ae8019b382f7358",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/type-and-context-root-rules.md",
+          "sha256": "d8377870fd144d8757cdc14c3cc6a0ceb4e07dd20da0479c26371856f31d7515",
+          "kind": "owned",
+          "owner": "iib-to-ms-migration-specification"
+        }
+      ]
+    },
+    {
+      "agent_id": "planning",
+      "skill_name": "iib-to-ms-planning",
+      "skill_path": "iib-to-ms-planning/SKILL.md",
+      "skill_sha256": "b0b0a8b96b3d4b20e5058bfd53a813026a02e96a60f03acbccb0a1fd12f69db4",
+      "required_role": "MIGRATION_PLANNER",
+      "depends_on": [
+        "migration-specification",
+        "framework-baseline"
+      ],
+      "references": [
+        {
+          "path": "references/construct-mapping.md",
+          "sha256": "e03d9f2217d2764cd73b4f9034ded8f43b035d2260d87c648c5ffc4afb59a162",
+          "kind": "owned",
+          "owner": "iib-to-ms-planning"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/ibm-mq-cobol-copybook.md",
+          "sha256": "e1040275cc7297a0af45a9169bd52ecdbdf76fcd940eec2a3f83460b523ad956",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/ql-cics-camel-bindy.md",
+          "sha256": "de12502f5fb8c27283e7efdd4dcb750f19dd2533374e8d5607372811b69d4df0",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/rest-external-direct.md",
+          "sha256": "f5ff77c2ca2995577ee8d6b8791cafb50b6b2219970167b09a9ce9a9d698606b",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/rxclaim-sbo-xml-jaxb.md",
+          "sha256": "2cd775d08eba841b796737c66ee45cd3bd6908bc3dd25c2493074659a3378bce",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scaffold-and-generate.md",
+          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/soap-backend.md",
+          "sha256": "5c1c49554d84c8c5be3409a02d2c4e006460bcd5d4ddb4100088589fc3867329",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/structural-conventions.md",
+          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/type-and-context-root-rules.md",
+          "sha256": "d8377870fd144d8757cdc14c3cc6a0ceb4e07dd20da0479c26371856f31d7515",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-specification"
+        }
+      ]
+    },
+    {
+      "agent_id": "code-generation",
+      "skill_name": "iib-to-ms-code-generation",
+      "skill_path": "iib-to-ms-code-generation/SKILL.md",
+      "skill_sha256": "1bb8dbb2a83d1a7b3093afa651bc09ea23ed23869630f1be6a2105c635d6897d",
+      "required_role": "CODE_GENERATOR",
+      "depends_on": [
+        "planning"
+      ],
+      "references": [
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "copy",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/construct-mapping.md",
+          "sha256": "e03d9f2217d2764cd73b4f9034ded8f43b035d2260d87c648c5ffc4afb59a162",
+          "kind": "copy",
+          "owner": "iib-to-ms-planning"
+        },
+        {
+          "path": "references/fixed-file-templates.md",
+          "sha256": "629c55c840ff2036e35fe4950badd38cf11c629691707cc46c6336ccb3b40330",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/handoff-and-action-items.md",
+          "sha256": "f90bc908574b4ca5303ef8db3a02243db4c563b357a2ad39e5b78ea278ed745a",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/handoff-build-and-reconcile.md",
+          "sha256": "32836607b704cf8db4f456b9cc7722ba4cb2c8aead4598a2c3d99265f1602b96",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/ibm-mq-cobol-copybook.md",
+          "sha256": "e1040275cc7297a0af45a9169bd52ecdbdf76fcd940eec2a3f83460b523ad956",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/ql-cics-camel-bindy.md",
+          "sha256": "de12502f5fb8c27283e7efdd4dcb750f19dd2533374e8d5607372811b69d4df0",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/rest-external-direct.md",
+          "sha256": "f5ff77c2ca2995577ee8d6b8791cafb50b6b2219970167b09a9ce9a9d698606b",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/rxclaim-sbo-xml-jaxb.md",
+          "sha256": "2cd775d08eba841b796737c66ee45cd3bd6908bc3dd25c2493074659a3378bce",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scaffold-and-generate.md",
+          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/soap-backend.md",
+          "sha256": "5c1c49554d84c8c5be3409a02d2c4e006460bcd5d4ddb4100088589fc3867329",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/structural-conventions.md",
+          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/templates/config-map-baseline.properties",
+          "sha256": "71247065bfe449aa8f5baa4e2cbfef774375df1b05d18663d9ad7568255bc6fe",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/type-and-context-root-rules.md",
+          "sha256": "d8377870fd144d8757cdc14c3cc6a0ceb4e07dd20da0479c26371856f31d7515",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-specification"
+        }
+      ]
+    },
+    {
+      "agent_id": "test-engineering",
+      "skill_name": "iib-to-ms-test-engineering",
+      "skill_path": "iib-to-ms-test-engineering/SKILL.md",
+      "skill_sha256": "eb1cd4cc39f03bfe9803c591256fd9a31ea0d93109d4786652fbb2228dccc4f0",
+      "required_role": "TEST_ENGINEER",
+      "depends_on": [
+        "ace-analysis"
+      ],
+      "references": [
+        {
+          "path": "references/handoff-build-and-reconcile.md",
+          "sha256": "32836607b704cf8db4f456b9cc7722ba4cb2c8aead4598a2c3d99265f1602b96",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/rest-external-direct.md",
+          "sha256": "f5ff77c2ca2995577ee8d6b8791cafb50b6b2219970167b09a9ce9a9d698606b",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scaffold-and-generate.md",
+          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scope-boundary.md",
+          "sha256": "18b907fe90de43f3a659e8cdf32e06b4a380e9392eee5def4623990281a4e138",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/smoke-test-procedure.md",
+          "sha256": "82c00486c9cae4b1ea796f1d86d7c770f203e8831844bfcddea982cd09326f8a",
+          "kind": "owned",
+          "owner": "iib-to-ms-test-engineering"
+        }
+      ]
+    },
+    {
+      "agent_id": "variance-analysis",
+      "skill_name": "iib-to-ms-variance-analysis",
+      "skill_path": "iib-to-ms-variance-analysis/SKILL.md",
+      "skill_sha256": "59c43bef1d6e6380f212a0d8919cb5a29b25c2b1bdf2fb79e54d887ae981e82c",
+      "required_role": "VARIANCE_ANALYST",
+      "depends_on": [
+        "test-engineering"
+      ],
+      "references": [
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "copy",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/known-variance-signatures.md",
+          "sha256": "d1af285419e469b02b546a3ba817ebef0c7649e55e6e85b8c2b756c9685ce8f8",
+          "kind": "owned",
+          "owner": "iib-to-ms-variance-analysis"
+        },
+        {
+          "path": "references/scope-boundary.md",
+          "sha256": "18b907fe90de43f3a659e8cdf32e06b4a380e9392eee5def4623990281a4e138",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        }
+      ]
+    },
+    {
+      "agent_id": "rca",
+      "skill_name": "iib-to-ms-rca",
+      "skill_path": "iib-to-ms-rca/SKILL.md",
+      "skill_sha256": "b5dd90defdd7359dc292b35c41615968c213504d87c9a9571f40ab04607da301",
+      "required_role": "RCA_ANALYST",
+      "depends_on": [
+        "variance-analysis"
+      ],
+      "references": [
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "owned",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/evidence-hierarchy.md",
+          "sha256": "56404c34eef2c1a1492c296331d066a6c30c9462f4c2468f57a01914ab4ef9bf",
+          "kind": "copy",
+          "owner": "iib-to-ms-knowledge-evidence"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/known-variance-signatures.md",
+          "sha256": "d1af285419e469b02b546a3ba817ebef0c7649e55e6e85b8c2b756c9685ce8f8",
+          "kind": "copy",
+          "owner": "iib-to-ms-variance-analysis"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        }
+      ]
+    },
+    {
+      "agent_id": "remediation",
+      "skill_name": "iib-to-ms-remediation",
+      "skill_path": "iib-to-ms-remediation/SKILL.md",
+      "skill_sha256": "7b11af30d8040d76d4455d833d12a3dd812bc97021136f1546a66de8df790cdb",
+      "required_role": "REMEDIATION_ENGINEER",
+      "depends_on": [
+        "rca"
+      ],
+      "references": [
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "copy",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/fix-and-retry-policy.md",
+          "sha256": "e74d9e852b17d22ca3d88d6a6b8e3fa4b78ea790b6b3f76c4f6dc8bba988c0d5",
+          "kind": "owned",
+          "owner": "iib-to-ms-remediation"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scaffold-and-generate.md",
+          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/smoke-test-procedure.md",
+          "sha256": "82c00486c9cae4b1ea796f1d86d7c770f203e8831844bfcddea982cd09326f8a",
+          "kind": "copy",
+          "owner": "iib-to-ms-test-engineering"
+        }
+      ]
+    },
+    {
+      "agent_id": "governance",
+      "skill_name": "iib-to-ms-governance",
+      "skill_path": "iib-to-ms-governance/SKILL.md",
+      "skill_sha256": "f57166fcf6a0b64b4b7232c6ed29721517fa27810c0cb8856d5c206276ffc894",
+      "required_role": "GOVERNANCE_ENGINE",
+      "depends_on": [],
+      "references": [
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/hard-constraints.md",
+          "sha256": "91cad8a622ef939986e955b8a76df2d9a203ced12fa1183933f4af6cb8751a16",
+          "kind": "owned",
+          "owner": "iib-to-ms-governance"
+        },
+        {
+          "path": "references/mandatory-migration-rules.md",
+          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        },
+        {
+          "path": "references/scope-boundary.md",
+          "sha256": "18b907fe90de43f3a659e8cdf32e06b4a380e9392eee5def4623990281a4e138",
+          "kind": "copy",
+          "owner": "iib-to-ms-migration-orchestrator"
+        },
+        {
+          "path": "references/structural-conventions.md",
+          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/verification-checklists.md",
+          "sha256": "020f5eea4d42237b90acecdb054f5d56cb8e11c6b1ff547c761e709a66ee4e86",
+          "kind": "owned",
+          "owner": "iib-to-ms-governance"
+        }
+      ]
+    },
+    {
+      "agent_id": "knowledge-evidence",
+      "skill_name": "iib-to-ms-knowledge-evidence",
+      "skill_path": "iib-to-ms-knowledge-evidence/SKILL.md",
+      "skill_sha256": "a47ac8160f700fa4d823b4ad4df567957cde60a4b47d3522d766f52fc0923025",
+      "required_role": "KNOWLEDGE_CURATOR",
+      "depends_on": [],
+      "references": [
+        {
+          "path": "references/common-patterns-and-gotchas.md",
+          "sha256": "42c86e2c0557a1f728499872202284bafc32293be9f0c042c6bac9213589ea07",
+          "kind": "copy",
+          "owner": "iib-to-ms-rca"
+        },
+        {
+          "path": "references/evidence-hierarchy.md",
+          "sha256": "56404c34eef2c1a1492c296331d066a6c30c9462f4c2468f57a01914ab4ef9bf",
+          "kind": "owned",
+          "owner": "iib-to-ms-knowledge-evidence"
+        },
+        {
+          "path": "references/fixed-file-templates.md",
+          "sha256": "629c55c840ff2036e35fe4950badd38cf11c629691707cc46c6336ccb3b40330",
+          "kind": "copy",
+          "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/gap-checklist.md",
+          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "kind": "copy",
+          "owner": "iib-to-ms-code-generation"
+        }
+      ]
+    }
+  ],
+  "agents_without_skill": [
+    {
+      "agent_id": "dormancy-intelligence",
+      "reason": "The source skill never decides whether a service is worth migrating. It has no traffic, telemetry, deployment-inventory or dormancy content, so any skill written for this agent would be invented."
+    }
+  ],
+  "reference_owners": {
+    "backend-type-detection.md": "iib-to-ms-ace-analysis",
+    "common-patterns-and-gotchas.md": "iib-to-ms-rca",
+    "construct-mapping.md": "iib-to-ms-planning",
+    "definition-of-done.md": "iib-to-ms-migration-orchestrator",
+    "evidence-hierarchy.md": "iib-to-ms-knowledge-evidence",
+    "fix-and-retry-policy.md": "iib-to-ms-remediation",
+    "fixed-file-templates.md": "iib-to-ms-framework-baseline",
+    "gap-checklist.md": "iib-to-ms-code-generation",
+    "handoff-and-action-items.md": "iib-to-ms-migration-orchestrator",
+    "handoff-build-and-reconcile.md": "iib-to-ms-code-generation",
+    "hard-constraints.md": "iib-to-ms-governance",
+    "ibm-mq-cobol-copybook.md": "iib-to-ms-code-generation",
+    "intake-procedure.md": "iib-to-ms-repository-intake",
+    "known-variance-signatures.md": "iib-to-ms-variance-analysis",
+    "mandatory-migration-rules.md": "iib-to-ms-code-generation",
+    "ql-cics-camel-bindy.md": "iib-to-ms-code-generation",
+    "rest-external-direct.md": "iib-to-ms-code-generation",
+    "rxclaim-sbo-xml-jaxb.md": "iib-to-ms-code-generation",
+    "scaffold-and-generate.md": "iib-to-ms-code-generation",
+    "scope-boundary.md": "iib-to-ms-migration-orchestrator",
+    "smoke-test-procedure.md": "iib-to-ms-test-engineering",
+    "soap-backend.md": "iib-to-ms-code-generation",
+    "state-file-and-resumption.md": "iib-to-ms-migration-orchestrator",
+    "structural-conventions.md": "iib-to-ms-framework-baseline",
+    "templates/config-map-baseline.properties": "iib-to-ms-framework-baseline",
+    "type-and-context-root-rules.md": "iib-to-ms-migration-specification",
+    "verification-checklists.md": "iib-to-ms-governance"
+  }
+}
