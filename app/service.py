@@ -46,7 +46,7 @@ ITERATION_ADVANCING={'REMEDIATING','BUILD_VALIDATED','FAILED'}
 _LIFECYCLE_AGENT_SVC={'FRAMEWORK_BASELINED':'framework-baseline','ACE_ANALYSED':'ace-analysis','PLAN_APPROVED':'planning','IMPLEMENTING':'code-generation'}
 def _explicitly_disabled_agents(repo,job_id):
  """Return agent IDs that were explicitly deselected in the latest active pipeline for job_id."""
- pl=repo.one("select id from pipelines where job_id=? and status in ('RUNNING','DRAFT') order by created_at desc limit 1",(job_id,))
+ pl=repo.one("select id from pipelines where job_id=? and status in ('DRAFT','READY','RUNNING','PAUSED','WAITING_APPROVAL') order by created_at desc limit 1",(job_id,))
  if not pl:return set()
  rows=repo.rows("select agent_id,error from pipeline_steps where pipeline_id=? and status='SKIPPED'",(pl['id'],))
  return {r['agent_id'] for r in rows if 'skip_kind:explicitly_disabled' in str(r['error'] or '')}

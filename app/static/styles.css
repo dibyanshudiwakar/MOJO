@@ -1131,3 +1131,15 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .tpick-agent-name{font-size:12px;font-weight:500;color:var(--text);flex:1}
 .tpick-empty{padding:28px 20px;text-align:center;font-size:13px;color:var(--text-3);line-height:1.6}
 .tpick-ftr{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-top:1px solid var(--border);background:var(--bg)}
+
+/* Governance hold. Deliberately amber-but-distinct from .psc-paused: a hold is
+   waiting on an approver, a pause is waiting on the operator who made it, and
+   reading one as the other sends people to the wrong place. */
+.pc-waiting_approval{border-left-color:#f79009!important}
+.psc-waiting_approval{background:rgba(247,144,9,.12);color:#b54708;border:1px solid rgba(247,144,9,.35)}
+.step-card.WAITING_APPROVAL{opacity:1}
+.step-card.WAITING_APPROVAL .step-icon{color:#f79009}
+.status-dot-WAITING_APPROVAL{background:#f79009}
+.step-status-label.WAITING_APPROVAL{background:rgba(247,144,9,.12);color:#b54708}
+.pipeline-step.WAITING_APPROVAL{background:rgba(247,144,9,.12);color:#b54708}
+.op-status-chip.WAITING_APPROVAL{background:rgba(247,144,9,.12);color:#b54708}

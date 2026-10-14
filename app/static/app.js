@@ -1,7 +1,7 @@
 ﻿const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fmtDt(v){if(!v||v==='—')return v||'—';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function fmtTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
-function stateBadge(s){const map={COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
+function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
 function progressFillClass(state,pct){const s=String(state||'').toUpperCase();const p=s in STATE_PCT?STATE_PCT[s]:(pct||0);if(s==='COMPLETED'||p>=100)return ' darkgreen';if(s==='FAILED'||s==='ROLLED_BACK')return ' error';if(s==='READY_FOR_PROMOTION')return ' done';if(s==='TEST_PASSED')return ' cyan';if(s.startsWith('WAITING_'))return ' orange';if(s==='PLAN_APPROVED')return ' orange';if(s==='REMEDIATING')return ' error';if(['DIFFERENTIAL_TESTING','VARIANCE_REVIEW'].includes(s))return ' cyan';if(['FRAMEWORK_BASELINED','ACE_ANALYSED'].includes(s))return ' purple';if(['INTAKE_VALIDATED','DORMANCY_ASSESSED'].includes(s))return ' teal';if(['IMPLEMENTING','BUILD_VALIDATED'].includes(s))return ' blue';if(s==='CREATED')return ' neutral';return ''}
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
@@ -1349,7 +1349,7 @@ $('#agentForm').onsubmit=async e=>{
  finally{btn.disabled=false}};
 
 // ---- Pipelines: list and live detail view ---------------------------------
-const STEP_STATUS_LABEL={PENDING:'Pending',QUEUED:'Queued',RUNNING:'Running',COMPLETED:'Completed',FAILED:'Failed',SKIPPED:'Skipped',CANCELLED:'Cancelled'};
+const STEP_STATUS_LABEL={PENDING:'Pending',QUEUED:'Queued',RUNNING:'Running',COMPLETED:'Completed',FAILED:'Failed',SKIPPED:'Skipped',CANCELLED:'Cancelled',WAITING_APPROVAL:'Waiting approval'};
 const STEP_KIND_LABEL={CLONE:'Clone',AGENT:'Agent',DELIVERY:'Delivery'};
 const AGENT_DESC_MAP={
  'repository-intake':'Clones and indexes the ACE repository structure and artefacts.',
@@ -1382,7 +1382,7 @@ function stepDesc(step){
  if(step.kind==='DELIVERY')return 'Push generated Spring Boot code to the target repository.';
  return AGENT_DESC_MAP[step.agent_id]||''}
 function stepCard(step){
- const clickable=step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED';
+ const clickable=step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL';
  const dur=step.started_at&&step.completed_at?((new Date(step.completed_at)-new Date(step.started_at))/1000).toFixed(1)+'s':'';
  return `<div class="step-card ${esc(step.status)}" data-step="${esc(step.id)}">
   <div class="step-card-top">
@@ -1421,13 +1421,14 @@ async function pipelineDetail(id){
  $('#title').textContent=p.workspace_dir||'Pipeline';
  const counts={};p.steps.forEach(s=>counts[s.status]=(counts[s.status]||0)+1);
  const done=(counts.COMPLETED||0),total=p.steps.length,pct=total?Math.round(done/total*100):0;
- const statusBadgeClass=s=>({COMPLETED:'completed',RUNNING:'running',FAILED:'failed',PENDING:'pending',QUEUED:'queued',SKIPPED:'skipped',CANCELLED:'cancelled'}[s]||'pending');
+ const statusBadgeClass=s=>({COMPLETED:'completed',RUNNING:'running',FAILED:'failed',PENDING:'pending',QUEUED:'queued',SKIPPED:'skipped',CANCELLED:'cancelled',WAITING_APPROVAL:'warning'}[s]||'pending');
  const actions=[
   p.status==='DRAFT'?`<button id="pConfirm" class="btn-sm primary">Confirm &amp; Run</button>`:'',
   p.status==='READY'?`<button id="pRun" class="btn-sm primary">Run pipeline</button>`:'',
   p.status==='RUNNING'?`<button id="pPause" class="btn-sm">Pause</button>`:'',
   p.status==='PAUSED'?`<button id="pResume" class="btn-sm primary">Resume</button>`:'',
-  (p.status==='RUNNING'||p.status==='PAUSED')?`<button id="pCancel" class="btn-sm danger">Stop</button>`:'',
+  p.status==='WAITING_APPROVAL'?`<button id="pPause" class="btn-sm">Pause</button>`:'',
+  (p.status==='RUNNING'||p.status==='PAUSED'||p.status==='WAITING_APPROVAL')?`<button id="pCancel" class="btn-sm danger">Stop</button>`:'',
  ].join('');
  // Group steps by stage
  const stageMap={};
@@ -1469,7 +1470,7 @@ async function pipelineDetail(id){
   const step=p.steps.find(s=>s.id===el.dataset.step);
   if(step&&(step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'))
    el.onclick=()=>openStepOutput(id,el.dataset.step,step)});
- if(p.status==='RUNNING'||p.status==='PAUSED'){clearInterval(refreshTimer);refreshTimer=setInterval(()=>pipelineDetail(id),5000)}}
+ if(p.status==='RUNNING'||p.status==='PAUSED'||p.status==='WAITING_APPROVAL'){clearInterval(refreshTimer);refreshTimer=setInterval(()=>pipelineDetail(id),5000)}}
 function parseStepError(error,kind,agentId){
  const raw=error||'Unknown failure';
  const low=raw.toLowerCase();
@@ -1541,7 +1542,7 @@ async function openStepOutput(pipelineId,stepId,step){
  let detail=step;
  try{detail=await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/output`)}catch(e){}
  const panel=$('#outputPanel'),backdrop=$('#panelBackdrop');
- const statusColors={COMPLETED:'#12b76a',RUNNING:'#3157e5',FAILED:'#d92d20',PENDING:'#98a2b3',QUEUED:'#98a2b3'};
+ const statusColors={COMPLETED:'#12b76a',RUNNING:'#3157e5',FAILED:'#d92d20',PENDING:'#98a2b3',QUEUED:'#98a2b3',WAITING_APPROVAL:'#f79009'};
  const sc=statusColors[detail.status]||'#98a2b3';
  const outputs=typeof detail.outputs==='object'&&detail.outputs?detail.outputs:{};
  const params=stepParams(detail);

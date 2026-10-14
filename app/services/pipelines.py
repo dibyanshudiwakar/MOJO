@@ -19,6 +19,7 @@ import logging
 import re as _re
 from app.repository import uid, now, digest
 from app.services import workspace
+from app.services.factory_v3 import WorkflowOrchestrator
 from app.service import FactoryService
 from app.services.policy import PolicyError
 from app.domain.state_machine import TransitionError
@@ -61,6 +62,13 @@ PARAM_SOURCES = {
 # must wait for that repository's CLONE step even though the catalogue's
 # dependency graph (agent-to-agent only) has no way to express that.
 REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-baseline': 'FRAMEWORK'}
+
+# A governance hold, derived from a step parked at an unapproved gate. Distinct
+# from the operator's PAUSED: an operator may undo their own pause, but only an
+# approver releases a hold, so the two must never be the same value.
+HELD = 'WAITING_APPROVAL'
+# Pipeline statuses in which the scheduler still owns the pipeline.
+_SCHEDULER_OWNED = ('RUNNING', HELD)
 
 # Central mapping: agent_id → the lifecycle state that agent's successful
 # completion should drive. FactoryService.transition() remains the single
@@ -360,7 +368,7 @@ class PipelineService:
         p = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
         if not p:
             raise ValueError('pipeline_not_found')
-        if p['status'] != 'RUNNING':
+        if p['status'] not in _SCHEDULER_OWNED:
             raise PipelineError('pipeline_not_running:' + p['status'])
         queued = self.repo.rows("select * from pipeline_steps where pipeline_id=? and status='QUEUED'", (pipeline_id,))
         with self.repo.connect() as c:
@@ -377,9 +385,13 @@ class PipelineService:
             raise ValueError('pipeline_not_found')
         if p['status'] != 'PAUSED':
             raise PipelineError('pipeline_not_paused:' + p['status'])
-        with self.repo.connect() as c:
-            c.execute("update pipelines set status='RUNNING',updated_at=? where id=?", (now(), pipeline_id))
-        self._schedule_ready(pipeline_id, workflow)
+        self._set_status(pipeline_id, 'RUNNING')
+        # advance() rather than _schedule_ready(): it re-derives the halt reason
+        # from the steps, so resuming a pipeline whose gate is still unapproved
+        # lands back on WAITING_APPROVAL and schedules nothing. That makes
+        # "an operator cannot resume past a gate" structural rather than a
+        # separate check that could be forgotten.
+        self.advance(pipeline_id, workflow)
         return self.detail(pipeline_id)
 
     def cancel(self, pipeline_id, workflow):
@@ -393,7 +405,7 @@ class PipelineService:
         p = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
         if not p:
             raise ValueError('pipeline_not_found')
-        if p['status'] not in ('DRAFT', 'READY', 'RUNNING', 'PAUSED'):
+        if p['status'] not in ('DRAFT', 'READY', 'RUNNING', 'PAUSED', HELD):
             raise PipelineError('pipeline_not_cancellable:' + p['status'])
         rows = self.repo.rows('select * from pipeline_steps where pipeline_id=?', (pipeline_id,))
         with self.repo.connect() as c:
@@ -402,8 +414,12 @@ class PipelineService:
                     if step['queue_id']:
                         workflow.cancel(step['queue_id'])
                     c.execute("update pipeline_steps set status='CANCELLED',queue_id='',updated_at=? where id=?", (now(), step['id']))
-                elif step['status'] == 'PENDING':
-                    c.execute("update pipeline_steps set status='CANCELLED',updated_at=? where id=?", (now(), step['id']))
+                elif step['status'] in ('PENDING', HELD):
+                    # A held step is cancellable like an unstarted one. The job
+                    # stays at WAITING_Gx and its approval package stays open:
+                    # closing one is a governed act for an approver, not
+                    # something cancelling a pipeline may do.
+                    c.execute("update pipeline_steps set status='CANCELLED',queue_id='',updated_at=? where id=?", (now(), step['id']))
             c.execute("update pipelines set status='CANCELLED',completed_at=?,updated_at=? where id=?", (now(), now(), pipeline_id))
         return self.detail(pipeline_id)
 
@@ -421,12 +437,95 @@ class PipelineService:
 
     def _schedule_ready(self, pipeline_id, workflow):
         job_id = self.repo.one('select job_id from pipelines where id=?', (pipeline_id,))['job_id']
-        ready, _ = self._ready_steps(pipeline_id)
+        ready, rows = self._ready_steps(pipeline_id)
+        if self._halt_reason(rows):
+            return
         for step in ready:
             q = workflow.schedule(job_id, 'pipeline_step', {'pipeline_id': pipeline_id, 'step_id': step['id']},
                                   idempotency_key='pipeline-step:' + step['id'])
             with self.repo.connect() as c:
-                c.execute("update pipeline_steps set status='QUEUED',queue_id=?,updated_at=? where id=? and status='PENDING'", (q['id'], now(), step['id']))
+                claimed = c.execute("update pipeline_steps set status='QUEUED',queue_id=?,updated_at=? where id=? and status='PENDING'",
+                                    (q['id'], now(), step['id'])).rowcount
+            # ``schedule`` is idempotent on the key, so for a step that has been
+            # through the queue before it returns the *pre-existing* row
+            # untouched -- including one cancelled by a pause, a hold or a halt,
+            # which ``claim`` ignores forever, and one sitting on a retry
+            # backoff. Reviving it here is what makes a resumed step actually
+            # run instead of sitting at QUEUED behind a dead row. Guarded by the
+            # rowcount above so a row another worker claimed in the same instant
+            # is never yanked out from under it.
+            if claimed and q['status'] != 'READY':
+                workflow.revive(q['id'])
+
+    def _set_status(self, pipeline_id, status, final=False):
+        """The one place ``pipelines.status`` is written.
+
+        Mirrors how ``FactoryService.transition`` is the only authority for
+        ``jobs.state``: a status can then never be written without its
+        ``updated_at``, and the hold cannot be set from two places under two
+        different rules. ``final`` stamps ``completed_at``, which means "nothing
+        is executing any more" -- so a hold never gets one.
+        """
+        with self.repo.connect() as c:
+            if final:
+                c.execute('update pipelines set status=?,completed_at=?,updated_at=? where id=?',
+                          (status, now(), now(), pipeline_id))
+            else:
+                c.execute("update pipelines set status=?,completed_at='',updated_at=? where id=?",
+                          (status, now(), pipeline_id))
+
+    @staticmethod
+    def _halt_reason(rows):
+        """Why nothing further may be scheduled: 'FAILED', the hold, or ''.
+
+        Strict fail-fast: one FAILED step stops the whole pipeline, including
+        branches that never depended on it. A failure part-way through a
+        migration means the result is wrong, not that one leaf is wrong, so
+        continuing would spend gate approvals and agent runs on something nobody
+        will ship.
+
+        FAILED outranks a hold because the two need different people. A hold is
+        cleared by an approver and then resumes by itself; a failure is cleared
+        only by ``retry_step``. Reporting the hold while a step has already
+        failed would send the operator to find an approver for a pipeline that
+        cannot continue even once the approval lands.
+        """
+        statuses = {r['status'] for r in rows}
+        return 'FAILED' if 'FAILED' in statuses else (HELD if HELD in statuses else '')
+
+    def _park_queue_row(self, queue_id, workflow):
+        """Stop this step's queue row from running, reversibly.
+
+        ``WorkflowOrchestrator.complete`` turns a failed activity into a RETRY
+        scheduled ``2**attempt`` seconds out, so without this a step the
+        pipeline has deliberately halted -- or parked at a gate -- is re-claimed
+        and re-run seconds later, trampling the park. ``cancel`` sets
+        ``cancel_requested``, which both hides the row from ``claim`` and makes
+        ``complete`` resolve it to CANCELLED instead of RETRY.
+        ``_schedule_ready`` revives it when the halt or hold lifts.
+        """
+        if not queue_id:
+            return
+        try:
+            workflow.cancel(queue_id)
+        except ValueError:
+            pass
+
+    def _retract_queued(self, rows, workflow):
+        """Pull every scheduled-but-unclaimed step back to PENDING.
+
+        A step the worker already claimed (RUNNING) cannot be preempted, but one
+        merely QUEUED must not start after the halt -- otherwise "everything
+        that has not run stays PENDING" stops being true at the worker's next
+        poll.
+        """
+        for step in rows:
+            if step['status'] != 'QUEUED':
+                continue
+            self._park_queue_row(step['queue_id'], workflow)
+            with self.repo.connect() as c:
+                c.execute("update pipeline_steps set status='PENDING',queue_id='',updated_at=? where id=? and status='QUEUED'",
+                          (now(), step['id']))
 
     @staticmethod
     def _blocked(rows):
@@ -474,31 +573,61 @@ class PipelineService:
         p = self.repo.one('select status from pipelines where id=?', (pipeline_id,))
         if not p or p['status'] in ('PAUSED', 'CANCELLED', 'COMPLETED'):
             return
-        recovering = p['status'] == 'FAILED'
+        _, rows = self._ready_steps(pipeline_id)
+        halt = self._halt_reason(rows)
+        if halt:
+            # Strict fail-fast, or a governance hold. Either way nothing further
+            # is scheduled and anything merely queued comes back to PENDING. The
+            # hold is never stamped terminal: an approval has to be able to
+            # drive it back to RUNNING, which is why HELD is absent from the
+            # early-return above.
+            self._retract_queued(rows, workflow)
+            running = any(r['status'] == 'RUNNING' for r in rows)
+            self._set_status(pipeline_id, halt, final=(halt == 'FAILED' and not running))
+            return
         self._schedule_ready(pipeline_id, workflow)
         _, rows = self._ready_steps(pipeline_id)
         blocked = self._blocked(rows)
         still_active = any(r['status'] in ('QUEUED', 'RUNNING') for r in rows) or \
             any(r['status'] == 'PENDING' and r['id'] not in blocked for r in rows)
         if still_active:
+            # A retry that cleared the last failure, or an approval that
+            # released the last hold, leaves the pipeline readable as RUNNING
+            # again rather than stuck on the status that halted it.
+            if p['status'] != 'RUNNING':
+                self._set_status(pipeline_id, 'RUNNING')
             return
-        failed = any(r['status'] == 'FAILED' for r in rows)
-        if recovering and failed:
-            return  # Still genuinely failed; leave the FAILED status in place.
-        with self.repo.connect() as c:
-            c.execute("update pipelines set status=?,completed_at=?,updated_at=? where id=?",
-                      ('FAILED' if failed else 'COMPLETED', now(), now(), pipeline_id))
+        self._set_status(pipeline_id, 'COMPLETED', final=True)
 
     def mark_step(self, step_id, status, outputs=None, error=''):
         with self.repo.connect() as c:
             if status == 'RUNNING':
                 c.execute("update pipeline_steps set status=?,started_at=?,updated_at=? where id=?", (status, now(), now(), step_id))
-            else:
-                c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=?",
-                          (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id))
+                return
+            # A step already parked at a gate must not be dragged back out of
+            # it. ``app/worker.py`` records the same failure twice -- once in
+            # ``_execute`` and again in ``process_one``'s catch-all -- and
+            # without this guard the second write replaced WAITING_APPROVAL with
+            # FAILED and then re-attempted the WAITING_Gx transition the job had
+            # already made, which the state machine rejects. The visible effect
+            # was that a gate-blocked step ended FAILED and the hold was lost
+            # every time it ran through the worker.
+            written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status!=?",
+                                (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD)).rowcount
+        if not written:
+            return
         if status == 'COMPLETED':
             self._try_lifecycle_transition(step_id)
         elif status == 'FAILED':
+            # A failure halts the pipeline, so this step's own queue row has to
+            # stop as well. Left alone, ``WorkflowOrchestrator.complete`` turns
+            # it into a RETRY scheduled 2**attempt seconds out and the worker
+            # re-runs the step behind the operator's back -- and for a gate
+            # failure that re-run tramples the park that is about to be made
+            # just below. Parking first makes ``complete`` resolve the row to
+            # CANCELLED instead.
+            row = self.repo.one('select queue_id from pipeline_steps where id=?', (step_id,))
+            self._park_queue_row((row or {}).get('queue_id'), WorkflowOrchestrator(self.repo))
             self._check_gate_block(step_id, error or '')
 
     def _try_lifecycle_transition(self, step_id):
@@ -723,9 +852,12 @@ class PipelineService:
             raise PipelineError('pipeline_step_not_failed:' + step['status'])
         with self.repo.connect() as c:
             c.execute("update pipeline_steps set status='PENDING',error='',updated_at=? where id=?", (now(), step_id))
-            if step['queue_id']:
-                c.execute("update workflow_queue set status='READY',available_at=?,lease_owner=null,lease_until=null,updated_at=? where id=?",
-                          (now(), now(), step['queue_id']))
+        # The queue row is revived by _schedule_ready when this step is next
+        # scheduled, which also defeats the 2**attempt backoff -- that backoff
+        # is for a transient blip, not for a human who just fixed the cause.
+        # Doing it here instead would let the queue run the step even while
+        # another failure still halts the pipeline.
+        self._set_status(step['pipeline_id'], 'RUNNING')
         return self.repo.one('select * from pipeline_steps where id=?', (step_id,))
 
     # -- gate-approval waiting -------------------------------------------------
@@ -788,17 +920,34 @@ class PipelineService:
             self._auto_create_approval_package(job_id, gate)
         except Exception as exc:
             _log.debug('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
-        tag = 'gate_retry:' + gate if needs_retry else 'gate_blocked:' + gate
+        # The tag records which gate parked this step; the original message is
+        # kept after it so the UI's error pane still has something to show and
+        # ``_gate_from_error`` can still read the gate back out.
+        tag = ('gate_retry:' if needs_retry else 'gate_blocked:') + gate
+        if error_msg:
+            tag = tag + ';' + error_msg
         with self.repo.connect() as c:
             # Only park the step if it has not already completed — a step that
             # ran successfully and then triggered a gate-blocked lifecycle advance
             # must stay COMPLETED so the lifecycle query can still count it as a
             # waypoint after the gate is approved.
-            c.execute(
+            parked = c.execute(
                 "update pipeline_steps set status='WAITING_APPROVAL',error=?,updated_at=? "
                 "where id=? and status!='COMPLETED'",
                 (tag, now(), step_id),
-            )
+            ).rowcount
+            row = c.execute('select pipeline_id,queue_id from pipeline_steps where id=?', (step_id,)).fetchone()
+        if not parked or not row:
+            # Nothing was parked: the step stayed COMPLETED, so there is nothing
+            # to re-run and the governance hold lives on the job as WAITING_Gx.
+            # Marking the pipeline held here would claim a hold that no step
+            # backs, and the next ``advance`` would flip it straight back.
+            return
+        # Its queue row has to stop too, or the retry backoff re-runs the step a
+        # couple of seconds from now and overwrites the park.
+        self._park_queue_row(row['queue_id'], WorkflowOrchestrator(self.repo))
+        if self._halt_reason(self.repo.rows('select * from pipeline_steps where pipeline_id=?', (row['pipeline_id'],))) == HELD:
+            self._set_status(row['pipeline_id'], HELD)
 
     def _check_gate_block(self, step_id, error):
         """Handle an AGENT step that failed because its gate approval is missing."""
@@ -812,7 +961,7 @@ class PipelineService:
             return
         self._enter_gate_wait(step_id, pipeline['job_id'], '', error, needs_retry=True)
 
-    def resume_gate_step(self, job_id, workflow):
+    def resume_gate_step(self, job_id, workflow, gate=''):
         """Unblock the pipeline after a gate approval lands.
 
         Finds the WAITING_APPROVAL step for the running pipeline of this job,
@@ -824,35 +973,47 @@ class PipelineService:
         so the job still advances past the gate.
         """
         pl = self.repo.one(
-            "select id from pipelines where job_id=? and status='RUNNING' order by created_at desc limit 1",
-            (job_id,),
+            "select id from pipelines where job_id=? and status in ('RUNNING',?) order by created_at desc limit 1",
+            (job_id, HELD),
         )
         if not pl:
             # Pipeline already completed before the gate was approved — re-walk
             # the lifecycle from the current job state so it advances now.
             self.resume_after_clarification(job_id)
             return True
-        step = self.repo.one(
-            "select * from pipeline_steps where pipeline_id=? and status='WAITING_APPROVAL' limit 1",
-            (pl['id'],),
+        parked = self.repo.rows(
+            "select * from pipeline_steps where pipeline_id=? and status=?",
+            (pl['id'], HELD),
         )
-        if not step:
-            # No parked step (e.g. the triggering step stayed COMPLETED due to
-            # Fix 1 above) — still re-walk the lifecycle to advance the job.
+        # Release only what *this* gate was blocking. The tag records the gate
+        # that parked each step, so approving G1 must not release a step parked
+        # at G2 -- which the old unfiltered ``limit 1`` did, handing the later
+        # gate's work an approval nobody granted.
+        if gate:
+            parked = [s for s in parked if _gate_from_error(str(s['error'] or '')) == gate]
+        if not parked:
+            # No parked step for this gate (e.g. the triggering step stayed
+            # COMPLETED) — still re-walk the lifecycle to advance the job.
             self.resume_after_clarification(job_id)
             return True
-        needs_retry = str(step['error'] or '').startswith('gate_retry:')
-        with self.repo.connect() as c:
-            if needs_retry:
-                c.execute(
-                    "update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
-                    (now(), step['id']),
-                )
-            else:
-                c.execute(
-                    "update pipeline_steps set status='COMPLETED',completed_at=?,error='',updated_at=? where id=?",
-                    (now(), now(), step['id']),
-                )
+        for step in parked:
+            needs_retry = str(step['error'] or '').startswith('gate_retry:')
+            # A step that never actually executed must not be recorded as
+            # COMPLETED: ``_try_lifecycle_transition`` counts completed agent
+            # steps as lifecycle waypoints, so doing that would let an approval
+            # advance the lifecycle past work that never ran.
+            ran = bool(step['started_at']) and not needs_retry
+            with self.repo.connect() as c:
+                if ran:
+                    c.execute(
+                        "update pipeline_steps set status='COMPLETED',completed_at=?,error='',updated_at=? where id=?",
+                        (now(), now(), step['id']),
+                    )
+                else:
+                    c.execute(
+                        "update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
+                        (now(), step['id']),
+                    )
         self.advance(pl['id'], workflow)
         return True
 
