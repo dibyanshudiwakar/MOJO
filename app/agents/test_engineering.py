@@ -22,6 +22,7 @@ somewhere the next agent can actually read them.
 """
 import json
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
+from app.agents.reasoning import ReasoningGateway
 from app.repository import digest, now, uid
 from app.services.enterprise_v5 import ACERuntimeAdapter, SpringBootRuntimeAdapter
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
@@ -43,6 +44,17 @@ class TestEngineeringAgent(BaseAgent):
     AGENT_ID = 'test-engineering'
     TOOLS = ('test.execute', 'runtime.invoke', 'evidence.write')
     OUTPUTS = ('test_suites', 'execution_evidence')
+    PROMPT = 'agent/test-engineering/case-coverage-review'
+
+    def _interfaces(self, job_id):
+        """Interface shapes from the latest analysis, for the coverage review."""
+        analysis = self.repo.one(
+            'select * from ace_analyses where job_id=? order by created_at desc limit 1', (job_id,))
+        if not analysis:
+            return []
+        return [{'node': x.get('node', ''), 'protocol': x.get('protocol', ''),
+                 'endpoint': x.get('endpoint', '')}
+                for x in json.loads(analysis['semantic_model']).get('interfaces', [])]
 
     def _cases(self, context):
         """Supplied cases, or one per analysed interface."""
@@ -105,6 +117,13 @@ class TestEngineeringAgent(BaseAgent):
         else:
             payload = json.dumps({'package_id': package['package_id'], 'plan_id': plan_id,
                                   'policy': policy, 'executions': []}, sort_keys=True)
+        # Case shapes only -- never ``case['input']`` or a replayed body, which
+        # carry the caller's own request data straight into the payload.
+        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
+            'interfaces': self._interfaces(context.job_id),
+            'cases': [{'id': x.get('id', ''), 'method': x.get('method', ''),
+                       'path': x.get('path', '')} for x in cases],
+            'replayed': bool(executions)})
         return AgentResult(
             outputs={'test_suites': package['package_id'],
                      'execution_evidence': [x['case_id'] for x in executions]},
@@ -115,7 +134,10 @@ class TestEngineeringAgent(BaseAgent):
                                    'executed': len(executions),
                                    'runtimes': ['ACE', 'SPRING_BOOT'] if executions else []}),),
             metrics={'case_count': package['case_count'], 'executed_count': len(executions),
-                     'replay': 'EXECUTED' if executions else 'NOT_EXECUTED'})
+                     'replay': 'EXECUTED' if executions else 'NOT_EXECUTED',
+                     'model_weak_coverage': (answer or {}).get('weak_coverage', [])
+                     if isinstance(answer, dict) else []},
+            reasoning=provenance)
 
 
 if __name__ == '__main__':

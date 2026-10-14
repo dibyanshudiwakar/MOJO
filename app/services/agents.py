@@ -1,6 +1,7 @@
 import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
+from app.providers import default_provider
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
 from app.services.agent_llm_bindings import AgentLLMBindingService
@@ -120,6 +121,7 @@ class AgentRegistry:
   # any future binding change or run failure.
   with self.repo.connect() as c:
    c.execute('update agent_runs set effective_model_alias=?,binding_source=? where id=?',(effective_alias,binding_source,run['id']))
+  if provider is None: provider=default_provider()
   context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source)
   try:result=impl.execute(context)
   except Exception as e:

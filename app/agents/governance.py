@@ -14,6 +14,7 @@ second implementation of any of these would be a governance answer that could
 disagree with the gate itself, which is worse than no answer.
 """
 from app.agents.base import AgentResult, BaseAgent
+from app.agents.reasoning import ReasoningGateway
 from app.domain.preconditions import PreconditionError, evidence_bundle
 from app.domain.state_machine import TRANSITIONS
 from app.service import GATE_TRANSITIONS, FactoryService
@@ -24,6 +25,12 @@ class GovernanceAgent(BaseAgent):
     AGENT_ID = 'governance'
     TOOLS = ('policy.read', 'policy.evaluate', 'audit.write')
     OUTPUTS = ('allow_deny_decision', 'approval_requirement', 'evidence_requirement')
+    #: Explains a decision already made; it never makes one. The module note
+    #: above rules out a second implementation of any governance rule, and a
+    #: model that could answer ALLOW/DENY would be exactly that. The prompt is
+    #: told so, the answer lands in ``metrics`` only, and ``outputs`` and
+    #: ``next_state`` below are untouched by it.
+    PROMPT = 'agent/governance/blocking-explanation'
 
     def _evaluate(self, c, factory, job, target):
         """What ``target`` requires from here, and whether it is satisfied."""
@@ -85,13 +92,22 @@ class GovernanceAgent(BaseAgent):
                   'decision': decision, 'approval_requirement': approval,
                   'evidence_requirement': requirement}
         AuditLedger(self.repo).append(context.job_id, context.identity, 'GOVERNANCE_EVALUATED', detail)
+        # ``evidence_bundle`` is omitted: it is a bundle of content hashes, and a
+        # long hex run reads as a PAN to the data-loss scan.
+        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
+            'state': job['state'],
+            'evaluations': [{k: v for k, v in x.items() if k != 'evidence_bundle'}
+                            for x in evaluations]})
+        metrics = {'state': job['state'], 'allowed_targets': allowed,
+                   'blocked_targets': sorted(t for t, d in decision.items() if d == 'DENY'),
+                   'evaluations': evaluations}
+        if isinstance(answer, dict) and answer.get('explanations'):
+            metrics['model_explanations'] = answer['explanations']
         return AgentResult(
             outputs={'allow_deny_decision': decision, 'approval_requirement': approval,
                      'evidence_requirement': requirement},
             next_state=allowed[0] if len(allowed) == 1 else '',
-            metrics={'state': job['state'], 'allowed_targets': allowed,
-                     'blocked_targets': sorted(t for t, d in decision.items() if d == 'DENY'),
-                     'evaluations': evaluations})
+            metrics=metrics, reasoning=provenance)
 
 
 if __name__ == '__main__':

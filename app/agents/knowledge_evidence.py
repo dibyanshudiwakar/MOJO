@@ -14,6 +14,7 @@ Indexing is idempotent by (reference, content hash), so running this agent
 repeatedly across a lifecycle does not split citations across duplicate entries.
 """
 from app.agents.base import AgentResult, BaseAgent
+from app.agents.reasoning import ReasoningGateway
 from app.repository import digest
 from app.services.platform_v7 import KnowledgeService
 
@@ -31,6 +32,12 @@ class KnowledgeEvidenceAgent(BaseAgent):
     AGENT_ID = 'knowledge-evidence'
     TOOLS = ('evidence.read', 'index.write', 'index.read')
     OUTPUTS = ('cited_context', 'version_lineage')
+    #: Judges whether what was retrieved is enough to answer the query. Note
+    #: this agent's catalogue alias was ``embeddings``, which Claude cannot
+    #: serve -- there is no embeddings endpoint -- so it is now a chat alias and
+    #: this is a judgement prompt, not a vector operation. Retrieval itself is
+    #: still ``KnowledgeService.search``.
+    PROMPT = 'agent/knowledge-evidence/citation-sufficiency'
 
     def _artefacts(self, job_id):
         for table, kind, column, version_column, scheme in SOURCES:
@@ -61,14 +68,29 @@ class KnowledgeEvidenceAgent(BaseAgent):
             indexed.append({**entry, 'index_id': result['id'], 'token_count': result['token_count']})
         query = str(context.param('query', ''))
         cited = service.search(query, context.job_id) if query.strip() else []
+        # Hashes are truncated to a 12-character prefix: full digests are long
+        # hex runs and this payload is almost nothing but hashes, so sending
+        # them whole would have the data-loss scan refuse most runs as PANs. A
+        # prefix still identifies the version and still shows an absent hash.
+        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
+            'query': query,
+            'lineage': [{'kind': x['kind'], 'reference': x['reference'], 'version': x['version'],
+                         'content_hash': (x['content_hash'] or '')[:12]} for x in lineage],
+            'citations': [{'kind': x['kind'], 'reference': x['reference'],
+                           'version': x['version'], 'score': x['score'],
+                           'content_hash': (x['content_hash'] or '')[:12]} for x in cited]})
+        metrics = {'indexed_count': len(indexed), 'artefact_count': len(lineage),
+                   'citation_count': len(cited), 'query': query}
+        if isinstance(answer, dict) and 'sufficient' in answer:
+            metrics['model_sufficient'] = answer.get('sufficient')
+            metrics['model_missing_kinds'] = answer.get('missing_kinds', [])
         return AgentResult(
             outputs={'cited_context': [{'reference': x['reference'], 'kind': x['kind'],
                                         'version': x['version'], 'content_hash': x['content_hash'],
                                         'score': x['score'], 'lineage': x.get('lineage') or ''}
                                        for x in cited],
                      'version_lineage': lineage},
-            metrics={'indexed_count': len(indexed), 'artefact_count': len(lineage),
-                     'citation_count': len(cited), 'query': query})
+            metrics=metrics, reasoning=provenance)
 
 
 if __name__ == '__main__':
