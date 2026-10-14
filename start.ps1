@@ -82,6 +82,8 @@ $env:PORT = "$Port"
 $env:HOST = $BindAddress
 if (-not $env:FACTORY_JWT_ISSUER) { $env:FACTORY_JWT_ISSUER = 'ace-factory-idp' }
 if (-not $env:FACTORY_JWT_AUDIENCE) { $env:FACTORY_JWT_AUDIENCE = 'ace-factory' }
+# Claude via the CVS cvscode gateway for all reasoning agents (set AI_PROVIDER=none to disable).
+if (-not $env:AI_PROVIDER) { $env:AI_PROVIDER = 'gateway' }
 
 # --- Launch ------------------------------------------------------------------
 if (-not $env:FACTORY_WORKSPACE_ROOT) { $env:FACTORY_WORKSPACE_ROOT = Join-Path $root 'app' }

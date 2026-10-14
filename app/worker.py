@@ -77,9 +77,18 @@ class WorkerLoop:
             # A bug here (not in the step itself -- _execute already catches
             # and records step-level failures) must still resolve the queue
             # row, or it retries forever with no visible record of why.
+            #
+            # Only record the failure if _execute did not already: it marks the
+            # step FAILED and re-raises, so recording it again here used to
+            # overwrite a step that _check_gate_block had just parked at
+            # WAITING_APPROVAL, and a gate-blocked step ended FAILED with the
+            # hold silently lost. mark_step now refuses to overwrite a parked
+            # step as well, so this is the belt to that braces.
             traceback.print_exc()
             try:
-                self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
+                step = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
+                if not step or step['status'] not in ('FAILED', 'WAITING_APPROVAL'):
+                    self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
             except Exception:
                 pass
             self.workflow.complete(item['id'], False, str(exc), worker_id=self.worker_id)

@@ -108,8 +108,26 @@ class ReasoningGateway:
         if context.provider is None:
             provenance['reason'] = 'no_provider_execution_adapter'
             return None, provenance
+        # An adapter that serves more than one model exposes ``for_alias`` and is
+        # pinned to the alias the registry resolved for this agent, so the
+        # ``reasoning-small`` agents do not quietly borrow the large model. The
+        # seam itself is unchanged -- an adapter without the hook (every test
+        # double) is used as-is.
+        provider = context.provider
+        selector = getattr(provider, 'for_alias', None)
+        if alias and callable(selector):
+            try:
+                provider = selector(alias)
+            except (RuntimeError, ValueError) as exc:
+                provenance['reason'] = 'provider_alias_unavailable:' + str(exc)
+                try:
+                    self.registry.complete_request(request['request_id'], {}, 'FAILED')
+                except (PermissionError, ValueError):
+                    pass
+                return None, provenance
+        provenance['provider_model'] = getattr(provider, 'model', '')
         try:
-            answer = context.provider.invoke(prompt['template'], payload)
+            answer = provider.invoke(prompt['template'], payload)
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:
             provenance['reason'] = 'provider_execution_failed:' + str(exc)

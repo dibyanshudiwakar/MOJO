@@ -14,6 +14,7 @@ does not hold.
 import json
 from pathlib import Path
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
+from app.agents.reasoning import ReasoningGateway
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 
@@ -21,6 +22,7 @@ class CodeGenerationAgent(BaseAgent):
     AGENT_ID = 'code-generation'
     TOOLS = ('repository.branch', 'repository.write', 'build.execute', 'evidence.write')
     OUTPUTS = ('source_code', 'tests', 'manifest', 'provenance')
+    PROMPT = 'agent/code-generation/quality-failure-triage'
 
     def execute(self, context):
         service = MappingAndPlanningService(self.repo)
@@ -37,6 +39,18 @@ class CodeGenerationAgent(BaseAgent):
             bool(context.param('execute_build', False)))
         files = [x['path'] for x in manifest.get('files', [])]
         tests = [x for x in files if 'src/test/' in x.replace('\\', '/')]
+        failed = [x['name'] for x in quality['checks'] if x['status'] == 'FAIL']
+        # Only consulted when the gate already failed, and only about why: the
+        # status below is ``quality['status']``, never the model's opinion of it.
+        # The payload carries check names and counts, not generated source --
+        # the project is on disk for a human to read.
+        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
+            'failed_checks': [{'name': x['name'], 'detail': str(x.get('detail', ''))[:400]}
+                              for x in quality['checks'] if x['status'] == 'FAIL'],
+            'file_count': generated['file_count'], 'test_count': len(tests),
+            'service_name': context.param('service_name')}) if failed else (None, {
+                'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+                'reason': 'quality_gate_passed_nothing_to_triage'})
         return AgentResult(
             status='FAILED' if quality['status'] == 'FAIL' else 'COMPLETED',
             error='quality_gate_failed:' + quality['quality_run_id'] if quality['status'] == 'FAIL' else '',
@@ -52,8 +66,10 @@ class CodeGenerationAgent(BaseAgent):
                                    'quality_run_id': quality['quality_run_id'],
                                    'quality_status': quality['status']}),),
             metrics={'file_count': generated['file_count'], 'test_count': len(tests),
-                     'quality_status': quality['status'],
-                     'failed_checks': [x['name'] for x in quality['checks'] if x['status'] == 'FAIL']})
+                     'quality_status': quality['status'], 'failed_checks': failed,
+                     'model_failure_triage': (answer or {}).get('failures', [])
+                     if isinstance(answer, dict) else []},
+            reasoning=provenance)
 
 
 if __name__ == '__main__':

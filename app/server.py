@@ -593,7 +593,7 @@ class H(BaseHTTPRequestHandler):
             if p=='/api/v2/approvals':
                 pr=self.principal();self.authorize_job(pr,d.get('job_id',''))
                 result=factory.approve(d,pr.roles,pr.identity)
-                try: pipelines.resume_gate_step(d.get('job_id',''),workflow)
+                try: pipelines.resume_gate_step(d.get('job_id',''),workflow,d.get('gate',''))
                 except Exception: pass
                 # Also walk the lifecycle forward on pipelines that already
                 # completed (e.g. framework-baseline was disabled — the pipeline
@@ -620,7 +620,7 @@ class H(BaseHTTPRequestHandler):
                 result=factory.approve(approve_data,pr.roles,pr.identity)
                 with repo.connect() as c: c.execute("update approval_packages set status='APPROVED' where id=?",(m.group(1),))
                 ledger.append(pkg['job_id'],pr.identity,'APPROVAL_PACKAGE_SIGNED',{'package_id':m.group(1),'gate':pkg['gate'],'decision':decision})
-                try: pipelines.resume_gate_step(pkg['job_id'],workflow)
+                try: pipelines.resume_gate_step(pkg['job_id'],workflow,pkg['gate'])
                 except Exception: pass
                 try: pipelines.resume_after_clarification(pkg['job_id'])
                 except Exception: pass

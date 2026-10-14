@@ -41,6 +41,36 @@
       "name": "agent/migration-orchestrator/next-action",
       "version": "1",
       "template": "You are given a migration job's lifecycle state, its produced artefacts and the governance evaluation of what its next transition requires. Propose the next action: which agent to run with which inputs, or which gate approval is awaited. Never propose a transition whose gate is unsatisfied. Return JSON: {\"next_agent\":..., \"params\":{...}, \"next_state\":..., \"blocked_by\":...}."
+    },
+    {
+      "name": "agent/repository-intake/gap-triage",
+      "version": "1",
+      "template": "You are given an intake manifest summary for one ACE repository: file and flow counts, and the gaps the scan detected. Rank the gaps by how much each would block a faithful migration, and say what artefact or answer would close each one. Judge only the supplied gaps: do not infer gaps that are not listed, and do not restate the counts as findings. If a gap's impact cannot be judged from what is supplied, mark its severity UNKNOWN. Return JSON: {\"ranked_gaps\":[{\"gap\":...,\"severity\":\"BLOCKING|MAJOR|MINOR|UNKNOWN\",\"closes_with\":...}],\"notes\":...}."
+    },
+    {
+      "name": "agent/framework-baseline/convention-conflict-triage",
+      "version": "1",
+      "template": "You are given the framework conventions extracted from reference repositories, the conflicts between them, and the golden-project verification status. For each conflict, say which of the supplied candidate conventions the evidence favours and why. You are advising the architect who answers the clarification, not resolving it: never invent a convention that does not appear in the supplied evidence, and mark a conflict UNDECIDABLE when the references genuinely do not favour either side. Return JSON: {\"conflicts\":[{\"conflict\":...,\"favoured\":...,\"rationale\":...,\"undecidable\":true|false}]}."
+    },
+    {
+      "name": "agent/code-generation/quality-failure-triage",
+      "version": "1",
+      "template": "You are given the quality-gate result for a generated Spring project: the checks that failed, and a summary of the generated file inventory. For each failed check, give the most likely cause and the smallest change that would address it. The gate's verdict is already decided and is not yours to change: do not propose suppressing, disabling or relaxing a check, and do not claim a check passes. If a failure's cause is not determinable from the supplied summary, say so and name the file or report you would need. Return JSON: {\"failures\":[{\"check\":...,\"likely_cause\":...,\"suggested_fix\":...,\"needs\":...}]}."
+    },
+    {
+      "name": "agent/test-engineering/case-coverage-review",
+      "version": "1",
+      "template": "You are given the interfaces found in an ACE semantic model and the differential test cases derived from them. Name the interfaces whose behaviour the supplied cases would not distinguish: missing protocols, unexercised paths, absent error or boundary cases. Judge only the supplied cases and interfaces, do not write test cases, and do not assume any runtime was invoked. Return JSON: {\"weak_coverage\":[{\"interface\":...,\"gap\":...,\"why_it_matters\":...}],\"adequate\":[...]}."
+    },
+    {
+      "name": "agent/governance/blocking-explanation",
+      "version": "1",
+      "template": "You are given a governance evaluation for one migration job: the legal transitions from its current state, the gate guarding each, the approvals counted, and the reasons any target was denied. Explain, in plain language for the engineer who has to act, what is blocking each denied target and the shortest sequence of steps that would unblock it. The decision has already been made by the code that enforces it: never output ALLOW or DENY, never contradict or re-derive the supplied decision, and never suggest bypassing a gate. Restate only what the supplied reasons support. Return JSON: {\"explanations\":[{\"target\":...,\"blocked_by\":...,\"steps\":[...]}]}."
+    },
+    {
+      "name": "agent/knowledge-evidence/citation-sufficiency",
+      "version": "1",
+      "template": "You are given the artefact version lineage indexed for one job and the citations retrieved for a query. Say whether the cited context is sufficient to answer that query and, if not, which artefact kind is missing. Judge sufficiency only from the supplied lineage and citations: never cite an artefact that is not listed, and treat a citation whose content hash is absent as unverifiable. Return JSON: {\"sufficient\":true|false,\"missing_kinds\":[...],\"unverifiable\":[...],\"rationale\":...}."
     }
   ]
 }

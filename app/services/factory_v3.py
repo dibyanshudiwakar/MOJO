@@ -54,6 +54,33 @@ class WorkflowOrchestrator:
    if not q:raise ValueError('activity_not_found')
    status='CANCELLED' if q['status'] in ('READY','RETRY') else q['status'];c.execute('update workflow_queue set cancel_requested=1,status=?,updated_at=? where id=?',(status,now(),qid))
   return self.repo.one('select * from workflow_queue where id=?',(qid,))
+ def revive(self,qid):
+  """Return a cancelled or resolved activity to the claimable set.
+
+  The counterpart to ``cancel``, which is how a pipeline parks work it means to
+  resume (a pause, a gate hold, a halt caused by a failure elsewhere).
+  ``cancel`` is the right lever for that because ``cancel_requested`` both stops
+  ``claim`` picking the row up and makes ``complete`` resolve it to CANCELLED
+  instead of scheduling a ``2**attempt`` RETRY -- so a parked step is not
+  silently re-run a couple of seconds later. The cost is that nothing could
+  un-park it: ``schedule`` returns the pre-existing row for an idempotency key
+  rather than inserting a second one, so a cancelled row made its step
+  unrunnable forever. This is the one write path that reverses that.
+
+  ``attempt`` is reset because the backoff it drives is meant for a transient
+  infrastructure blip, not for a human who has just approved a gate or fixed
+  the cause and wants the step to run now.
+
+  Deliberately not folded into ``schedule``: that is a generic primitive
+  exposed over ``/api/v3/workflow/schedule``, and reviving there would let any
+  caller who can replay an idempotency key resurrect an activity an operator
+  explicitly cancelled. Resurrection stays an explicit act by the owner of the
+  row -- compare ``replay_dead_letter``, which re-keys instead.
+  """
+  with self.repo.connect() as c:
+   if not c.execute('select id from workflow_queue where id=?',(qid,)).fetchone():raise ValueError('activity_not_found')
+   c.execute("update workflow_queue set status='READY',cancel_requested=0,attempt=0,available_at=?,lease_owner=null,lease_until=null,last_error='',updated_at=? where id=?",(now(),now(),qid))
+  return self.repo.one('select * from workflow_queue where id=?',(qid,))
  def replay_dead_letter(self,qid,new_key=None):
   q=self.repo.one('select * from workflow_queue where id=?',(qid,))
   if not q or q['status']!='DEAD_LETTER':raise ValueError('dead_letter_not_found')
