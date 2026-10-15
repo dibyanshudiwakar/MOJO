@@ -28,13 +28,32 @@ _log = logging.getLogger(__name__)
 
 
 def _gate_from_error(error_str):
-    """Extract gate label (e.g. 'G2') from a gate-block error message."""
+    """Extract gate label (e.g. 'G2') from a gate-block error message.
+
+    Agent services raise a variety of error patterns when a gate approval is
+    missing.  This function must recognise all of them so the pipeline parks
+    the step at WAITING_APPROVAL instead of leaving it FAILED.
+    """
     m = _re.search(r'required_gate_approval_missing:(G\d)', error_str)
     if m:
         return m.group(1)
     m = _re.search(r'g(\d)_\w+_approval_required', error_str)
     if m:
         return 'G' + m.group(1)
+    # Internal service errors that map to a known gate but do not carry the Gx
+    # label in the string.  PlanningGenerationService and
+    # MappingAndPlanningService raise these when their artefact-bound approval
+    # check fails.
+    _KNOWN_GATE_ERRORS = {
+        'framework_not_approved': 'G1',
+        'analysis_or_specification_not_approved': 'G2',
+        'analysis_not_approved': 'G2',
+        'specification_not_approved': 'G2',
+        'plan_not_approved': 'G3',
+    }
+    for pattern, gate in _KNOWN_GATE_ERRORS.items():
+        if pattern in error_str:
+            return gate
     return ''
 
 # migration-orchestrator is deliberately not offered here: it is its own
@@ -436,26 +455,39 @@ class PipelineService:
         return ready, rows
 
     def _schedule_ready(self, pipeline_id, workflow):
+        """Schedule the single next ready step.
+
+        Only one step is queued at a time so agents execute strictly
+        sequentially -- no parallel execution.  CLONE steps that are both
+        ready are also serialised: the worker processes them one at a time.
+        """
         job_id = self.repo.one('select job_id from pipelines where id=?', (pipeline_id,))['job_id']
         ready, rows = self._ready_steps(pipeline_id)
         if self._halt_reason(rows):
             return
-        for step in ready:
-            q = workflow.schedule(job_id, 'pipeline_step', {'pipeline_id': pipeline_id, 'step_id': step['id']},
-                                  idempotency_key='pipeline-step:' + step['id'])
-            with self.repo.connect() as c:
-                claimed = c.execute("update pipeline_steps set status='QUEUED',queue_id=?,updated_at=? where id=? and status='PENDING'",
-                                    (q['id'], now(), step['id'])).rowcount
-            # ``schedule`` is idempotent on the key, so for a step that has been
-            # through the queue before it returns the *pre-existing* row
-            # untouched -- including one cancelled by a pause, a hold or a halt,
-            # which ``claim`` ignores forever, and one sitting on a retry
-            # backoff. Reviving it here is what makes a resumed step actually
-            # run instead of sitting at QUEUED behind a dead row. Guarded by the
-            # rowcount above so a row another worker claimed in the same instant
-            # is never yanked out from under it.
-            if claimed and q['status'] != 'READY':
-                workflow.revive(q['id'])
+        # Sequential execution: if any step is already in flight, wait for it
+        # to finish before scheduling the next one.
+        if any(r['status'] in ('QUEUED', 'RUNNING') for r in rows):
+            return
+        # Schedule only the first ready step (lowest sequence number).
+        if not ready:
+            return
+        step = ready[0]
+        q = workflow.schedule(job_id, 'pipeline_step', {'pipeline_id': pipeline_id, 'step_id': step['id']},
+                              idempotency_key='pipeline-step:' + step['id'])
+        with self.repo.connect() as c:
+            claimed = c.execute("update pipeline_steps set status='QUEUED',queue_id=?,updated_at=? where id=? and status='PENDING'",
+                                (q['id'], now(), step['id'])).rowcount
+        # ``schedule`` is idempotent on the key, so for a step that has been
+        # through the queue before it returns the *pre-existing* row
+        # untouched -- including one cancelled by a pause, a hold or a halt,
+        # which ``claim`` ignores forever, and one sitting on a retry
+        # backoff. Reviving it here is what makes a resumed step actually
+        # run instead of sitting at QUEUED behind a dead row. Guarded by the
+        # rowcount above so a row another worker claimed in the same instant
+        # is never yanked out from under it.
+        if claimed and q['status'] != 'READY':
+            workflow.revive(q['id'])
 
     def _set_status(self, pipeline_id, status, final=False):
         """The one place ``pipelines.status`` is written.

@@ -75,8 +75,9 @@ function friendly(code){
  if(code==='gateway_model_alias_required_for_override')return 'Agent Override requires a model alias. Click Configure Override to set one.';
  return code.replaceAll('_',' ')}
 async function afterLogin(){
- // Section 2 of the brief: once signed in, resolve the stored GitHub connection
- // and only prompt when there is nothing usable to verify.
+ // Section 2 of the brief: once signed in, resolve the stored GitHub connection.
+ // Always re-verify the token on every login — a PAT that was CONNECTED in a
+ // previous session may have been revoked since.
  try{const me=await api('/api/v2/auth/me');
   // Guard: the decoded token's sub must match the account the server returned.
   // A mismatch means the token in sessionStorage belongs to a different account
@@ -88,10 +89,11 @@ async function afterLogin(){
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
- if(githubState.status!=='CONNECTED'){
-  try{githubState=await api('/api/v2/integrations/github/test',{method:'POST'});renderIdentity()}
-  catch(e){if(e.reauth)return signOut('Your session is no longer valid. Sign in again.',true);return openGithub(githubErr(e))}
-  if(githubState.status!=='CONNECTED')return openGithub(githubState.last_error||'GitHub connection could not be verified.')}
+ // Always re-verify the stored GitHub token regardless of its last-known status.
+ // A token that was CONNECTED in a previous session may have been revoked.
+ try{githubState=await api('/api/v2/integrations/github/test',{method:'POST'});renderIdentity()}
+ catch(e){if(e.reauth)return signOut('Your session is no longer valid. Sign in again.',true);return openGithub(githubErr(e))}
+ if(githubState.status!=='CONNECTED')return openGithub(githubState.last_error||'GitHub connection could not be verified. Enter a valid token to continue.');
  render()}
 function githubErr(e){
  // The service encodes reason|status|detail so the operator sees what GitHub
@@ -1461,14 +1463,14 @@ async function pipelineDetail(id){
       try{await api('/api/v2/pipelines/'+id+'/run',{method:'POST'})}catch(e2){}
       pipelineDetail(id)}catch(e){notice(e.message,true)}};
  if(p.status==='READY')$('#pRun').onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/run',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};
- if(p.status==='RUNNING')$('#pPause').onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/pause',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};
+ if(p.status==='RUNNING'||p.status==='WAITING_APPROVAL'){const pauseBtn=$('#pPause');if(pauseBtn)pauseBtn.onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/pause',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};}
  if(p.status==='PAUSED')$('#pResume').onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/resume',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};
- if(p.status==='RUNNING'||p.status==='PAUSED')$('#pCancel').onclick=async()=>{
+ if(p.status==='RUNNING'||p.status==='PAUSED'||p.status==='WAITING_APPROVAL'){const cancelBtn=$('#pCancel');if(cancelBtn)cancelBtn.onclick=async()=>{
   if(!confirm('Stop this pipeline? Steps that have not started will be cancelled; a step already running will finish but no longer affects the outcome.'))return;
-  try{await api('/api/v2/pipelines/'+id+'/cancel',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};
+  try{await api('/api/v2/pipelines/'+id+'/cancel',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};};
  document.querySelectorAll('[data-step]').forEach(el=>{
   const step=p.steps.find(s=>s.id===el.dataset.step);
-  if(step&&(step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'))
+  if(step&&(step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL'))
    el.onclick=()=>openStepOutput(id,el.dataset.step,step)});
  if(p.status==='RUNNING'||p.status==='PAUSED'||p.status==='WAITING_APPROVAL'){clearInterval(refreshTimer);refreshTimer=setInterval(()=>pipelineDetail(id),5000)}}
 function parseStepError(error,kind,agentId){

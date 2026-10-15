@@ -32,8 +32,25 @@ from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
 from app.services.pipelines import PipelineService
 from app.services.repo_clone import RepoCloneService
+from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
 
 ACTIVITY = 'pipeline_step'
+
+# Gates that must be approved BEFORE the agent runs.  These agents' own
+# services check for artefact-bound approvals internally and refuse to
+# execute without them, so running them without the gate just wastes an
+# attempt and produces a FAILED → WAITING_APPROVAL transition.  Pre-checking
+# here parks the step immediately as WAITING_APPROVAL without executing the
+# agent at all.
+#
+# Mapping: agent_id → list of gates whose approval is checked internally by
+# the agent's service.  Sourced from MappingAndPlanningService (G1/G2/G3)
+# and PlanningGenerationService (G1/G2).
+AGENT_PREFLIGHT_GATES = {
+    'ace-analysis':            ['G1'],
+    'planning':                ['G1', 'G2'],
+    'code-generation':         ['G3'],
+}
 
 
 class WorkerLoop:
@@ -72,7 +89,23 @@ class WorkerLoop:
         pipeline_id = payload['pipeline_id']
         try:
             self._execute(pipeline_id, step_id)
-            self.workflow.complete(item['id'], True, worker_id=self.worker_id)
+            # The step may have been parked at WAITING_APPROVAL by the
+            # pre-flight gate check rather than completing normally.  In that
+            # case the queue row should be cancelled (not completed) so the
+            # retry backoff does not re-run the step behind the operator's
+            # back.  ``_enter_gate_wait`` already parks the queue row via
+            # ``_park_queue_row``, but ``complete`` below would overwrite that,
+            # so detect the park and skip the normal completion.
+            step = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
+            if step and step['status'] == 'WAITING_APPROVAL':
+                # The queue row was already parked by _enter_gate_wait; resolve
+                # it as cancelled so it stays dormant until the gate is approved.
+                try:
+                    self.workflow.complete(item['id'], False, 'gate_hold', worker_id=self.worker_id)
+                except Exception:
+                    pass
+            else:
+                self.workflow.complete(item['id'], True, worker_id=self.worker_id)
         except Exception as exc:
             # A bug here (not in the step itself -- _execute already catches
             # and records step-level failures) must still resolve the queue
@@ -95,6 +128,35 @@ class WorkerLoop:
         self.pipelines.advance(pipeline_id, self.workflow)
         return True
 
+    def _gate_approved(self, job_id, gate):
+        """Return True if there is at least one valid approval for *gate* at the current iteration."""
+        job = self.repo.one('select iteration from jobs where id=?', (job_id,))
+        iteration = int((job or {}).get('iteration') or 1)
+        row = self.repo.one(
+            'select id from approvals where job_id=? and gate=? and iteration=?',
+            (job_id, gate, iteration),
+        )
+        return bool(row)
+
+    def _preflight_gate_check(self, job_id, step):
+        """Park the step immediately if its agent needs a gate that is not yet approved.
+
+        Returns True if the step was parked (caller should skip execution),
+        False if it is clear to proceed.
+        """
+        if step['kind'] != 'AGENT':
+            return False
+        required = AGENT_PREFLIGHT_GATES.get(step['agent_id'])
+        if not required:
+            return False
+        for gate in required:
+            if not self._gate_approved(job_id, gate):
+                error_msg = 'required_gate_approval_missing:%s' % gate
+                self.pipelines._enter_gate_wait(
+                    step['id'], job_id, '', error_msg, needs_retry=True)
+                return True
+        return False
+
     def _execute(self, pipeline_id, step_id):
         step = self.repo.one('select * from pipeline_steps where id=?', (step_id,))
         if not step:
@@ -102,6 +164,10 @@ class WorkerLoop:
         pipeline = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
         job_id = pipeline['job_id']
         self.pipelines.mark_step(step_id, 'RUNNING')
+        # Pre-flight: if the agent needs a gate that is not yet approved, park
+        # the step immediately as WAITING_APPROVAL without running the agent.
+        if self._preflight_gate_check(job_id, step):
+            return
         try:
             if step['kind'] == 'AGENT':
                 outputs = self._dispatch_agent(job_id, step, pipeline['created_by'])

@@ -64,13 +64,12 @@ def held(env, agents=('repository-intake',)):
 
 
 def two_branch(env):
-    """A started pipeline with a CLONE and an independent agent, both QUEUED.
+    """A started pipeline with a CLONE and an independent agent.
 
-    ``governance`` is one of only three dependency-free agents in the catalogue
-    and consumes no repository, so it is scheduled alongside the clone rather
-    than behind it -- which is what makes it a genuine independent branch.
-    Most agents (``dormancy-intelligence`` included) depend on
-    ``repository-intake`` and so are merely downstream of the clone.
+    Execution is strictly sequential: only one step is scheduled at a time.
+    After ``run()``, only the first ready step (the CLONE, lowest sequence)
+    is QUEUED; the independent ``governance`` agent stays PENDING until the
+    CLONE finishes.
     """
     _, job, pipelines, workflow = env
     p = pipelines.create(job['id'], 'workspace/orders', ACE_REPO,
@@ -161,7 +160,9 @@ def test_a_released_step_that_never_ran_is_not_recorded_as_completed(env):
 def test_strict_fail_fast_halts_an_independent_branch(env):
     _, _, pipelines, workflow = env
     pid, clone, independent = two_branch(env)
-    assert independent['status'] == 'QUEUED'
+    # Sequential execution: the CLONE is the first step scheduled; the
+    # independent governance agent stays PENDING until the CLONE finishes.
+    assert independent['status'] == 'PENDING'
     pipelines.mark_step(clone['id'], 'FAILED', error='git_command_failed:host unreachable')
     pipelines.advance(pid, workflow)
     after = agent_step(pipelines.detail(pid)['steps'], 'governance')
@@ -190,8 +191,10 @@ def test_retry_after_a_strict_halt_resumes_the_whole_pipeline(env):
     assert pipelines.detail(pid)['status'] == 'RUNNING'
     pipelines.advance(pid, workflow)
     steps = pipelines.detail(pid)['steps']
+    # Sequential execution: after retry, only the CLONE is re-queued.
+    # The governance agent stays PENDING until the CLONE finishes.
     assert clone_step(steps, 'ACE')['status'] == 'QUEUED'
-    assert agent_step(steps, 'governance')['status'] == 'QUEUED'
+    assert agent_step(steps, 'governance')['status'] == 'PENDING'
 
 
 def test_a_failure_outranks_a_concurrent_gate_hold(env):
