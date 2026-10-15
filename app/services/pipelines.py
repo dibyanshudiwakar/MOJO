@@ -174,6 +174,107 @@ class PipelineError(ValueError):
     pass
 
 
+class PipelineContextAccumulator:
+    """Shared context that accumulates across every agent in a pipeline.
+
+    Each agent's execution result — outputs, evidence, reasoning provenance,
+    metrics, and the skill that guided it — is recorded after the agent
+    completes.  Before the next agent runs, the full accumulated snapshot is
+    loaded and passed to it via ``AgentContext.params['_pipeline_context']``,
+    so every agent sees what every prior agent produced and which skill drove
+    each decision.  Nothing is lost at agent boundaries.
+    """
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def record(self, pipeline_id, step_id, agent_id, job_id, dispatch_result, skill=None):
+        """Write what this agent produced into the shared context store."""
+        evidence_ids = [e.get('id', '') for e in (dispatch_result.get('evidence') or [])]
+        skill_summary = ''
+        if skill:
+            # First paragraph of SKILL.md as a compact summary.
+            lines = (skill.text or '').strip().split('\n\n')
+            skill_summary = lines[0].strip() if lines else ''
+            # Cap at 500 chars to keep the accumulated payload reasonable.
+            if len(skill_summary) > 500:
+                skill_summary = skill_summary[:497] + '...'
+        row = {
+            'id': uid(),
+            'pipeline_id': pipeline_id,
+            'step_id': step_id,
+            'agent_id': agent_id,
+            'job_id': job_id,
+            'outputs': json.dumps(dispatch_result.get('outputs') or {}, default=str),
+            'evidence_ids': json.dumps(evidence_ids),
+            'metrics': json.dumps(dispatch_result.get('metrics') or {}, default=str),
+            'reasoning': json.dumps(dispatch_result.get('reasoning') or {}, default=str),
+            'error': dispatch_result.get('error') or '',
+            'skill_name': skill.name if skill else '',
+            'skill_hash': skill.content_hash if skill else '',
+            'skill_summary': skill_summary,
+            'run_id': dispatch_result.get('run_id') or '',
+            'status': dispatch_result.get('status') or '',
+            'created_at': now(),
+        }
+        with self.repo.connect() as c:
+            # Upsert: a retried step replaces its previous context row.
+            c.execute('delete from pipeline_context where pipeline_id=? and agent_id=?',
+                      (pipeline_id, agent_id))
+            self.repo.insert(c, 'pipeline_context', row)
+
+    def snapshot(self, pipeline_id, job_id):
+        """Build the full accumulated context from all completed agents.
+
+        Returns a dict with:
+          'agents'          — dict keyed by agent_id, each carrying outputs, evidence,
+                              metrics, reasoning, skill info
+          'agent_chain'     — ordered list of agent_ids in execution order
+          'skills_summary'  — combined skill summaries from all agents
+          'evidence_summary'— flat list of {kind, id, producer} across all agents
+        """
+        rows = self.repo.rows(
+            'select * from pipeline_context where pipeline_id=? order by created_at',
+            (pipeline_id,))
+        if not rows:
+            return {}
+        agents = {}
+        agent_chain = []
+        all_skills = []
+        all_evidence = []
+        for r in rows:
+            aid = r['agent_id']
+            agent_chain.append(aid)
+            evidence_ids = json.loads(r['evidence_ids'] or '[]')
+            entry = {
+                'agent_id': aid,
+                'status': r['status'],
+                'run_id': r['run_id'],
+                'outputs': json.loads(r['outputs'] or '{}'),
+                'evidence_ids': evidence_ids,
+                'metrics': json.loads(r['metrics'] or '{}'),
+                'reasoning': json.loads(r['reasoning'] or '{}'),
+                'skill_name': r['skill_name'],
+                'skill_hash': r['skill_hash'],
+                'skill_summary': r['skill_summary'],
+                'error': r['error'],
+            }
+            agents[aid] = entry
+            if r['skill_name'] and r['skill_summary']:
+                all_skills.append('[%s] %s' % (aid, r['skill_summary']))
+            # Build evidence summary from the evidence table for richer detail.
+            for eid in evidence_ids:
+                ev = self.repo.one('select id, kind, producer from evidence where id=?', (eid,))
+                if ev:
+                    all_evidence.append({'id': ev['id'], 'kind': ev['kind'], 'producer': ev['producer']})
+        return {
+            'agents': agents,
+            'agent_chain': agent_chain,
+            'skills_summary': '\n'.join(all_skills),
+            'evidence_summary': all_evidence,
+        }
+
+
 class StepLogger:
     """Append-only structured log for a single pipeline step.
 

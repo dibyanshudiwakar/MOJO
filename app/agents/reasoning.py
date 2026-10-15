@@ -167,11 +167,39 @@ class ReasoningGateway:
             except SkillIntegrityError as exc:
                 _log_warn('Skill integrity error for "%s": %s — invoking without skill guidance' % (ctx_agent_id, exc))
                 provenance['skill_error'] = str(exc)
+        # Enrich the payload with accumulated pipeline context so the LLM sees
+        # what every prior agent produced, which skills guided them, and the
+        # full evidence chain.  This is the "zero context loss" mechanism: the
+        # model receives the entire pipeline's accumulated knowledge alongside
+        # the agent's own payload.
+        enriched_payload = dict(payload) if isinstance(payload, dict) else payload
+        prior = getattr(context, 'pipeline_context', None)
+        if prior and isinstance(enriched_payload, dict):
+            # Compact summary: agent chain, skill summaries, evidence summary.
+            # Full per-agent outputs are large; include only the summary and
+            # let the model ask for specifics via the agent's own service calls.
+            enriched_payload['_prior_agents'] = {
+                'agent_chain': prior.get('agent_chain', []),
+                'skills_guidance': prior.get('skills_summary', ''),
+                'evidence_produced': [{'kind': e.get('kind'), 'id': e.get('id')[:12] if e.get('id') else ''}
+                                      for e in prior.get('evidence_summary', [])],
+                'agent_summaries': {
+                    aid: {
+                        'status': info.get('status', ''),
+                        'skill': info.get('skill_name', ''),
+                        'metrics': info.get('metrics', {}),
+                        'reasoning_mode': (info.get('reasoning') or {}).get('mode', ''),
+                        'outputs': info.get('outputs', {}),
+                    }
+                    for aid, info in (prior.get('agents') or {}).items()
+                },
+            }
+            _log_info('LLM payload enriched with pipeline context: %d prior agents' % len(prior.get('agent_chain', [])))
         _log_info('LLM invoking provider: model=%s, prompt="%s", skill=%s, payload_keys=%s' % (
             provider_model, prompt_name, skill.name if skill else '(none)',
-            sorted(payload.keys()) if isinstance(payload, dict) else '(non-dict)'))
+            sorted(enriched_payload.keys()) if isinstance(enriched_payload, dict) else '(non-dict)'))
         try:
-            answer = provider.invoke(prompt['template'], payload, skill=skill)
+            answer = provider.invoke(prompt['template'], enriched_payload, skill=skill)
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:
             provenance['reason'] = 'provider_execution_failed:' + str(exc)

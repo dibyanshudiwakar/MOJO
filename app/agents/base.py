@@ -135,8 +135,21 @@ class AgentContext:
         return row
 
     @property
+    def pipeline_context(self):
+        """The accumulated context from all prior agents in this pipeline.
+
+        Contains outputs, evidence, reasoning provenance, metrics and skill
+        summaries from every agent that has already completed.  ``None`` when
+        the agent is not running inside a pipeline or is the first in the chain.
+        """
+        return self.params.get('_pipeline_context')
+
+    @property
     def params_hash(self):
-        return digest(json.dumps(self.params, sort_keys=True, default=str))
+        # Exclude _pipeline_context from the hash — it changes with every step
+        # and would make idempotency keys useless.
+        filtered = {k: v for k, v in self.params.items() if k != '_pipeline_context'}
+        return digest(json.dumps(filtered, sort_keys=True, default=str))
 
 
 class BaseAgent:

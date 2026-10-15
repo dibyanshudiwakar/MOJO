@@ -30,9 +30,10 @@ from app.repository import Repository
 from app.services.accounts import AccountService
 from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
-from app.services.pipelines import PipelineService, StepLogger
+from app.services.pipelines import PipelineService, StepLogger, PipelineContextAccumulator
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
+from app.agents.skills import skill_for, SkillIntegrityError
 
 ACTIVITY = 'pipeline_step'
 
@@ -211,6 +212,23 @@ class WorkerLoop:
         if log:
             log.info('Resolved pipeline owner: %s (%d roles)' % (created_by, len(roles)))
         params = self.pipelines.resolved_params(step)
+        # Load accumulated pipeline context from all prior agents and merge it
+        # into the params so the agent (and its LLM reasoning) sees everything
+        # the pipeline has produced so far.
+        accumulator = PipelineContextAccumulator(self.repo)
+        prior = accumulator.snapshot(step['pipeline_id'], job_id)
+        if prior:
+            params['_pipeline_context'] = prior
+            if log:
+                n_agents = len(prior.get('agent_chain', []))
+                n_evidence = len(prior.get('evidence_summary', []))
+                log.info('Loaded pipeline context: %d prior agent%s, %d evidence item%s' % (
+                    n_agents, '' if n_agents == 1 else 's',
+                    n_evidence, '' if n_evidence == 1 else 's'))
+                if prior.get('agent_chain'):
+                    log.info('Prior agents: %s' % ' → '.join(prior['agent_chain']))
+        elif log:
+            log.info('No prior pipeline context (first agent in this pipeline)')
         if log:
             log.info('Dispatching agent %s v%s' % (step['agent_id'], step['version']))
         result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [], logger=log)
@@ -224,6 +242,16 @@ class WorkerLoop:
             reasoning = result.get('reasoning') or {}
             if reasoning.get('mode'):
                 log.info('Reasoning mode: %s' % reasoning['mode'])
+        # Record this agent's full context into the shared store so subsequent
+        # agents see it.
+        skill = None
+        try:
+            skill = skill_for(step['agent_id'])
+        except SkillIntegrityError:
+            pass
+        accumulator.record(step['pipeline_id'], step['id'], step['agent_id'], job_id, result, skill)
+        if log:
+            log.info('Pipeline context updated with %s outputs' % step['agent_id'])
         # Everything the agent itself declared as output stays at the top
         # level -- resolved_params() (and any later step that forwards a
         # value from this one) reads outputs[key] directly. Execution
