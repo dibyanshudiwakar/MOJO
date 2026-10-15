@@ -27,18 +27,67 @@ DEFAULT_MAPPINGS={
  'XSLT':{'pattern':'XSLT_TRANSFORMER','module':'mapping','generated':True,'tests':['xslt_golden']},
  'ESQL':{'pattern':'TYPED_SERVICE_LOGIC','module':'service','generated':False,'tests':['esql_semantics']},
  'SCHEMA':{'pattern':'GENERATED_CONTRACT_MODEL','module':'model','generated':True,'tests':['schema_validation']},
- 'POLICY':{'pattern':'EXTERNALIZED_CONFIGURATION','module':'config','generated':True,'tests':['configuration_binding']}
+ 'POLICY':{'pattern':'EXTERNALIZED_CONFIGURATION','module':'config','generated':True,'tests':['configuration_binding']},
+ # Outbound calls. HTTPRequest/SOAPRequest are the ``ComIbmWSRequest`` side of
+ # the pair below -- see the note on ``_WS_NODE_ROLES``.
+ 'HTTPRequest':{'pattern':'REST_CLIENT_WRAPPER','module':'client','generated':True,'tests':['backend_contract']},
+ 'SOAPRequest':{'pattern':'SOAP_BACKEND_CONNECTOR','module':'soap','generated':False,'tests':['backend_contract']},
 }
 
-def mapping_key(name,approved):
+# ACE's generic HTTP input/reply/request nodes are named ``ComIbmWSInput`` /
+# ``ComIbmWSReply`` / ``ComIbmWSRequest`` regardless of whether they carry a
+# SOAP envelope or plain JSON -- "WS" is IIB's historical "Web Services" family
+# name, not a SOAP marker. external-skills/iib-to-ms-migration/SKILL.md's own
+# backend-type detection table draws this exact line on signal (SOAP envelope
+# in ESQL vs. a plain external URL with no QL/RxClaim/SOAP routing), not on
+# the node's class name -- so the name alone can never resolve these three.
+# key(construct name) -> (key when plain HTTP/JSON, key when a SOAP envelope)
+_WS_NODE_ROLES={'wsinput':('HTTPInput','SOAPInput'),'wsreply':('HTTPReply','SOAPReply'),'wsrequest':('HTTPRequest','SOAPRequest')}
+
+# Every IIB service generates a Catch/Failure/Timeout subflow for its own input
+# node, each just composing an error response (see common-patterns-and-gotchas.md
+# and the per-backend-type reference files' ``*_TimeoutHandler_ComposeError``
+# rows). ``CatchHandler`` already matched the 'Catch' key by accident (its name
+# contains "catch"); Failure and Timeout do not contain any approved key's name
+# even though they are the same construct -- only the HTTP status they must
+# return differs (Timeout is specifically 408, never 500), which is a code-gen
+# detail belonging to the EXCEPTION_HANDLER pattern, not a different one.
+_HANDLER_SUFFIXES=('catchhandler','failurehandler','timeouthandler')
+
+def mapping_key(name,approved,properties=None):
  """Resolve an ACE construct name to its approved mapping key, or None.
+
+ ``properties`` is the node's own properties dict (``messageDomainProperty``,
+ ``URLSpecifier``, ...) when known -- only the WS* roles above need it, to
+ tell a SOAP use of the node from a plain HTTP/REST one. Every other
+ construct resolves on the name alone, exactly as before.
 
  Shared so the specification agent derives target modules through the same
  normalisation the catalogue uses. Two copies of this matching would let a
  specification promise a module the mapping catalogue then refuses to produce.
  """
  normal=''.join(c for c in str(name) if c.isalnum()).lower()
+ for role,(http_key,soap_key) in _WS_NODE_ROLES.items():
+  if role in normal:
+   domain=str((properties or {}).get('messageDomainProperty','')).upper()
+   target=soap_key if domain not in ('','JSON') else http_key
+   return target if target in approved else None
+ if any(suffix in normal for suffix in _HANDLER_SUFFIXES):
+  return 'Catch' if 'Catch' in approved else None
  return next((k for k in approved if ''.join(c for c in k if c.isalnum()).lower() in normal),None)
+
+def is_presentation_only(node_type):
+ """An ACE Toolkit canvas icon or routing-target label -- never a Spring pattern.
+
+ ``utility:GIFFileGraphic`` is the flow's palette icon reference; ``ComIbmLabel``
+ is a named anchor ``ComIbmRouteToLabel`` routes to, with no transformation
+ logic of its own. Neither should ever reach ``DEFAULT_MAPPINGS`` -- a GIF has
+ nothing to generate, and a Label's own "code" is nothing (the control-flow
+ point it marks is sequenced by whatever follows it, not by the label itself).
+ Checked by prefix, not substring, so ``ComIbmRouteToLabel`` (a real routing
+ node, already resolved by the generic match above) is never caught by this.
+ """
+ return str(node_type).startswith('utility:') or str(node_type).startswith('ComIbmLabel.')
 
 class MappingAndPlanningService:
  def __init__(self,repo):
@@ -70,14 +119,17 @@ class MappingAndPlanningService:
   f,a,s=self._inputs(job_id,framework_id,analysis_id,specification_id);model=json.loads(a['semantic_model']);approved=dict(DEFAULT_MAPPINGS);approved.update(overrides or {})
   fw_hash=f['content_hash'] if f else ''
   mappings=[];unsupported=[];risks=[]
-  def add(source,kind,name):
-   key=mapping_key(name,approved)
+  def add(source,kind,name,properties=None):
+   key=mapping_key(name,approved,properties)
    if key:
     target=approved[key];mappings.append({'id':uid(),'source_reference':source,'ace_construct':name,'mapping_key':key,'spring_pattern':target['pattern'],'target_module':target['module'],'boundary':'GENERATED' if target['generated'] else 'HAND_WRITTEN_PROTECTED','tests':target['tests'],'framework_hash':fw_hash,'analysis_hash':a['content_hash'],'specification_hash':s['content_hash']})
    else:
     item={'id':uid(),'source_reference':source,'ace_construct':name or 'UNKNOWN','reason':'NO_APPROVED_SPRING_PATTERN','status':'OPEN','owner':'ACE_SME_AND_JAVA_ARCHITECT'};unsupported.append(item);risks.append({'id':uid(),'category':'UNSUPPORTED_MAPPING','severity':'HIGH','source_reference':source,'statement':'No approved Spring mapping for '+str(name),'response':'Clarify or implement approved plug-in mapping','owner':'ACE_SME_AND_JAVA_ARCHITECT','status':'OPEN'})
   for flow in model.get('flows',[])+model.get('subflows',[]):
-   for node in flow.get('nodes',[]):add(flow.get('path','')+'#'+str(node.get('id','')), 'NODE',node.get('type','UNKNOWN'))
+   for node in flow.get('nodes',[]):
+    ntype=node.get('type','UNKNOWN')
+    if is_presentation_only(ntype):continue
+    add(flow.get('path','')+'#'+str(node.get('id','')), 'NODE',ntype,node.get('properties') or {})
   for x in model.get('esql',[]):add(x.get('path',''),'ESQL','ESQL')
   for x in model.get('maps',[]):add(x.get('path',''),'MAP',x.get('type','Mapping'))
   for x in model.get('schemas',[]):add(x.get('path',''),'SCHEMA','SCHEMA')

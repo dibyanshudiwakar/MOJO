@@ -38,8 +38,19 @@ class ACEParser:
   typ=node['type'];low=typ.lower();props=node['properties']
   for key,protocol in self.PROTOCOLS.items():
    if key.lower() in low:
-    endpoint=props.get('url') or props.get('path') or props.get('queueName') or props.get('topicName') or props.get('filePath')
+    endpoint=props.get('URLSpecifier') or props.get('url') or props.get('path') or props.get('queueName') or props.get('topicName') or props.get('filePath')
     m['interfaces'].append({'source':rel,'node':node['id'],'protocol':protocol,'endpoint':endpoint or 'UNKNOWN'})
+  # ComIbmWSInput/ComIbmWSReply/ComIbmWSRequest are ACE's generic HTTP node
+  # family -- "WS" is IIB's historical "Web Services" name, used for both a
+  # SOAP envelope and plain HTTP/JSON depending on messageDomainProperty, not
+  # a SOAP marker by itself (same disambiguation as _WS_NODE_ROLES in
+  # migration_lifecycle_v6.py). None of PROTOCOLS' keys match this family's
+  # actual name, so without this these nodes never became an interface at all.
+  if any(role in low for role in ('wsinput','wsreply','wsrequest')):
+   domain=str(props.get('messageDomainProperty','')).upper()
+   protocol='SOAP' if domain not in ('','JSON') else 'HTTP'
+   endpoint=props.get('URLSpecifier') or props.get('url') or props.get('path')
+   m['interfaces'].append({'source':rel,'node':node['id'],'protocol':protocol,'endpoint':endpoint or 'UNKNOWN'})
   if any(x in low for x in ('compute','mapping','xslt')):m['behaviour']['transformations'].append({'source':rel,'node':node['id'],'type':typ})
   if any(x in low for x in ('route','filter','switch')):m['behaviour']['routing'].append({'source':rel,'node':node['id'],'type':typ})
   if any(x in low for x in ('catch','failure','throw','error')):m['behaviour']['errorHandling'].append({'source':rel,'node':node['id'],'type':typ})

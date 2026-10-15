@@ -68,9 +68,15 @@ SELECTABLE_AGENTS_EXCLUDED = {'migration-orchestrator'}
 # keys are each agent's own declared AgentResult.outputs, taken verbatim from
 # app/agents/*.py -- see ace_analysis.py (analysis_document), framework_baseline.py
 # (framework_template), migration_specification.py (migration_specification_yaml),
-# planning.py (plan).
+# planning.py (plan), test_engineering.py (test_suites).
 # framework_id is optional: when framework-baseline was skipped, the resolved
 # value stays '' and the downstream service proceeds with default conventions.
+#
+# Deliberately NOT auto-wired here: remediation's ``root_cause_id``. RCA's
+# ``rca_hypotheses`` output is a list (one hypothesis per variance kind, each
+# with its own id) rather than a single value a source/key pair can resolve to
+# -- picking which hypothesis to act on is the reviewer's decision, not
+# something a prior step's output alone determines.
 PARAM_SOURCES = {
     'migration-specification': {'analysis_id': ('ace-analysis', 'analysis_document'),
                                  'framework_id': ('framework-baseline', 'framework_template')},
@@ -78,6 +84,8 @@ PARAM_SOURCES = {
                  'framework_id': ('framework-baseline', 'framework_template'),
                  'specification_id': ('migration-specification', 'migration_specification_yaml')},
     'code-generation': {'plan_id': ('planning', 'plan')},
+    'test-engineering': {'plan_id': ('planning', 'plan')},
+    'variance-analysis': {'package_id': ('test-engineering', 'test_suites')},
 }
 # Extra depends_on edges this scheduler adds on top of the catalogue's own
 # dependency graph, keyed by role: an agent that reads a repository directly
