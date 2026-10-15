@@ -525,6 +525,12 @@ async function submitPipeline(){
  const btn=$('#wizNext');if(btn)btn.disabled=true;
  const j=wizard.job,repos={ACE:{repo_url:wizard.ace.repo_url,branch:wizard.ace.branch,enabled:true}};
  if(wizard.frameworkEnabled)repos.FRAMEWORK={repo_url:wizard.framework.repo_url,branch:wizard.framework.branch,enabled:true};
+ else{
+  // Framework repository is disabled — remove framework-baseline from the
+  // agent selection so it is skipped (and its dependents cascade-skipped)
+  // rather than running against an empty directory and failing the pipeline.
+  wizard.selected.delete('framework-baseline');
+ }
  repos.TARGET={repo_url:wizard.target.repo_url,branch:wizard.target.branch,push_mode:wizard.targetPush?'PUSH_TO_REPO':'LOCAL_OUTPUT',enabled:true};
  try{
   const created=await api('/api/v2/pipelines',{method:'POST',body:JSON.stringify({

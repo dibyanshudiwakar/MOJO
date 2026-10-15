@@ -581,15 +581,46 @@ class PipelineService:
         return self.detail(pipeline_id)
 
     def _ready_steps(self, pipeline_id):
+        """Steps whose dependencies are all satisfied and that can be scheduled.
+
+        A dependency is satisfied when it is COMPLETED or SKIPPED.  When every
+        dependency of a PENDING step is either COMPLETED or SKIPPED, and at
+        least one is SKIPPED, the step is cascade-skipped rather than
+        scheduled — an intentionally omitted agent must not block its
+        dependents, but those dependents must not run either since they would
+        be operating on missing inputs.
+        """
         rows = self.repo.rows('select * from pipeline_steps where pipeline_id=? order by sequence', (pipeline_id,))
         status = {r['id']: r['status'] for r in rows}
         ready = []
+        cascade_skip = []
         for r in rows:
             if r['status'] != 'PENDING':
                 continue
             deps = json.loads(r['depends_on'] or '[]')
-            if all(status.get(d) == 'COMPLETED' for d in deps):
-                ready.append(r)
+            dep_statuses = [status.get(d, 'PENDING') for d in deps]
+            if not deps or all(s in ('COMPLETED', 'SKIPPED') for s in dep_statuses):
+                if any(s == 'SKIPPED' for s in dep_statuses):
+                    # At least one dependency was skipped — cascade-skip this step.
+                    cascade_skip.append(r)
+                else:
+                    ready.append(r)
+        # Apply cascade skips immediately so downstream steps see the SKIPPED
+        # status on the next _ready_steps call.
+        if cascade_skip:
+            with self.repo.connect() as c:
+                for r in cascade_skip:
+                    skipped_dep = ''
+                    for d in json.loads(r['depends_on'] or '[]'):
+                        if status.get(d) == 'SKIPPED':
+                            # Find the agent name of the skipped dependency for a readable reason.
+                            dep_step = next((s for s in rows if s['id'] == d), None)
+                            skipped_dep = dep_step['agent_id'] if dep_step and dep_step['agent_id'] else d[:12]
+                            break
+                    reason = 'skip_kind:dependency;depends on skipped agent %s' % skipped_dep
+                    c.execute("update pipeline_steps set status='SKIPPED',error=?,updated_at=? where id=? and status='PENDING'",
+                              (reason, now(), r['id']))
+                    status[r['id']] = 'SKIPPED'
         return ready, rows
 
     def _schedule_ready(self, pipeline_id, workflow):
