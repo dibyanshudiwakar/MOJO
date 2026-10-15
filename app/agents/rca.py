@@ -32,6 +32,7 @@ STRENGTH = {'STRUCTURAL': 1.0, 'TYPE': 0.8, 'VALUE': 0.6}
 
 class RCAAgent(BaseAgent):
     AGENT_ID = 'rca'
+    SKILL = 'iib-to-ms-rca'
     TOOLS = ('evidence.read', 'repository.read', 'rca.write')
     OUTPUTS = ('rca_hypotheses', 'confidence', 'missing_evidence')
     PROMPT = 'agent/rca/hypothesis'

@@ -42,6 +42,7 @@ TRANSPORT_FIELDS = ('$.adapter', '$.correlation_id', '$.latency_ms')
 
 class TestEngineeringAgent(BaseAgent):
     AGENT_ID = 'test-engineering'
+    SKILL = 'iib-to-ms-test-engineering'
     TOOLS = ('test.execute', 'runtime.invoke', 'evidence.write')
     OUTPUTS = ('test_suites', 'execution_evidence')
     PROMPT = 'agent/test-engineering/case-coverage-review'

@@ -405,7 +405,8 @@ context.skill_provenance()  # {'skill_name', 'skill_hash'} | {'skill_error'} | {
   run is started. Off by default: a skill is guidance, so by default a damaged one is
   recorded as `skill_error` and the run continues.
 - **Integrity.** `agent-skills/skills-map.json` records a SHA-256 for every file.
-  `app/agents/skills.py` verifies them on load; a missing or edited file raises
+  `app/agents/skills.py` verifies them on load (CRLF and LF compare equal, because git on
+  Windows with `core.autocrlf` checks the files out as CRLF; any content change still fails); a missing or edited file raises
   `SkillIntegrityError`. Check the whole library with
   `python -m app.agents.skills --verify`.
 - **Recorded, not silent.** `ReasoningGateway` adds `skill_name` and `skill_hash`
@@ -420,6 +421,22 @@ context.skill_provenance()  # {'skill_name', 'skill_hash'} | {'skill_error'} | {
   `skill_included`.
 - **Location.** `agent-skills/` by default; override with
   `FACTORY_AGENT_SKILLS_DIR`.
+- **Parity analysis (variance-analysis, opt-in).** `parity=true` adds a static
+  IIB-source-versus-migrated-code comparison, guided by `parity-skill.md` (sourced from
+  `external-skills/gap-analysis/`). It is model-only and uses its own governed prompt,
+  `agent/variance-analysis/parity-check`, which an `AI_GOVERNANCE_ADMIN` must register and
+  approve like any other (otherwise the step reports `NOT_ANALYSED`). For that one call the
+  parity skill is the guidance in place of the agent's general `SKILL.md`
+  (`Skill.focus()` / `ReasoningGateway.reason(..., skill=)`), because its output contract
+  differs from the `severity-rationale` step's. Inputs are the job's own intake source and
+  generated artefacts. The report is stored as a `PARITY_ANALYSIS` validation report; it is
+  not an agent output and never enters the variance store.
+- **Hardcoding check (variance-analysis, opt-in).** `hardcoding=true` adds a narrower, Java-only
+  comparison (transaction flow, integration points, field mappings), guided by
+  `hardcoding-skill.md` (from `external-skills/hardcoding/`), with its own governed prompt
+  `agent/variance-analysis/hardcoding-check` and a stored `HARDCODING_ANALYSIS` report. It shares
+  the parity step's machinery (`CHECKS` in `app/agents/variance_analysis.py`), so the same rules
+  hold: model-only, advisory, never in the variance store or the agent's outputs.
 - **Editing.** Change an owning file or a `SKILL.md`, then run
   `python scripts/sync_agent_skills.py`. `--check` fails on drift and is run by
   `tests/agents/test_agent_skills.py`.

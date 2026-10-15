@@ -21,6 +21,7 @@ from app.services.priority1 import PriorityOneService
 
 class ACEAnalysisAgent(BaseAgent):
     AGENT_ID = 'ace-analysis'
+    SKILL = 'iib-to-ms-ace-analysis'
     TOOLS = ('repository.read', 'parser.execute', 'evidence.write', 'clarification.create')
     OUTPUTS = ('analysis_document', 'semantic_model', 'ambiguities')
     PROMPT = 'agent/ace-analysis/ambiguity-triage'

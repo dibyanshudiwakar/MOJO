@@ -16,7 +16,7 @@ The source skill is left untouched. `app/agents/skills.py` loads these skills (s
 | `planning` | [`iib-to-ms-planning`](iib-to-ms-planning/SKILL.md) | `construct-mapping.md` | 9 |
 | `code-generation` | [`iib-to-ms-code-generation`](iib-to-ms-code-generation/SKILL.md) | `gap-checklist.md`, `handoff-build-and-reconcile.md`, `ibm-mq-cobol-copybook.md`, `mandatory-migration-rules.md`, `ql-cics-camel-bindy.md`, `rest-external-direct.md`, `rxclaim-sbo-xml-jaxb.md`, `scaffold-and-generate.md`, `soap-backend.md` | 7 |
 | `test-engineering` | [`iib-to-ms-test-engineering`](iib-to-ms-test-engineering/SKILL.md) | `smoke-test-procedure.md` | 5 |
-| `variance-analysis` | [`iib-to-ms-variance-analysis`](iib-to-ms-variance-analysis/SKILL.md) | `known-variance-signatures.md` | 3 |
+| `variance-analysis` | [`iib-to-ms-variance-analysis`](iib-to-ms-variance-analysis/SKILL.md) | `hardcoding-skill.md`, `known-variance-signatures.md`, `parity-skill.md` | 3 |
 | `rca` | [`iib-to-ms-rca`](iib-to-ms-rca/SKILL.md) | `common-patterns-and-gotchas.md` | 4 |
 | `remediation` | [`iib-to-ms-remediation`](iib-to-ms-remediation/SKILL.md) | `fix-and-retry-policy.md` | 4 |
 | `governance` | [`iib-to-ms-governance`](iib-to-ms-governance/SKILL.md) | `hard-constraints.md`, `verification-checklists.md` | 4 |
@@ -32,6 +32,7 @@ If you later want one, the content has to come from somewhere other than this sk
 ## How the split was made
 
 - **By who does the work, not by file.** Each part of the pipeline was assigned to the agent whose contract performs it, and the tool allow-list was respected: `repository-intake` cannot raise clarifications (so its skill reports *gaps*), `remediation` plans changes but does not write source, `test-engineering` can run what was built but cannot rebuild.
+- **Other external skills.** `parity-skill.md` (from `external-skills/gap-analysis/`) and `hardcoding-skill.md` (from `external-skills/hardcoding/`) are owned by `iib-to-ms-variance-analysis`; the sync script copies them like the others.
 - **No retyping.** Owned reference files are byte-identical copies of the originals, or cuts of them by exact line range; each cut starts with an HTML comment naming the source and ranges.
 - **Self-contained.** A skill that needs a file owned by another skill holds a byte-identical **copy** in its own `references/` folder, so any skill directory can be mounted alone. The copy set is derived from the `references/...` links in that skill's `SKILL.md`. Copies are never edited by hand.
 - **Drift is detected, not trusted.** `python scripts/sync_agent_skills.py --check` fails if any copy differs from its owner, if a generated table is stale, or if a `SKILL.md` links outside its folder. Every file's SHA-256 is in `skills-map.json`, and the loader verifies them at load time.
@@ -62,10 +63,12 @@ Text inside copied and extracted files still uses the **original** names (for ex
 | `handoff-and-action-items.md` | `iib-to-ms-migration-orchestrator` |
 | `handoff-build-and-reconcile.md` | `iib-to-ms-code-generation` |
 | `hard-constraints.md` | `iib-to-ms-governance` |
+| `hardcoding-skill.md` | `iib-to-ms-variance-analysis` |
 | `ibm-mq-cobol-copybook.md` | `iib-to-ms-code-generation` |
 | `intake-procedure.md` | `iib-to-ms-repository-intake` |
 | `known-variance-signatures.md` | `iib-to-ms-variance-analysis` |
 | `mandatory-migration-rules.md` | `iib-to-ms-code-generation` |
+| `parity-skill.md` | `iib-to-ms-variance-analysis` |
 | `ql-cics-camel-bindy.md` | `iib-to-ms-code-generation` |
 | `rest-external-direct.md` | `iib-to-ms-code-generation` |
 | `rxclaim-sbo-xml-jaxb.md` | `iib-to-ms-code-generation` |

@@ -56,6 +56,11 @@ class ProviderExecutionAdapter:
     prompt; adapters that do not accept it (test doubles) can ignore it.
     """
 
+    #: Set True on an adapter whose ``invoke`` accepts a ``skill=`` keyword. The
+    #: skill is passed only to adapters that declare this, so adapters written
+    #: against ``invoke(template, payload)`` keep working unchanged.
+    accepts_skill = False
+
     def invoke(self, template, payload, skill=None):
         raise NotImplementedError('provider_execution_adapter_required')
 
@@ -81,8 +86,11 @@ class ReasoningGateway:
                 ' order by created_at desc limit 1')
         return prompt, model
 
-    def reason(self, context, prompt_name, payload):
+    def reason(self, context, prompt_name, payload, skill=None):
         """Return ``(answer_or_None, provenance)``.
+
+        ``skill`` overrides the agent's own skill for this one call (see
+        ``Skill.focus``); without it the agent's skill from ``context`` is used.
 
         ``provenance`` always records which mode produced the agent's result and,
         when a request was made, the prompt and model versions it was made
@@ -97,6 +105,13 @@ class ReasoningGateway:
         provenance = {'mode': DETERMINISTIC, 'prompt_name': prompt_name,
                       'model_alias': alias or '', 'binding_source': getattr(context, 'binding_source', 'DEFAULT')}
         _log_info('LLM reasoning: looking up prompt "%s" with model alias "%s"' % (prompt_name, alias or '(default)'))
+        # Which skill (by content hash) was available to this step, in every mode.
+        # Guidance only: a damaged skill is recorded here and the step carries on.
+        skill_provenance = getattr(context, 'skill_provenance', None)
+        if skill is not None:
+            provenance.update(skill.provenance())
+        elif skill_provenance:
+            provenance.update(skill_provenance())
         prompt, model = self._approved(prompt_name, alias)
         if not prompt or not model:
             provenance['reason'] = 'no_approved_prompt_or_model'
@@ -199,7 +214,18 @@ class ReasoningGateway:
             provider_model, prompt_name, skill.name if skill else '(none)',
             sorted(enriched_payload.keys()) if isinstance(enriched_payload, dict) else '(non-dict)'))
         try:
-            answer = provider.invoke(prompt['template'], enriched_payload, skill=skill)
+            # The skill travels outside ``payload`` on purpose: the payload is the
+            # job's evidence and was DLP-cleared by the gateway; the skill is
+            # static, reviewed repository content. The adapter appends it to the
+            # approved template; it never replaces it.
+            guidance = None
+            if getattr(provider, 'accepts_skill', False) and 'skill_hash' in provenance:
+                guidance = skill if skill is not None else context.skill()
+            if guidance is not None:
+                answer = provider.invoke(prompt['template'], enriched_payload, skill=guidance)
+            else:
+                answer = provider.invoke(prompt['template'], enriched_payload, skill=skill)
+            provenance['skill_included'] = guidance is not None
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:
             provenance['reason'] = 'provider_execution_failed:' + str(exc)

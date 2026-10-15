@@ -42,6 +42,19 @@ class Skill:
     #: path relative to the skill directory (``references/x.md``) -> file text
     references: dict = field(default_factory=dict)
     content_hash: str = ''
+    #: Set when this skill was narrowed to one reference file by ``focus``; ``''`` for a whole skill.
+    focused_on: str = ''
+
+    def focus(self, reference):
+        """This skill narrowed to one of its reference files.
+
+        For a step whose guidance *is* that file and must not be mixed with the
+        agent's general SKILL.md -- for example a reference that defines its own
+        output contract. ``KeyError`` if the skill has no such reference.
+        """
+        text = self.reference(reference)
+        return Skill(self.agent_id, '%s#%s' % (self.name, reference), self.root, text, {},
+                     hashlib.sha256(text.encode('utf-8')).hexdigest(), reference)
 
     def reference(self, name):
         """One reference by file name or by its ``references/...`` path."""
@@ -51,7 +64,10 @@ class Skill:
         raise KeyError(name)
 
     def provenance(self):
-        return {'skill_name': self.name, 'skill_hash': self.content_hash}
+        out = {'skill_name': self.name, 'skill_hash': self.content_hash}
+        if self.focused_on:
+            out['skill_focus'] = self.focused_on
+        return out
 
     def as_system_prompt(self):
         """The skill as one block of guidance for a model adapter to place in its system prompt.
@@ -59,6 +75,8 @@ class Skill:
         SKILL.md in full, then an index of the reference files (not their text --
         they are large; fetch one with ``reference(name)`` when a step needs it).
         """
+        if self.focused_on:
+            return self.text.rstrip('\n') + '\n'
         index = '\n'.join('- ' + path for path in sorted(self.references))
         return ('%s\n\n---\nReference files available for this agent (%s):\n%s\n'
                 % (self.text.rstrip('\n'), self.name, index))
@@ -103,7 +121,9 @@ class SkillLibrary:
     def _read(self, skill_dir, rel, expected):
         path = skill_dir / rel
         try:
-            data = path.read_bytes()
+            # Line endings are not content: git on Windows (core.autocrlf) checks these
+            # files out as CRLF, while the manifest hashes the LF form. Compare like with like.
+            data = path.read_bytes().replace(b'\r\n', b'\n')
         except OSError as exc:
             raise SkillIntegrityError('skill_file_missing:%s/%s' % (skill_dir.name, rel)) from exc
         if hashlib.sha256(data).hexdigest() != expected:
