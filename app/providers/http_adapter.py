@@ -16,13 +16,16 @@ from app.agents.reasoning import ProviderExecutionAdapter
 class HttpProviderAdapter(ProviderExecutionAdapter):
     """Call any OpenAI-compatible /v1/chat/completions endpoint."""
 
+    #: ``invoke`` takes ``skill=``; ReasoningGateway passes the agent's skill to adapters that say so.
+    accepts_skill = True
+
     def __init__(self, api_base: str, api_key: str, model: str, timeout: int = 60):
         self.url = api_base.rstrip('/') + '/chat/completions'
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
 
-    def invoke(self, template: str, payload: dict) -> dict:
+    def invoke(self, template: str, payload: dict, skill=None) -> dict:
         """Send template + payload to the model and return a JSON-serialisable answer.
 
         template  -- the approved prompt text from prompt_registry
@@ -33,8 +36,10 @@ class HttpProviderAdapter(ProviderExecutionAdapter):
         non-dict response is wrapped under 'answer' so callers always receive a
         dict and ReasoningGateway.complete_request() can hash it.
         """
+        # The agent's skill is guidance appended to the approved template, never a replacement for it.
+        system = template if skill is None else template + '\n\n---\n' + skill.as_system_prompt()
         messages = [
-            {'role': 'system', 'content': template},
+            {'role': 'system', 'content': system},
             {'role': 'user',   'content': json.dumps(payload, sort_keys=True, default=str)},
         ]
         body = json.dumps({

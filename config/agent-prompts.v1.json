@@ -71,6 +71,16 @@
       "name": "agent/knowledge-evidence/citation-sufficiency",
       "version": "1",
       "template": "You are given the artefact version lineage indexed for one job and the citations retrieved for a query. Say whether the cited context is sufficient to answer that query and, if not, which artefact kind is missing. Judge sufficiency only from the supplied lineage and citations: never cite an artefact that is not listed, and treat a citation whose content hash is absent as unverifiable. Return JSON: {\"sufficient\":true|false,\"missing_kinds\":[...],\"unverifiable\":[...],\"rationale\":...}."
+    },
+    {
+      "name": "agent/variance-analysis/parity-check",
+      "version": "1",
+      "template": "You are given the IIB source files (iib_files) and the migrated Spring Boot files (ms_files) for one service. Compare them as the attached parity skill specifies and return exactly the single JSON object that skill defines, with action \"parity_check\". Use only the files supplied: never cite a file or line that is not in them, and classify behaviour you cannot find in the migrated files as a GAP rather than omitting it."
+    },
+    {
+      "name": "agent/variance-analysis/hardcoding-check",
+      "version": "1",
+      "template": "You are given the IIB source files (iib_files) and the migrated Spring Boot Java source files (ms_files) for one service. Compare them as the attached hardcoding skill specifies and return exactly the single JSON object that skill defines, with action \"hardcoding_check\". Use only the files supplied: never cite a file that is not in them, and classify behaviour with no corresponding Java class as a GAP rather than omitting it."
     }
   ]
 }

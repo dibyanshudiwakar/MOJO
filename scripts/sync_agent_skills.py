@@ -62,6 +62,11 @@ WHOLE = [('code-generation', n) for n in [
     ('framework-baseline', n) for n in [
         'structural-conventions.md', 'fixed-file-templates.md', 'templates/config-map-baseline.properties']] + [
     ('rca', 'common-patterns-and-gotchas.md')]
+# files owned by a skill but sourced from another folder under external-skills/
+EXTERNAL = [
+    ('variance-analysis', 'parity-skill.md', ROOT / 'external-skills' / 'gap-analysis' / 'parity-skill.md'),
+    ('variance-analysis', 'hardcoding-skill.md', ROOT / 'external-skills' / 'hardcoding' / 'hardcoding-skill.md'),
+]
 # hand-written reference files that live in the repo and are only copied onward
 AUTHORED = [('variance-analysis', 'known-variance-signatures.md')]
 
@@ -73,6 +78,11 @@ LINK = re.compile(r'`references/([^`\s]+)`')
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
+
+
+def lf(b):
+    """Line endings are not content: a Windows checkout (core.autocrlf) turns LF into CRLF."""
+    return b.replace(b'\r\n', b'\n')
 
 
 def src_lines(rel):
@@ -89,6 +99,8 @@ def owners():
     for a, n, _ in EXTRACTS:
         o[n] = a
     for a, n in WHOLE + AUTHORED:
+        o[n] = a
+    for a, n, _ in EXTERNAL:
         o[n] = a
     return o
 
@@ -133,9 +145,11 @@ def plan():
     for a, n, parts in EXTRACTS:
         owned_bytes[n] = extract_bytes(parts)
     for a, n in WHOLE:
-        owned_bytes[n] = (SRC / 'references' / n).read_bytes()
+        owned_bytes[n] = lf((SRC / 'references' / n).read_bytes())
+    for a, n, src in EXTERNAL:
+        owned_bytes[n] = lf(src.read_bytes())
     for a, n in AUTHORED:
-        owned_bytes[n] = (OUT / SKILL[a] / 'references' / n).read_bytes()
+        owned_bytes[n] = lf((OUT / SKILL[a] / 'references' / n).read_bytes())
 
     for cid in cat:
         if cid not in SKILL and cid not in UNMAPPED:
@@ -182,6 +196,7 @@ def plan():
 
     manifest = {
         'source_skill': 'external-skills/iib-to-ms-migration',
+        'additional_sources': sorted({str(src.parent.relative_to(ROOT)).replace('\\', '/') for _, _, src in EXTERNAL}),
         'catalogue': 'config/agent-catalogue.v1.json',
         'note': 'One self-contained skill per agent. Each reference file has one owner; other skills hold '
                 'byte-identical copies (kind=copy). Regenerate with scripts/sync_agent_skills.py.',
@@ -222,6 +237,7 @@ If you later want one, the content has to come from somewhere other than this sk
 ## How the split was made
 
 - **By who does the work, not by file.** Each part of the pipeline was assigned to the agent whose contract performs it, and the tool allow-list was respected: `repository-intake` cannot raise clarifications (so its skill reports *gaps*), `remediation` plans changes but does not write source, `test-engineering` can run what was built but cannot rebuild.
+- **Other external skills.** `parity-skill.md` (from `external-skills/gap-analysis/`) and `hardcoding-skill.md` (from `external-skills/hardcoding/`) are owned by `iib-to-ms-variance-analysis`; the sync script copies them like the others.
 - **No retyping.** Owned reference files are byte-identical copies of the originals, or cuts of them by exact line range; each cut starts with an HTML comment naming the source and ranges.
 - **Self-contained.** A skill that needs a file owned by another skill holds a byte-identical **copy** in its own `references/` folder, so any skill directory can be mounted alone. The copy set is derived from the `references/...` links in that skill's `SKILL.md`. Copies are never edited by hand.
 - **Drift is detected, not trusted.** `python scripts/sync_agent_skills.py --check` fails if any copy differs from its owner, if a generated table is stale, or if a `SKILL.md` links outside its folder. Every file's SHA-256 is in `skills-map.json`, and the loader verifies them at load time.
@@ -248,7 +264,7 @@ Text inside copied and extracted files still uses the **original** names (for ex
 def apply(files):
     for p, b in files.items():
         p.parent.mkdir(parents=True, exist_ok=True)
-        if not p.exists() or p.read_bytes() != b:
+        if not p.exists() or lf(p.read_bytes()) != b:
             p.write_bytes(b)
 
 
@@ -273,7 +289,7 @@ def main(argv=None):
         for p, b in files.items():
             if not p.exists():
                 errors.append('missing: ' + str(p.relative_to(ROOT)))
-            elif p.read_bytes() != b:
+            elif lf(p.read_bytes()) != b:
                 errors.append('out of date: ' + str(p.relative_to(ROOT)))
         errors += ['stale (no SKILL.md links to it): ' + str(p.relative_to(ROOT)) for p in stale]
         for e in errors:

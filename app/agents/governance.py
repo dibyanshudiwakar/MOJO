@@ -23,6 +23,7 @@ from app.services.factory_v3 import AuditLedger
 
 class GovernanceAgent(BaseAgent):
     AGENT_ID = 'governance'
+    SKILL = 'iib-to-ms-governance'
     TOOLS = ('policy.read', 'policy.evaluate', 'audit.write')
     OUTPUTS = ('allow_deny_decision', 'approval_requirement', 'evidence_requirement')
     #: Explains a decision already made; it never makes one. The module note

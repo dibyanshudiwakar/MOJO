@@ -20,6 +20,7 @@ from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 class CodeGenerationAgent(BaseAgent):
     AGENT_ID = 'code-generation'
+    SKILL = 'iib-to-ms-code-generation'
     TOOLS = ('repository.branch', 'repository.write', 'build.execute', 'evidence.write')
     OUTPUTS = ('source_code', 'tests', 'manifest', 'provenance')
     PROMPT = 'agent/code-generation/quality-failure-triage'

@@ -2,6 +2,7 @@ import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
 from app.providers import default_provider
+from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
 from app.services.agent_llm_bindings import AgentLLMBindingService
@@ -75,6 +76,14 @@ class AgentRegistry:
    outputs=set(impl.OUTPUTS)-set(json.loads(a['produced_outputs'] or '[]'))
    if impl.AGENT_ID!=a['agent_id']:item['findings'].append('agent_id_mismatch:'+impl.AGENT_ID)
    if impl.VERSION!=a['version']:item['findings'].append('version_mismatch:'+impl.VERSION)
+   # The skill an implementation declares must be the one the manifest assigns it.
+   # '' means undeclared (not checked); None means "deliberately none". File hashes are
+   # not checked here -- a damaged skill is guidance lost, not contract drift.
+   declared=getattr(impl,'SKILL','')
+   if declared!='':
+    try:expected=library().skill_name(a['agent_id'])
+    except SkillIntegrityError:expected=declared  # manifest unreadable: cannot verify, so not drift
+    if declared!=expected:item['findings'].append('skill_mismatch:declared='+str(declared)+',manifest='+str(expected))
    if tools:item['findings'].append('tool_not_in_contract:'+','.join(sorted(tools)))
    if outputs:item['findings'].append('output_not_in_contract:'+','.join(sorted(outputs)))
    if item['findings']:item['status']='DRIFT'
@@ -100,6 +109,11 @@ class AgentRegistry:
   deps=self.dependency_status(job_id,agent_id)
   if deps['outstanding']: raise PermissionError('agent_dependency_not_satisfied:'+','.join(deps['outstanding']))
   impl=load_implementation(agent_id)(self.repo)
+  # Opt-in strict mode: an agent that declares a skill does not run without it. Checked
+  # before start() so a refusal leaves no RUNNING row behind.
+  if skills_required() and getattr(impl,'SKILL',''):
+   try:skill_for(agent_id)
+   except SkillIntegrityError as e:raise PermissionError('agent_skill_unavailable:'+str(e))
   run=self.start(job_id,agent_id,version,input_evidence or [],roles,impl.TOOLS,identity)
   job=self.repo.one('select iteration from jobs where id=?',(job_id,))
   effective_alias,binding_source=self.bindings.resolve(agent_id,a.get('default_model_alias') or '')
@@ -136,16 +150,19 @@ class AgentRegistry:
   # by returning them in its result.
   if result.evidence and 'evidence.write' not in allowed: raise PermissionError('tool_not_allowed:evidence.write')
   if result.clarifications and 'clarification.create' not in allowed: raise PermissionError('tool_not_allowed:clarification.create')
+  # The skill that worked with this run, for every agent -- not only those that reason
+  # through the gateway. Recorded on the run, on each artefact and in the audit entry.
+  skill_prov=context.skill_provenance()
   registered=[]
   for ref in result.evidence:
-   meta=dict(ref.metadata or {});meta.update({'agent_id':agent_id,'agent_version':version,'run_id':run['id'],'model_provenance':result.reasoning or {}})
+   meta=dict(ref.metadata or {});meta.update({'agent_id':agent_id,'agent_version':version,'run_id':run['id'],'model_provenance':result.reasoning or {},'skill':skill_prov})
    registered.append(self.evidence.register(job_id,ref.kind,ref.version,ref.uri,ref.content,agent_id,meta))
   opened=[]
   # Clarification blocking is disabled — agents may still return
   # clarifications in their result but they are not persisted or acted on.
   evidence_ids=[x['id'] for x in registered]
-  self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,result.reasoning,(result.reasoning or {}).get('mode',''))
-  detail={'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence_ids':evidence_ids,'clarification_ids':opened,'requested_tools':sorted(impl.TOOLS),'params_hash':context.params_hash,'reasoning':result.reasoning,'channel':channel,'contract_hash':a['contract_hash'],'effective_model_alias':effective_alias,'binding_source':binding_source}
+  self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
+  detail={'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence_ids':evidence_ids,'clarification_ids':opened,'requested_tools':sorted(impl.TOOLS),'params_hash':context.params_hash,'reasoning':result.reasoning,'channel':channel,'contract_hash':a['contract_hash'],'effective_model_alias':effective_alias,'binding_source':binding_source,'skill':skill_prov}
   with self.repo.connect() as c:
    self.repo.event(c,job_id,identity,'AGENT_RUN_COMPLETED',details=detail,correlation=run['correlation_id'])
    self.ledger.append(job_id,identity,'AGENT_RUN_COMPLETED',detail,cursor=c)

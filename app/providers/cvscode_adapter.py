@@ -119,6 +119,9 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
     is known, so this object stays stateless and safe to share between jobs.
     """
 
+    #: ``invoke`` takes ``skill=``; ReasoningGateway passes the agent's skill to adapters that say so.
+    accepts_skill = True
+
     def __init__(self, base_url='', model='', effort=None, timeout=600, max_tokens=16384,
                  alias=DEFAULT_ALIAS):
         self.base_url = base_url or os.environ.get('ANTHROPIC_BASE_URL') or DEFAULT_BASE_URL
@@ -172,9 +175,8 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
 
         ``skill`` is the optional per-agent guidance from ``agent-skills/``, in
         the shape ``tests/agents/test_agent_skills.py`` specifies for a
-        skill-aware adapter. ``ReasoningGateway`` does not pass one yet, so this
-        is inert today and costs nothing; accepting it now means this adapter
-        does not have to change when that wiring lands. The approved prompt
+        skill-aware adapter. ``ReasoningGateway`` passes the running agent's
+        skill because this class sets ``accepts_skill``. The approved prompt
         stays first in the system prompt -- the skill is guidance appended to
         it, never a replacement for the template the gateway authorised.
         """

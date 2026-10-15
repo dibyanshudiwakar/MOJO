@@ -1,5 +1,9 @@
 {
   "source_skill": "external-skills/iib-to-ms-migration",
+  "additional_sources": [
+    "external-skills/gap-analysis",
+    "external-skills/hardcoding"
+  ],
   "catalogue": "config/agent-catalogue.v1.json",
   "note": "One self-contained skill per agent. Each reference file has one owner; other skills hold byte-identical copies (kind=copy). Regenerate with scripts/sync_agent_skills.py.",
   "agents": [
@@ -448,7 +452,7 @@
       "agent_id": "variance-analysis",
       "skill_name": "iib-to-ms-variance-analysis",
       "skill_path": "iib-to-ms-variance-analysis/SKILL.md",
-      "skill_sha256": "59c43bef1d6e6380f212a0d8919cb5a29b25c2b1bdf2fb79e54d887ae981e82c",
+      "skill_sha256": "9ceddcd42110e5bb40de6f3a117b333258e33352ddcda4998f52ad8759e08118",
       "required_role": "VARIANCE_ANALYST",
       "depends_on": [
         "test-engineering"
@@ -467,8 +471,20 @@
           "owner": "iib-to-ms-code-generation"
         },
         {
+          "path": "references/hardcoding-skill.md",
+          "sha256": "d9c5fd3908119ffb10ed7b3ebcaed7eff425d074d023bc8fc6d81921685aba75",
+          "kind": "owned",
+          "owner": "iib-to-ms-variance-analysis"
+        },
+        {
           "path": "references/known-variance-signatures.md",
           "sha256": "d1af285419e469b02b546a3ba817ebef0c7649e55e6e85b8c2b756c9685ce8f8",
+          "kind": "owned",
+          "owner": "iib-to-ms-variance-analysis"
+        },
+        {
+          "path": "references/parity-skill.md",
+          "sha256": "c5ce0c3e85e1c615546b244f3c86a0b7288e6b8a69d37eb6ca8ab4067e696a0a",
           "kind": "owned",
           "owner": "iib-to-ms-variance-analysis"
         },
@@ -663,10 +679,12 @@
     "handoff-and-action-items.md": "iib-to-ms-migration-orchestrator",
     "handoff-build-and-reconcile.md": "iib-to-ms-code-generation",
     "hard-constraints.md": "iib-to-ms-governance",
+    "hardcoding-skill.md": "iib-to-ms-variance-analysis",
     "ibm-mq-cobol-copybook.md": "iib-to-ms-code-generation",
     "intake-procedure.md": "iib-to-ms-repository-intake",
     "known-variance-signatures.md": "iib-to-ms-variance-analysis",
     "mandatory-migration-rules.md": "iib-to-ms-code-generation",
+    "parity-skill.md": "iib-to-ms-variance-analysis",
     "ql-cics-camel-bindy.md": "iib-to-ms-code-generation",
     "rest-external-direct.md": "iib-to-ms-code-generation",
     "rxclaim-sbo-xml-jaxb.md": "iib-to-ms-code-generation",

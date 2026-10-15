@@ -30,6 +30,7 @@ DEFAULT_TESTS = ['targeted_regression', 'impacted_suite']
 
 class RemediationAgent(BaseAgent):
     AGENT_ID = 'remediation'
+    SKILL = 'iib-to-ms-remediation'
     TOOLS = ('repository.branch', 'repository.write', 'test.execute', 'evidence.write')
     OUTPUTS = ('patch_plan', 'code_changes', 'tests')
     PROMPT = 'agent/remediation/patch-plan'

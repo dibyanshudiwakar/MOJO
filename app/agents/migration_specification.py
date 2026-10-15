@@ -35,6 +35,7 @@ def _paths(items):
 
 class MigrationSpecificationAgent(BaseAgent):
     AGENT_ID = 'migration-specification'
+    SKILL = 'iib-to-ms-migration-specification'
     TOOLS = ('evidence.read', 'schema.validate', 'evidence.write')
     OUTPUTS = ('migration_specification_yaml',)
     PROMPT = 'agent/migration-specification/authoring'

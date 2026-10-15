@@ -17,6 +17,7 @@ invoked directly.
 """
 import json
 from dataclasses import dataclass, field
+from app.agents.skills import SkillIntegrityError, skill_for
 from app.repository import digest
 
 
@@ -94,8 +95,12 @@ class AgentContext:
 
     def __init__(self, repo, job_id, identity='system', roles=(), params=None,
                  correlation_id='', iteration=1, provider=None, channel='API',
-                 default_model_alias='', effective_model_alias='', binding_source='DEFAULT'):
+                 default_model_alias='', effective_model_alias='', binding_source='DEFAULT',
+                 agent_id=''):
         self.repo = repo
+        # Which catalogue agent this invocation is for. Only used to look up the
+        # agent's skill; it confers no capability and is not read from a request.
+        self.agent_id = agent_id
         self.job_id = job_id
         self.identity = identity
         self.roles = tuple(roles)
@@ -122,6 +127,26 @@ class AgentContext:
             raise ValueError('missing_param:' + name)
         return value
 
+    def skill(self):
+        """This agent's verified skill, or ``None`` if it has none.
+
+        Raises ``SkillIntegrityError`` if the skill files do not match the
+        manifest. Use ``skill_provenance`` where the skill is optional.
+        """
+        return skill_for(self.agent_id) if self.agent_id else None
+
+    def skill_provenance(self):
+        """What to record about the skill: its name and hash, or why there is none.
+
+        Never raises. A skill is guidance, so a damaged or missing one must not
+        fail a run -- but it must be visible in the record, not silently absent.
+        """
+        try:
+            skill = self.skill()
+        except SkillIntegrityError as exc:
+            return {'skill_error': str(exc)}
+        return skill.provenance() if skill else {}
+
     def job(self):
         row = self.repo.one('select * from jobs where id=?', (self.job_id,))
         if not row:
@@ -141,6 +166,11 @@ class BaseAgent:
     governed prompt name when they reason through the model gateway.
     """
     AGENT_ID = ''
+    #: The skill (``agent-skills/<name>``) that works with this agent when it runs.
+    #: ``''`` means undeclared and is not checked; a name must match the manifest;
+    #: ``None`` says "deliberately no skill" and must match an agent the manifest
+    #: lists as having none. ``AgentRegistry.conformance`` checks the declaration.
+    SKILL = ''
     VERSION = '1.0.0'
     TOOLS = ()
     PROMPT = None
@@ -157,7 +187,13 @@ class BaseAgent:
 
     def context(self, job_id, **kwargs):
         """Build a context bound to this agent's repository."""
+        kwargs.setdefault('agent_id', self.AGENT_ID)
         return AgentContext(self.repo, job_id, **kwargs)
+
+    @property
+    def skill(self):
+        """This agent's verified skill (``agent-skills/``), or ``None`` if it has none."""
+        return skill_for(self.AGENT_ID)
 
     def run(self, job_id, **kwargs):
         """Execute directly, without the registry.

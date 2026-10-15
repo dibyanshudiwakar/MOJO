@@ -27,6 +27,7 @@ from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 class PlanningAgent(BaseAgent):
     AGENT_ID = 'planning'
+    SKILL = 'iib-to-ms-planning'
     TOOLS = ('evidence.read', 'plan.write', 'clarification.create')
     OUTPUTS = ('plan', 'task_graph', 'mapping', 'risk_register')
     PROMPT = 'agent/planning/risk-assessment'
