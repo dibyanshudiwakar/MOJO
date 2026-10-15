@@ -136,7 +136,7 @@ class AgentRegistry:
   with self.repo.connect() as c:
    c.execute('update agent_runs set effective_model_alias=?,binding_source=? where id=?',(effective_alias,binding_source,run['id']))
   if provider is None: provider=default_provider()
-  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source,logger=logger)
+  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source,logger=logger,agent_id=agent_id)
   _log_info('Executing agent %s…' % agent_id)
   try:result=impl.execute(context)
   except Exception as e:

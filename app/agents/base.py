@@ -95,7 +95,7 @@ class AgentContext:
     def __init__(self, repo, job_id, identity='system', roles=(), params=None,
                  correlation_id='', iteration=1, provider=None, channel='API',
                  default_model_alias='', effective_model_alias='', binding_source='DEFAULT',
-                 logger=None):
+                 logger=None, agent_id=''):
         self.repo = repo
         self.job_id = job_id
         self.identity = identity
@@ -118,6 +118,9 @@ class AgentContext:
         self.binding_source = binding_source
         # Optional StepLogger for structured pipeline step logs.
         self.logger = logger
+        # The catalogue agent_id, used by ReasoningGateway to load the
+        # agent's skill from agent-skills/.
+        self.agent_id = agent_id
 
     def param(self, name, default=_REQUIRED):
         value = self.params.get(name, default)

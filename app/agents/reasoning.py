@@ -30,6 +30,7 @@ Refusing to fall back would mean 14 agents that cannot complete.
 import json
 from pathlib import Path
 from app.services.platform_v7 import AIRegistryService
+from app.agents.skills import skill_for, SkillIntegrityError
 
 CATALOGUE = Path(__file__).resolve().parents[2] / 'config' / 'agent-prompts.v1.json'
 
@@ -49,9 +50,13 @@ class ProviderExecutionAdapter:
     already cleared, and return a JSON-serialisable answer. The factory ships no
     implementation: an external provider call is an enterprise adapter, and this
     codebase does not simulate those. Tests supply a deterministic double.
+
+    ``skill`` is the optional per-agent guidance loaded from ``agent-skills/``.
+    Adapters that support it (``CvscodeClaudeAdapter``) append it to the system
+    prompt; adapters that do not accept it (test doubles) can ignore it.
     """
 
-    def invoke(self, template, payload):
+    def invoke(self, template, payload, skill=None):
         raise NotImplementedError('provider_execution_adapter_required')
 
 
@@ -144,10 +149,29 @@ class ReasoningGateway:
                 return None, provenance
         provider_model = getattr(provider, 'model', '')
         provenance['provider_model'] = provider_model
-        _log_info('LLM invoking provider: model=%s, prompt="%s", payload_keys=%s' % (
-            provider_model, prompt_name, sorted(payload.keys()) if isinstance(payload, dict) else '(non-dict)'))
+        # Load the agent's skill from agent-skills/ if one exists.  A damaged
+        # or missing skill is recorded and skipped — it is guidance, not
+        # authority, so its absence must not prevent the agent from running.
+        skill = None
+        ctx_agent_id = getattr(context, 'agent_id', '') or ''
+        if ctx_agent_id:
+            try:
+                skill = skill_for(ctx_agent_id)
+                if skill:
+                    _log_info('Skill loaded: "%s" (hash: %s, %d references)' % (
+                        skill.name, skill.content_hash[:12], len(skill.references)))
+                    provenance['skill_name'] = skill.name
+                    provenance['skill_hash'] = skill.content_hash
+                else:
+                    _log_info('No skill defined for agent "%s" — invoking without skill guidance' % ctx_agent_id)
+            except SkillIntegrityError as exc:
+                _log_warn('Skill integrity error for "%s": %s — invoking without skill guidance' % (ctx_agent_id, exc))
+                provenance['skill_error'] = str(exc)
+        _log_info('LLM invoking provider: model=%s, prompt="%s", skill=%s, payload_keys=%s' % (
+            provider_model, prompt_name, skill.name if skill else '(none)',
+            sorted(payload.keys()) if isinstance(payload, dict) else '(non-dict)'))
         try:
-            answer = provider.invoke(prompt['template'], payload)
+            answer = provider.invoke(prompt['template'], payload, skill=skill)
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:
             provenance['reason'] = 'provider_execution_failed:' + str(exc)
