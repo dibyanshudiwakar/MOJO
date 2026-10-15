@@ -41,24 +41,26 @@ GATEWAY_HEADERS = {
 }
 
 #: Per-model request shape. ``effort`` is None where the model rejects
-#: ``output_config.effort`` (Haiku 4.5 errors on it), and ``sampling`` is False
-#: where ``temperature`` was removed and returns a 400 -- which is every Claude
-#: 5.x model. Getting either wrong is a hard request failure, not a quality
-#: regression, so the shape travels with the model id rather than being assumed.
+#: ``output_config.effort`` (Haiku 4.5 errors on it). ``temperature`` is not in
+#: this SDK build's ``Messages.create()`` signature at all -- passing it raises
+#: a ``TypeError`` before any request is sent, for every model, so this adapter
+#: never sends it. Getting ``effort`` wrong is a hard request failure, not a
+#: quality regression, so the shape travels with the model id rather than
+#: being assumed.
 MODEL_SHAPES = {
-    'claude-opus-5-5': {'effort': 'high', 'sampling': False},
-    'claude-sonnet-5-5': {'effort': 'high', 'sampling': False},
-    'claude-opus-5': {'effort': 'high', 'sampling': False},
-    'claude-sonnet-5': {'effort': 'high', 'sampling': False},
-    'claude-opus-4-8': {'effort': 'high', 'sampling': False},
-    'claude-sonnet-4-6': {'effort': 'high', 'sampling': True},
-    'claude-haiku-4-5@20251001': {'effort': None, 'sampling': True},
+    'claude-opus-5-5': {'effort': 'high'},
+    'claude-sonnet-5-5': {'effort': 'high'},
+    'claude-opus-5': {'effort': 'high'},
+    'claude-sonnet-5': {'effort': 'high'},
+    'claude-opus-4-8': {'effort': 'high'},
+    'claude-sonnet-4-6': {'effort': 'high'},
+    'claude-haiku-4-5@20251001': {'effort': None},
 }
 #: Applied to a model id this module has no row for (including an operator's
 #: ``MOJO_MODEL_*`` override): assume the current-generation contract, because
 #: sending a removed parameter fails the request outright while omitting an
 #: accepted one only costs a little quality.
-FALLBACK_SHAPE = {'effort': 'high', 'sampling': False}
+FALLBACK_SHAPE = {'effort': 'high'}
 
 #: alias -> (model id, effort override). Effort None means "use the model's
 #: shape default"; ``coding`` asks for xhigh because code generation and
@@ -132,7 +134,6 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             self.model, default_effort = resolve_alias(alias)
         shape = MODEL_SHAPES.get(self.model, FALLBACK_SHAPE)
         self.effort = effort or default_effort or shape['effort']
-        self.sampling = shape['sampling']
         self.timeout = timeout
         self.max_tokens = max_tokens
 
@@ -145,12 +146,15 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
 
     def _client(self):
         import anthropic
-        import httpx
+        # This SDK build validates ``http_client`` against ``httpx2``, not the
+        # plain ``httpx`` package -- passing an ``httpx.Client`` raises
+        # "Invalid `http_client` argument" even though the two are API-compatible.
+        import httpx2
         return anthropic.Anthropic(
             api_key=get_cvs_api_key(),  # fresh on every call; keys rotate
             base_url=self.base_url,
             default_headers=GATEWAY_HEADERS,
-            http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(float(self.timeout))),
+            http_client=httpx2.Client(trust_env=False, timeout=httpx2.Timeout(float(self.timeout))),
         )
 
     def _request(self, template, payload):
@@ -160,11 +164,8 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             'system': template,
             'messages': [{'role': 'user', 'content': json.dumps(payload, sort_keys=True, default=str)}],
         }
-        # Only one of these is legal per model family -- see MODEL_SHAPES.
         if self.effort:
             body['output_config'] = {'effort': self.effort}
-        if self.sampling:
-            body['temperature'] = 0
         return body
 
     def invoke(self, template, payload, skill=None):

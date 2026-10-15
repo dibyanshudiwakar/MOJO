@@ -17,7 +17,6 @@ existing Approval Governance screens, which this module does not reimplement.
 import json
 import logging
 import re as _re
-import shutil
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services import workspace
@@ -579,7 +578,6 @@ class PipelineService:
                     # something cancelling a pipeline may do.
                     c.execute("update pipeline_steps set status='CANCELLED',queue_id='',updated_at=? where id=?", (now(), step['id']))
             c.execute("update pipelines set status='CANCELLED',completed_at=?,updated_at=? where id=?", (now(), now(), pipeline_id))
-        self._cleanup_workspace(pipeline_id)
         return self.detail(pipeline_id)
 
     def _ready_steps(self, pipeline_id):
@@ -668,10 +666,6 @@ class PipelineService:
         ``updated_at``, and the hold cannot be set from two places under two
         different rules. ``final`` stamps ``completed_at``, which means "nothing
         is executing any more" -- so a hold never gets one.
-
-        When a pipeline reaches a terminal state (``final=True``), its workspace
-        directory is cleaned up so disk space is not consumed indefinitely by
-        completed or failed migration runs.
         """
         with self.repo.connect() as c:
             if final:
@@ -680,35 +674,6 @@ class PipelineService:
             else:
                 c.execute("update pipelines set status=?,completed_at='',updated_at=? where id=?",
                           (status, now(), pipeline_id))
-        if final:
-            self._cleanup_workspace(pipeline_id)
-
-    def _cleanup_workspace(self, pipeline_id):
-        """Remove the pipeline's workspace directory after a terminal state.
-
-        The workspace (cloned repos, generated output, agent scratch files) is
-        only useful while the pipeline is active.  Cleaning it on COMPLETED,
-        FAILED and CANCELLED prevents unbounded disk growth from repeated
-        migration runs.
-
-        The cleanup is best-effort: a missing or already-removed directory is
-        not an error, and a partial removal (files open by another process on
-        Windows) is logged but does not fail the pipeline.  The workspace_dir
-        is always confined inside the workspace root by ``workspace.resolve``,
-        so the ``shutil.rmtree`` can never escape that boundary.
-        """
-        try:
-            p = self.repo.one('select workspace_dir from pipelines where id=?', (pipeline_id,))
-            if not p or not p['workspace_dir']:
-                return
-            target = workspace.resolve(p['workspace_dir'], must_exist=False, create=False)
-            if not target.exists():
-                return
-            shutil.rmtree(str(target), ignore_errors=True)
-            _log.info('cleaned up workspace %s for pipeline %s', target, pipeline_id)
-        except Exception as exc:
-            # Cleanup must never crash the pipeline status write.
-            _log.warning('workspace cleanup failed for pipeline %s: %s', pipeline_id, exc)
 
     @staticmethod
     def _halt_reason(rows):
