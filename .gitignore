@@ -4,6 +4,15 @@
 .env
 .env.*
 
+# Databases — contain credentials, password hashes and encrypted tokens
+*.db
+
+# Pipeline workspace output — created at runtime, never committed
+workspace/
+app/orders-migration*/
+app/idcard-test*/
+idcard-test*/
+
 # Python
 __pycache__/
 *.pyc
@@ -18,7 +27,6 @@ venv/
 # VS Code
 .vscode/
 .idea/
-
 
 # Claude
 .claude/scratch/
