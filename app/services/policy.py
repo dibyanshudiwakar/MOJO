@@ -1,4 +1,21 @@
 class PolicyError(PermissionError): pass
+def gate_enabled(repo,gate):
+ """Whether ``approval_policies`` says this gate is switched on.
+
+ ``FactoryService._transition_policy`` has always honoured this flag, but the
+ artefact-bound approval checks in ``MappingAndPlanningService``,
+ ``PlanningGenerationService`` and the worker's pre-flight check queried the
+ ``approvals`` table directly, so a gate disabled in the database still blocked
+ planning and code generation. This is the single place that answers the
+ question, so disabling a gate is one row in the database and takes effect on
+ every path.
+
+ A missing row means the gate is *not* disabled, matching
+ ``_transition_policy``'s ``if p and not p['enabled']`` -- an unknown gate stays
+ enforced rather than silently opening.
+ """
+ row=repo.one('select enabled from approval_policies where gate=?',(gate,))
+ return True if row is None else bool(row['enabled'])
 class ApprovalPolicyService:
  def __init__(self,repo): self.repo=repo
  def evaluate(self,request,actor_roles):

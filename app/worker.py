@@ -35,6 +35,7 @@ from app.services.pipelines import PipelineService, StepLogger, PipelineContextA
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
 from app.services.platform_v7 import NotificationService
+from app.services.policy import gate_enabled
 from app.agents.skills import skill_for, SkillIntegrityError
 
 ACTIVITY = 'pipeline_step'
@@ -173,7 +174,15 @@ class WorkerLoop:
             pass  # Notifications are best-effort; never crash the worker.
 
     def _gate_approved(self, job_id, gate):
-        """Return True if there is at least one valid approval for *gate* at the current iteration."""
+        """Return True if this gate is satisfied, or switched off in the database.
+
+        A gate disabled in ``approval_policies`` counts as satisfied, so the
+        database flag is the one switch for gating on every path -- without this
+        the pre-flight check would still park planning and code-generation at
+        WAITING_APPROVAL for a gate nobody is required to sign.
+        """
+        if not gate_enabled(self.repo, gate):
+            return True
         job = self.repo.one('select iteration from jobs where id=?', (job_id,))
         iteration = int((job or {}).get('iteration') or 1)
         row = self.repo.one(

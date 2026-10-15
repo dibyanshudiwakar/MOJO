@@ -22,8 +22,8 @@ from pathlib import Path
 from app.repository import uid, now, digest
 from app.services import workspace
 from app.services.factory_v3 import WorkflowOrchestrator
-from app.service import FactoryService
-from app.services.policy import PolicyError
+from app.service import FactoryService, _WAITING_TARGETS
+from app.services.policy import PolicyError, gate_enabled
 from app.domain.state_machine import TransitionError
 
 _log = logging.getLogger(__name__)
@@ -806,9 +806,12 @@ class PipelineService:
         to COMPLETED so the UI does not permanently show FAILED after a
         successful retry resolves all errors.
         """
-        p = self.repo.one('select status from pipelines where id=?', (pipeline_id,))
+        p = self.repo.one('select status,job_id from pipelines where id=?', (pipeline_id,))
         if not p or p['status'] in ('PAUSED', 'CANCELLED', 'COMPLETED'):
             return
+        # A gate switched off after a step was already parked on it must release
+        # that step, or the pipeline stays held on a gate nobody has to sign.
+        self._release_disabled_gate_holds(p['job_id'], pipeline_id)
         _, rows = self._ready_steps(pipeline_id)
         halt = self._halt_reason(rows)
         if halt:
@@ -1203,6 +1206,61 @@ class PipelineService:
         self._park_queue_row(row['queue_id'], WorkflowOrchestrator(self.repo))
         if self._halt_reason(self.repo.rows('select * from pipeline_steps where pipeline_id=?', (row['pipeline_id'],))) == HELD:
             self._set_status(row['pipeline_id'], HELD)
+
+    def _release_disabled_gate_holds(self, job_id, pipeline_id):
+        """Free steps parked at a gate that has since been switched off in the database.
+
+        Without this, disabling a gate only affects steps the pipeline has not
+        reached yet. ``_halt_reason`` reports HELD for any WAITING_APPROVAL step
+        and ``advance`` returns before scheduling anything, while the only
+        un-park path (``resume_gate_step``) is reachable solely from the approval
+        endpoints and ``retry_step`` refuses a step that is not FAILED. A step
+        parked before its gate was disabled would therefore stay parked forever,
+        which is the opposite of what disabling the gate is for.
+
+        Release uses the same rule as ``resume_gate_step``: a step that actually
+        executed is completed, one that never ran goes back to PENDING so it
+        runs now.
+        """
+        released = []
+        for s in self.repo.rows('select * from pipeline_steps where pipeline_id=? and status=?',
+                                (pipeline_id, HELD)):
+            gate = _gate_from_error(str(s['error'] or ''))
+            if not gate or gate_enabled(self.repo, gate):
+                continue
+            needs_retry = str(s['error'] or '').startswith('gate_retry:')
+            ran = bool(s['started_at']) and not needs_retry
+            with self.repo.connect() as c:
+                if ran:
+                    c.execute("update pipeline_steps set status='COMPLETED',completed_at=?,error='',updated_at=? where id=?",
+                              (now(), now(), s['id']))
+                else:
+                    c.execute("update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
+                              (now(), s['id']))
+            released.append(gate)
+        if not released:
+            return False
+        _log.info('released %d step(s) held at disabled gate(s) %s for job %s',
+                  len(released), ','.join(sorted(set(released))), job_id)
+        self._leave_waiting_state(job_id)
+        return True
+
+    def _leave_waiting_state(self, job_id):
+        """Walk a job off WAITING_Gx once that gate no longer requires a signature.
+
+        ``resume_after_clarification`` cannot do this: WAITING_Gx is absent from
+        ``_LIFECYCLE_ORDER``, so its index lookup returns -1 and it bails out.
+        The post-gate targets are the same ones ``FactoryService.approve`` uses.
+        """
+        job = self.repo.one('select state from jobs where id=?', (job_id,))
+        for target in (_WAITING_TARGETS.get((job or {}).get('state', '')) or []):
+            try:
+                FactoryService(self.repo).transition(
+                    job_id, target, 'pipeline-system', {'source': 'gate_disabled_by_policy'})
+                return
+            except Exception as exc:
+                _log.debug('cannot leave %s for %s via %s: %s',
+                           (job or {}).get('state'), job_id, target, exc)
 
     def _check_gate_block(self, step_id, error):
         """Handle an AGENT step that failed because its gate approval is missing."""

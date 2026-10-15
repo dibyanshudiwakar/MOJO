@@ -2,6 +2,7 @@ import json, hashlib, re, subprocess
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from app.repository import uid, now, digest
+from app.services.policy import gate_enabled
 
 class WorkflowOrchestrator:
  def __init__(self,repo):self.repo=repo
@@ -161,6 +162,9 @@ class ACEAnalysisService:
 class PlanningGenerationService:
  def __init__(self,repo):self.repo=repo
  def _approved(self,job_id,gate,evidence_hash):
+  # A gate switched off in approval_policies counts as satisfied, so the
+  # database flag is the one switch for gating on every path.
+  if not gate_enabled(self.repo,gate):return True
   for x in self.repo.rows('select * from approvals where job_id=? and gate=? order by created_at desc',(job_id,gate)):
    if x['decision']=='APPROVE' and evidence_hash in json.loads(x.get('artifact_bindings') or '{}').values():return True
   return False
@@ -182,7 +186,7 @@ class PlanningGenerationService:
  def generate(self,job_id,plan_id,package='com.example.migration'):
   p=self.repo.one('select * from migration_plans where id=? and job_id=?',(plan_id,job_id));out=[]
   if not p:raise ValueError('plan_not_found')
-  approved=any(x['decision']=='APPROVE' and p['content_hash'] in json.loads(x.get('artifact_bindings') or '{}').values() for x in self.repo.rows("select * from approvals where job_id=? and gate='G3'",(job_id,)))
+  approved=not gate_enabled(self.repo,'G3') or any(x['decision']=='APPROVE' and p['content_hash'] in json.loads(x.get('artifact_bindings') or '{}').values() for x in self.repo.rows("select * from approvals where job_id=? and gate='G3'",(job_id,)))
   if not approved:raise PermissionError('plan_not_approved')
   files={'pom.xml':'<project><modelVersion>4.0.0</modelVersion><groupId>'+package+'</groupId><artifactId>migration-service</artifactId><version>1.0.0</version></project>','src/main/resources/application.yml':'spring:\n  application:\n    name: migration-service\nexternal:\n  endpoint: ${EXTERNAL_ENDPOINT}\n'}
   appcls='MigrationApplication';files['src/main/java/'+package.replace('.','/')+'/'+appcls+'.java']='package '+package+';\npublic class '+appcls+' { public static void main(String[] args) {} }\n'

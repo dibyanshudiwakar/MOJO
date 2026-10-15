@@ -2,6 +2,7 @@ import json, re, shutil, subprocess
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services.enterprise_v5 import SpringProjectGenerator, BuildRunner, DifferentialEvidenceEngine
+from app.services.policy import gate_enabled
 
 DEFAULT_MAPPINGS={
  'HTTPInput':{'pattern':'SPRING_MVC_CONTROLLER','module':'web','generated':True,'tests':['contract','negative']},
@@ -43,6 +44,9 @@ class MappingAndPlanningService:
  def __init__(self,repo):
   self.repo=repo;self.generator=SpringProjectGenerator();self.builder=BuildRunner();self.diff=DifferentialEvidenceEngine()
  def _approved(self,job_id,gate,content_hash):
+  # A gate switched off in approval_policies counts as satisfied, so the
+  # database flag is the one switch for gating on every path.
+  if not gate_enabled(self.repo,gate):return {'id':'gate_disabled','gate':gate,'decision':'APPROVE'}
   for a in self.repo.rows('select * from approvals where job_id=? and gate=? order by created_at desc',(job_id,gate)):
    if a['decision']!='APPROVE':continue
    bindings=json.loads(a.get('artifact_bindings') or '{}')
