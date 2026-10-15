@@ -174,6 +174,40 @@ class PipelineError(ValueError):
     pass
 
 
+class StepLogger:
+    """Append-only structured log for a single pipeline step.
+
+    Each call writes one row to ``pipeline_step_logs``.  The front-end's Logs
+    tab already renders ``[timestamp, level, message]`` tuples with CSS classes
+    for INFO, WARN, ERROR and SUCCESS — this is the back-end half of that
+    contract.  The 5-second auto-refresh on a RUNNING pipeline means entries
+    appear live while the step is executing.
+    """
+
+    def __init__(self, repo, step_id):
+        self.repo = repo
+        self.step_id = step_id
+
+    def info(self, msg):
+        self._write('INFO', msg)
+
+    def warn(self, msg):
+        self._write('WARN', msg)
+
+    def error(self, msg):
+        self._write('ERROR', msg)
+
+    def success(self, msg):
+        self._write('SUCCESS', msg)
+
+    def _write(self, level, message):
+        with self.repo.connect() as c:
+            self.repo.insert(c, 'pipeline_step_logs', {
+                'id': uid(), 'step_id': self.step_id,
+                'level': level, 'message': str(message),
+                'created_at': now()})
+
+
 class PipelineService:
     def __init__(self, repo):
         self.repo = repo

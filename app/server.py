@@ -331,7 +331,10 @@ class H(BaseHTTPRequestHandler):
                 if ar:
                     prov=json.loads(ar['model_provenance'] or '{}')
                     model_info={'model_alias':ar['effective_model_alias'] or '','binding_source':ar['binding_source'] or '','model_mode':prov.get('mode',''),'model_reason':prov.get('reason','')}
-            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info})
+            # Structured step logs: [timestamp, level, message] tuples the UI
+            # Logs tab already renders.  Written by StepLogger during execution.
+            logs=[[r['created_at'],r['level'],r['message']] for r in repo.rows('select created_at,level,message from pipeline_step_logs where step_id=? order by created_at',(step['id'],))]
+            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.
         if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})

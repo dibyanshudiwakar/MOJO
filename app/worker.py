@@ -30,7 +30,7 @@ from app.repository import Repository
 from app.services.accounts import AccountService
 from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
-from app.services.pipelines import PipelineService
+from app.services.pipelines import PipelineService, StepLogger
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
 
@@ -138,7 +138,7 @@ class WorkerLoop:
         )
         return bool(row)
 
-    def _preflight_gate_check(self, job_id, step):
+    def _preflight_gate_check(self, job_id, step, log=None):
         """Park the step immediately if its agent needs a gate that is not yet approved.
 
         Returns True if the step was parked (caller should skip execution),
@@ -151,10 +151,15 @@ class WorkerLoop:
             return False
         for gate in required:
             if not self._gate_approved(job_id, gate):
+                if log:
+                    log.warn('Gate %s pre-flight: not approved — holding step until gate is signed' % gate)
                 error_msg = 'required_gate_approval_missing:%s' % gate
                 self.pipelines._enter_gate_wait(
                     step['id'], job_id, '', error_msg, needs_retry=True)
                 return True
+            else:
+                if log:
+                    log.info('Gate %s pre-flight: approved ✓' % gate)
         return False
 
     def _execute(self, pipeline_id, step_id):
@@ -163,23 +168,29 @@ class WorkerLoop:
             raise ValueError('pipeline_step_not_found:' + step_id)
         pipeline = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
         job_id = pipeline['job_id']
+        log = StepLogger(self.repo, step_id)
+        kind_label = {'CLONE': 'Clone', 'AGENT': 'Agent', 'DELIVERY': 'Delivery'}.get(step['kind'], step['kind'])
+        agent_label = step['agent_id'].replace('-', ' ').title() if step['agent_id'] else ''
+        log.info('Step started: %s%s' % (kind_label, (' — ' + agent_label) if agent_label else ''))
         self.pipelines.mark_step(step_id, 'RUNNING')
         # Pre-flight: if the agent needs a gate that is not yet approved, park
         # the step immediately as WAITING_APPROVAL without running the agent.
-        if self._preflight_gate_check(job_id, step):
+        if self._preflight_gate_check(job_id, step, log):
             return
         try:
             if step['kind'] == 'AGENT':
-                outputs = self._dispatch_agent(job_id, step, pipeline['created_by'])
+                outputs = self._dispatch_agent(job_id, step, pipeline['created_by'], log)
             elif step['kind'] == 'CLONE':
-                outputs = self._clone(pipeline, step)
+                outputs = self._clone(pipeline, step, log)
             elif step['kind'] == 'DELIVERY':
-                outputs = self._deliver(pipeline, step)
+                outputs = self._deliver(pipeline, step, log)
             else:
                 raise ValueError('unsupported_pipeline_step_kind:' + step['kind'])
         except Exception as exc:
+            log.error('Step failed: %s' % str(exc)[:300])
             self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
             raise
+        log.success('Step completed successfully')
         self.pipelines.mark_step(step_id, 'COMPLETED', outputs=outputs)
 
     def _principal(self, email):
@@ -195,10 +206,24 @@ class WorkerLoop:
             raise PermissionError('pipeline_owner_account_not_found:' + email)
         return user, AccountService.roles_of(user)
 
-    def _dispatch_agent(self, job_id, step, created_by):
+    def _dispatch_agent(self, job_id, step, created_by, log=None):
         user, roles = self._principal(created_by)
+        if log:
+            log.info('Resolved pipeline owner: %s (%d roles)' % (created_by, len(roles)))
         params = self.pipelines.resolved_params(step)
-        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [])
+        if log:
+            log.info('Dispatching agent %s v%s' % (step['agent_id'], step['version']))
+        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [], logger=log)
+        evidence_ids = [e.get('id') for e in result.get('evidence', [])]
+        if log:
+            status = result.get('status', 'UNKNOWN')
+            n_evidence = len(evidence_ids)
+            log.info('Agent returned %s with %d evidence item%s' % (status, n_evidence, '' if n_evidence == 1 else 's'))
+            if result.get('error'):
+                log.warn('Agent reported error: %s' % str(result['error'])[:200])
+            reasoning = result.get('reasoning') or {}
+            if reasoning.get('mode'):
+                log.info('Reasoning mode: %s' % reasoning['mode'])
         # Everything the agent itself declared as output stays at the top
         # level -- resolved_params() (and any later step that forwards a
         # value from this one) reads outputs[key] directly. Execution
@@ -206,19 +231,31 @@ class WorkerLoop:
         # underscore so it can never collide with a real output key.
         return {**result.get('outputs', {}), '_run_id': result.get('run_id'),
                 '_agent_status': result.get('status'), '_metrics': result.get('metrics'),
-                '_evidence_ids': [e.get('id') for e in result.get('evidence', [])]}
+                '_evidence_ids': evidence_ids}
 
-    def _clone(self, pipeline, step):
+    def _clone(self, pipeline, step, log=None):
         params = json.loads(step['params'] or '{}')
+        role = params.get('role', '')
+        if log:
+            log.info('Resolving GitHub credentials for %s repository' % (role or 'source'))
         user, _ = self._principal(pipeline['created_by'])
+        if log:
+            log.info('Cloning %s @ %s → %s' % (params['repo_url'], params['branch'], params['dest']))
         result = self.repo_clone.clone(user['id'], params['repo_url'], params['branch'], params['dest'])
-        self.pipelines.mark_repo_cloned(pipeline['job_id'], params.get('role', ''), result['path'], result['commit'])
+        self.pipelines.mark_repo_cloned(pipeline['job_id'], role, result['path'], result['commit'])
+        if log:
+            log.success('Clone complete — commit %s at %s' % (result.get('commit', '?')[:12], result.get('path', '?')))
         return result
 
-    def _deliver(self, pipeline, step):
+    def _deliver(self, pipeline, step, log=None):
         params = json.loads(step['params'] or '{}')
+        if log:
+            log.info('Pushing generated code to %s @ %s' % (params['repo_url'], params['branch']))
         user, _ = self._principal(pipeline['created_by'])
-        return self.repo_clone.push(user['id'], params['repo_url'], params['branch'], params['source_dir'])
+        result = self.repo_clone.push(user['id'], params['repo_url'], params['branch'], params['source_dir'])
+        if log:
+            log.success('Push complete — commit %s on branch %s' % (result.get('commit', '?')[:12], result.get('branch', '?')))
+        return result
 
 
 if __name__ == '__main__':
