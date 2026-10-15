@@ -94,7 +94,8 @@ class AgentContext:
 
     def __init__(self, repo, job_id, identity='system', roles=(), params=None,
                  correlation_id='', iteration=1, provider=None, channel='API',
-                 default_model_alias='', effective_model_alias='', binding_source='DEFAULT'):
+                 default_model_alias='', effective_model_alias='', binding_source='DEFAULT',
+                 logger=None):
         self.repo = repo
         self.job_id = job_id
         self.identity = identity
@@ -115,6 +116,8 @@ class AgentContext:
         self.effective_model_alias = effective_model_alias
         # 'DEFAULT' or 'AGENT_OVERRIDE' — recorded in model_provenance.
         self.binding_source = binding_source
+        # Optional StepLogger for structured pipeline step logs.
+        self.logger = logger
 
     def param(self, name, default=_REQUIRED):
         value = self.params.get(name, default)

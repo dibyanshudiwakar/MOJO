@@ -84,13 +84,26 @@ class ReasoningGateway:
         against -- so a stored artefact can be traced to the exact template that
         shaped it rather than to "some model, at some point".
         """
+        _log = getattr(context, 'logger', None)
+        _log_info = _log.info if _log else (lambda m: None)
+        _log_warn = _log.warn if _log else (lambda m: None)
+
         alias = getattr(context, 'effective_model_alias', '') or None
         provenance = {'mode': DETERMINISTIC, 'prompt_name': prompt_name,
                       'model_alias': alias or '', 'binding_source': getattr(context, 'binding_source', 'DEFAULT')}
+        _log_info('LLM reasoning: looking up prompt "%s" with model alias "%s"' % (prompt_name, alias or '(default)'))
         prompt, model = self._approved(prompt_name, alias)
         if not prompt or not model:
             provenance['reason'] = 'no_approved_prompt_or_model'
+            missing = []
+            if not prompt:
+                missing.append('prompt')
+            if not model:
+                missing.append('model')
+            _log_warn('LLM reasoning: no approved %s found — falling back to deterministic computation' % ' or '.join(missing))
             return None, provenance
+        _log_info('LLM prompt resolved: "%s" v%s (hash: %s)' % (prompt['name'], prompt['version'], prompt['content_hash'][:12]))
+        _log_info('LLM model resolved: "%s" v%s (id: %s)' % (model['name'], model['version'], model['id'][:12]))
         try:
             request = self.registry.gateway_request({
                 'job_id': context.job_id, 'prompt_id': prompt['id'], 'model_id': model['id'],
@@ -100,13 +113,16 @@ class ReasoningGateway:
             # was recorded or rejected by policy and the agent computes instead.
             provenance['mode'] = DETERMINISTIC
             provenance['reason'] = 'gateway_refused:' + str(exc)
+            _log_warn('LLM gateway refused request: %s — falling back to deterministic computation' % str(exc)[:200])
             return None, provenance
+        _log_info('LLM gateway request accepted: %s (status: %s)' % (request['request_id'][:12], request['status']))
         provenance.update({'request_id': request['request_id'], 'prompt_id': prompt['id'],
                            'prompt_version': prompt['version'], 'prompt_hash': prompt['content_hash'],
                            'model_id': model['id'], 'model_version': model['version'],
                            'region': request.get('region', ''), 'status': request['status']})
         if context.provider is None:
             provenance['reason'] = 'no_provider_execution_adapter'
+            _log_warn('LLM reasoning: no provider execution adapter configured — using deterministic fallback')
             return None, provenance
         # An adapter that serves more than one model exposes ``for_alias`` and is
         # pinned to the alias the registry resolved for this agent, so the
@@ -120,17 +136,22 @@ class ReasoningGateway:
                 provider = selector(alias)
             except (RuntimeError, ValueError) as exc:
                 provenance['reason'] = 'provider_alias_unavailable:' + str(exc)
+                _log_warn('LLM provider alias "%s" unavailable: %s' % (alias, str(exc)[:200]))
                 try:
                     self.registry.complete_request(request['request_id'], {}, 'FAILED')
                 except (PermissionError, ValueError):
                     pass
                 return None, provenance
-        provenance['provider_model'] = getattr(provider, 'model', '')
+        provider_model = getattr(provider, 'model', '')
+        provenance['provider_model'] = provider_model
+        _log_info('LLM invoking provider: model=%s, prompt="%s", payload_keys=%s' % (
+            provider_model, prompt_name, sorted(payload.keys()) if isinstance(payload, dict) else '(non-dict)'))
         try:
             answer = provider.invoke(prompt['template'], payload)
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:
             provenance['reason'] = 'provider_execution_failed:' + str(exc)
+            _log_warn('LLM provider execution failed: %s' % str(exc)[:200])
             try:
                 self.registry.complete_request(request['request_id'], {}, 'FAILED')
             except (PermissionError, ValueError):
@@ -138,4 +159,6 @@ class ReasoningGateway:
             return None, provenance
         provenance.update({'mode': MODEL_GATEWAY, 'status': recorded['status'],
                            'response_hash': recorded['response_hash']})
+        _log_info('LLM response received: status=%s, response_hash=%s, mode=%s' % (
+            recorded['status'], recorded['response_hash'][:12] if recorded.get('response_hash') else '?', MODEL_GATEWAY))
         return answer, provenance
