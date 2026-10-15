@@ -1139,23 +1139,42 @@ class PipelineService:
         return pkg_id
 
     def _enter_gate_wait(self, step_id, job_id, blocked_target, error_msg, needs_retry=False):
-        """Transition job → WAITING_Gx, create approval package, and park the step."""
+        """Park the step, create an approval package, and optionally move the job to WAITING_Gx.
+
+        The approval package and the step park are pipeline-level operations
+        that must happen regardless of whether the job lifecycle state machine
+        accepts the WAITING_Gx transition.  The lifecycle transition is
+        attempted best-effort — when the job is not yet at the state that
+        permits WAITING_Gx (e.g. the job is at FRAMEWORK_BASELINED but
+        WAITING_G2 is only legal from ACE_ANALYSED), the transition is
+        skipped but the step is still parked and the approval inbox still
+        shows the pending gate.  This was the root cause of the "logs show
+        the gate hold but the inbox is empty" bug.
+        """
         gate = _gate_from_error(error_msg)
         if not gate:
             return
         waiting_state = 'WAITING_' + gate
+        # Best-effort lifecycle transition.  The job may not be at the right
+        # state for WAITING_Gx yet (the state machine constrains which edges
+        # exist), so a failure here is logged but does not prevent the step
+        # park and approval package creation below.
         try:
             FactoryService(self.repo).transition(
                 job_id, waiting_state, 'pipeline-system',
                 {'source': 'gate_block', 'blocked_target': blocked_target, 'gate': gate},
             )
         except Exception as exc:
-            _log.debug('failed to enter %s for job %s: %s', waiting_state, job_id, exc)
-            return
+            _log.info('lifecycle transition to %s deferred for job %s: %s '
+                      '(step will still be parked and approval package created)',
+                      waiting_state, job_id, exc)
+        # Always create the approval package so the inbox shows the pending
+        # gate.  Idempotent: a second call for the same gate returns the
+        # existing package.
         try:
             self._auto_create_approval_package(job_id, gate)
         except Exception as exc:
-            _log.debug('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
+            _log.warning('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
         # The tag records which gate parked this step; the original message is
         # kept after it so the UI's error pane still has something to show and
         # ``_gate_from_error`` can still read the gate back out.

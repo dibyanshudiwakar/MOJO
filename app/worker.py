@@ -30,6 +30,7 @@ from app.repository import Repository
 from app.services.accounts import AccountService
 from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
+from app.repository import now as _now
 from app.services.pipelines import PipelineService, StepLogger, PipelineContextAccumulator
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
@@ -157,6 +158,20 @@ class WorkerLoop:
                 error_msg = 'required_gate_approval_missing:%s' % gate
                 self.pipelines._enter_gate_wait(
                     step['id'], job_id, '', error_msg, needs_retry=True)
+                # Verify the step was actually parked.  _enter_gate_wait may
+                # have failed to transition the job lifecycle (the state
+                # machine may not allow WAITING_Gx from the current state) but
+                # it now always parks the step and creates the approval package
+                # regardless.  This check is belt-and-suspenders.
+                after = self.repo.one('select status from pipeline_steps where id=?', (step['id'],))
+                if not after or after['status'] != 'WAITING_APPROVAL':
+                    # Fallback: force the step to WAITING_APPROVAL directly.
+                    tag = 'gate_retry:%s;%s' % (gate, error_msg)
+                    with self.repo.connect() as c:
+                        c.execute("update pipeline_steps set status='WAITING_APPROVAL',error=?,updated_at=? where id=?",
+                                  (tag, _now(), step['id']))
+                    if log:
+                        log.warn('Forced step to WAITING_APPROVAL (lifecycle transition was deferred)')
                 return True
             else:
                 if log:
