@@ -30,6 +30,7 @@ SOURCES = (
 
 class KnowledgeEvidenceAgent(BaseAgent):
     AGENT_ID = 'knowledge-evidence'
+    SKILL = 'iib-to-ms-knowledge-evidence'
     TOOLS = ('evidence.read', 'index.write', 'index.read')
     OUTPUTS = ('cited_context', 'version_lineage')
     #: Judges whether what was retrieved is enough to answer the query. Note

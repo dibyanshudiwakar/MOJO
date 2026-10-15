@@ -20,6 +20,7 @@ from app.services.factory_v3 import DormancyService
 
 class DormancyIntelligenceAgent(BaseAgent):
     AGENT_ID = 'dormancy-intelligence'
+    SKILL = None  # deliberately none: the migration skill has no dormancy content (agent-skills/README.md)
     TOOLS = ('telemetry.read', 'registry.read', 'evidence.write')
     OUTPUTS = ('classification', 'evidence', 'confidence')
     PROMPT = 'agent/dormancy-intelligence/classification-rationale'

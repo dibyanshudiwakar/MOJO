@@ -20,6 +20,7 @@ from app.services.factory_v3 import IntakeService
 
 class RepositoryIntakeAgent(BaseAgent):
     AGENT_ID = 'repository-intake'
+    SKILL = 'iib-to-ms-repository-intake'
     TOOLS = ('repository.read', 'evidence.write')
     OUTPUTS = ('intake_manifest', 'gaps')
     PROMPT = 'agent/repository-intake/gap-triage'

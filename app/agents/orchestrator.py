@@ -73,6 +73,7 @@ APPROVAL_MISSING = 'required_gate_approval_missing'
 
 class MigrationOrchestratorAgent(BaseAgent):
     AGENT_ID = 'migration-orchestrator'
+    SKILL = 'iib-to-ms-migration-orchestrator'
     TOOLS = ('workflow.read', 'workflow.transition', 'agent.invoke', 'clarification.create')
     OUTPUTS = ('commands', 'next_state_proposal', 'clarification_request')
     PROMPT = 'agent/migration-orchestrator/next-action'

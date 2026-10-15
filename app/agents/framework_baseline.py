@@ -21,6 +21,7 @@ OWNER = 'JAVA_ARCHITECT'
 
 class FrameworkBaselineAgent(BaseAgent):
     AGENT_ID = 'framework-baseline'
+    SKILL = 'iib-to-ms-framework-baseline'
     TOOLS = ('repository.read', 'evidence.write', 'clarification.create')
     OUTPUTS = ('framework_template', 'conflicts')
     PROMPT = 'agent/framework-baseline/convention-conflict-triage'

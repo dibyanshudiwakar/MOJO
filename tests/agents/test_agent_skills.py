@@ -24,6 +24,12 @@ def catalogue_ids():
     return [a[key] for a in agents]
 
 
+@pytest.fixture(autouse=True)
+def _workspace_root(tmp_path, monkeypatch):
+    """Intake only reads inside the workspace root; point it at this test's tmp_path."""
+    monkeypatch.setenv('FACTORY_WORKSPACE_ROOT', str(tmp_path))
+
+
 @pytest.fixture
 def library():
     return SkillLibrary(DEFAULT_ROOT)
@@ -315,3 +321,101 @@ def test_the_skill_can_be_rendered_as_a_system_prompt(library):
     assert prompt.startswith('---\nname: iib-to-ms-rca')
     assert 'references/common-patterns-and-gotchas.md' in prompt
     assert 'Mandatory Gap Checklist' not in prompt   # the index lists references, it does not inline them
+
+
+# ---- the connected model adapters ---------------------------------------------------------------
+
+import io
+from types import SimpleNamespace
+from app.providers.cvscode_adapter import CvscodeClaudeAdapter
+from app.providers.http_adapter import HttpProviderAdapter
+
+
+class _FakeClaude:
+    """Stands in for the anthropic client: records the request, returns a JSON answer."""
+
+    def __init__(self):
+        self.requests = []
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs):
+        self.requests.append(kwargs)
+        return SimpleNamespace(stop_reason='end_turn',
+                               content=[SimpleNamespace(type='text', text='{"ok": true}')])
+
+
+def test_the_claude_adapter_puts_the_agents_skill_after_the_approved_template(repo, job, gateway, monkeypatch):
+    gateway(ACEAnalysisAgent.PROMPT, template='APPROVED TEMPLATE')
+    fake = _FakeClaude()
+    adapter = CvscodeClaudeAdapter()
+    monkeypatch.setattr(adapter, '_client', lambda: fake)
+    context = ACEAnalysisAgent(repo).context(job['id'], provider=adapter)
+    answer, provenance = ReasoningGateway(repo).reason(context, ACEAnalysisAgent.PROMPT, {'k': 'v'})
+    assert provenance['mode'] == MODEL_GATEWAY and answer['ok'] is True
+    assert provenance['skill_included'] is True
+    system = fake.requests[0]['system']
+    assert system.startswith('APPROVED TEMPLATE')                      # the authorised prompt is first
+    assert 'name: iib-to-ms-ace-analysis' in system                    # the agent's skill follows it
+    assert 'references/backend-type-detection.md' in system           # with an index of its references
+    assert 'Mandatory Gap Checklist' not in system                     # not the reference bodies
+
+
+def test_each_agent_reaches_the_model_with_its_own_skill_not_anothers(repo, job, gateway, monkeypatch):
+    gateway(ACEAnalysisAgent.PROMPT)
+    fake = _FakeClaude()
+    adapter = CvscodeClaudeAdapter()
+    monkeypatch.setattr(adapter, '_client', lambda: fake)
+    ReasoningGateway(repo).reason(ACEAnalysisAgent(repo).context(job['id'], provider=adapter),
+                                  ACEAnalysisAgent.PROMPT, {'k': 'v'})
+    system = fake.requests[0]['system']
+    assert 'iib-to-ms-ace-analysis' in system
+    for other in ('iib-to-ms-rca', 'iib-to-ms-planning', 'iib-to-ms-governance'):
+        assert other not in system
+
+
+def test_an_agent_without_a_skill_reaches_the_model_without_one(repo, job, gateway, monkeypatch):
+    gateway(DormancyIntelligenceAgent.PROMPT, template='APPROVED TEMPLATE')
+    fake = _FakeClaude()
+    adapter = CvscodeClaudeAdapter()
+    monkeypatch.setattr(adapter, '_client', lambda: fake)
+    context = DormancyIntelligenceAgent(repo).context(job['id'], provider=adapter)
+    _, provenance = ReasoningGateway(repo).reason(context, DormancyIntelligenceAgent.PROMPT, {'k': 'v'})
+    assert provenance['skill_included'] is False
+    assert fake.requests[0]['system'] == 'APPROVED TEMPLATE'
+
+
+def test_an_alias_pinned_adapter_still_carries_the_skill():
+    pinned = CvscodeClaudeAdapter().for_alias('reasoning-small')
+    assert pinned.accepts_skill is True and pinned.model != CvscodeClaudeAdapter().model
+
+
+def test_the_http_adapter_appends_the_skill_to_the_system_message(monkeypatch):
+    sent = {}
+
+    def fake_urlopen(req, timeout=0):
+        sent['body'] = json.loads(req.data.decode())
+        return io.BytesIO(json.dumps({'choices': [{'message': {'content': '{"ok": 1}'}}]}).encode())
+
+    monkeypatch.setattr('urllib.request.urlopen', fake_urlopen)
+    adapter = HttpProviderAdapter('http://models.invalid/v1', 'key', 'm')
+    adapter.invoke('APPROVED TEMPLATE', {'k': 'v'}, skill=skill_for('rca'))
+    system = sent['body']['messages'][0]['content']
+    assert system.startswith('APPROVED TEMPLATE') and 'name: iib-to-ms-rca' in system
+    adapter.invoke('APPROVED TEMPLATE', {'k': 'v'})
+    assert sent['body']['messages'][0]['content'] == 'APPROVED TEMPLATE'
+
+
+# ---- line endings -------------------------------------------------------------------------------
+
+def test_a_crlf_checkout_still_verifies_but_a_content_change_does_not(library_copy):
+    """git on Windows (core.autocrlf) checks files out as CRLF; the manifest hashes the LF form."""
+    for path in library_copy.rglob('*'):
+        if path.is_file() and path.name != 'skills-map.json':
+            data = path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+            path.write_bytes(data)
+    lib = SkillLibrary(library_copy)
+    assert lib.verify() == []
+    target = library_copy / 'iib-to-ms-rca' / 'references' / 'common-patterns-and-gotchas.md'
+    target.write_bytes(target.read_bytes() + b'one more line\r\n')
+    with pytest.raises(SkillIntegrityError, match='skill_file_modified'):
+        SkillLibrary(library_copy).load('rca')
