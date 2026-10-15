@@ -63,6 +63,13 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
 button{font-family:inherit;cursor:pointer}
+/* The `hidden` attribute gets its display:none from the UA stylesheet, which
+   ANY author-level `display` declaration outranks. Classes like
+   .notif-dropdown{display:flex} therefore defeated hidden entirely, leaving
+   the panel permanently open. `hidden` is a semantic "not rendered" signal and
+   must never lose to a layout rule, so it is enforced here once for every
+   element in the app rather than patched per class. */
+[hidden]{display:none!important}
 
 /* ══ App grid ════════════════════════════════════════════════════════════════ */
 .app{display:grid;grid-template-columns:264px 1fr;min-height:100vh}

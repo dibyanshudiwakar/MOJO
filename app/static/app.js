@@ -131,6 +131,13 @@ async function afterLogin(){
  try{githubState=await api('/api/v2/integrations/github/test',{method:'POST'});renderIdentity()}
  catch(e){if(e.reauth)return signOut('Your session is no longer valid. Sign in again.',true);return openGithub(githubErr(e))}
  if(githubState.status!=='CONNECTED')return openGithub(githubState.last_error||'GitHub connection could not be verified. Enter a valid token to continue.');
+ // Always land on the dashboard after signing in. signOut() leaves the hash
+ // untouched, so without this a stale '#jobs' or '#pipelines/<id>' from the
+ // previous session would decide the first page. replaceState is used rather
+ // than assigning location.hash because assigning it fires hashchange, which
+ // calls render() a second time.
+ if((location.hash||'').slice(1)!=='dashboard'){
+  try{history.replaceState(null,'','#dashboard')}catch(e){location.hash='dashboard'}}
  render();notifStartPolling()}
 function githubErr(e){
  // The service encodes reason|status|detail so the operator sees what GitHub
@@ -174,7 +181,12 @@ async function signOut(message,bad){
  // silently erased the credential and forced reconnecting on every sign-in,
  // defeating the entire point of storing it per account. Disconnecting is now
  // a deliberate action (the Disconnect button in the GitHub dialog).
- sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;notifStopPolling();renderIdentity();
+ sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;notifStopPolling();
+ // The topbar markup is static, so an open notification panel would still be
+ // open on the next sign-in. Reset it with the rest of the session state.
+ const dd=$('#notifDropdown');if(dd)dd.hidden=true;
+ const nd=$('#notifDot'),nc=$('#notifCount');if(nd)nd.hidden=true;if(nc)nc.hidden=true;
+ renderIdentity();
  const d=$('#githubDialog');if(d.open)d.close();authScreen('login',message||'Signed out.',!!bad)}
 const _I=n=>`<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">${n}</svg>`;
 const NAV_ICON={
