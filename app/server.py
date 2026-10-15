@@ -58,6 +58,156 @@ try: connectors.load(ROOT/'config'/'integrations.json')
 except FileNotFoundError: pass
 TABLES={'jobs':'jobs','approvals':'approvals','evidence':'evidence','agents':'agent_runs','agent-registry':'agent_registry','specifications':'migration_specs','comparisons':'comparisons','variances':'variances','rca':'root_causes','remediations':'remediations','events':'workflow_events','versions':'versions','clarifications':'clarifications','checkpoints':'workflow_checkpoints','queue':'workflow_queue','intakes':'intake_manifests','dormancy':'dormancy_assessments','frameworks':'framework_baselines','analyses':'ace_analyses','plans':'migration_plans','generated':'generated_artifacts','audit-ledger':'audit_ledger','security-findings':'security_findings','metrics':'metrics','connectors':'connector_profiles','connector-operations':'connector_operations','routing-policies':'routing_policies','unsupported-constructs':'unsupported_constructs','validation-reports':'validation_reports','approval-packages':'approval_packages','mapping-catalogues':'mapping_catalogues','unsupported-mappings':'unsupported_mappings','migration-risks':'migration_risks','quality-runs':'quality_runs','differential-packages':'differential_packages','differential-evidence':'differential_evidence','service-registry':'service_registry','prompt-registry':'prompt_registry','model-registry':'model_registry','model-requests':'model_requests','knowledge-index':'knowledge_index','gate-controls':'gate_controls','delivery-operations':'delivery_operations','notifications':'notifications','observability-events':'observability_events','retention-policies':'retention_policies','skill-registry':'skills','skill-runtimes':'skill_runtimes','skill-agent-bindings':'skill_agent_bindings'}
 
+def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
+    """Resolve an agent's output IDs to displayable content from service tables.
+
+    Each agent writes its artefacts to specific service tables and returns the
+    row IDs in ``AgentResult.outputs``.  This function looks up the actual
+    content so the UI can render it formatted (markdown, YAML, source code,
+    structured tables) instead of showing only raw IDs.
+    """
+    a = {}
+    try:
+        if agent_id == 'repository-intake':
+            mid = outputs.get('intake_manifest', '')
+            if mid:
+                row = r.one('select inventory,gaps,repository_uri,branch,revision from intake_manifests where id=?', (mid,))
+                if row:
+                    inv = json.loads(row['inventory'] or '{}')
+                    a = {'title': 'Repository Intake Report', 'format': 'report',
+                         'sections': [
+                             {'heading': 'Repository', 'content': '%s @ %s (%s)' % (row['repository_uri'], row['branch'], row['revision'] or 'HEAD')},
+                             {'heading': 'Summary', 'content': '%d files · %d flows · %d ESQL · %d schemas · %d maps' % (
+                                 len(inv.get('files', [])), len(inv.get('flows', [])), len(inv.get('esql', [])),
+                                 len(inv.get('schemas', [])), len(inv.get('maps', [])))},
+                             {'heading': 'Gaps', 'items': json.loads(row['gaps'] or '[]')},
+                             {'heading': 'Flows', 'items': inv.get('flows', [])},
+                             {'heading': 'ESQL Modules', 'items': inv.get('esql', [])},
+                             {'heading': 'Schemas', 'items': inv.get('schemas', [])},
+                         ]}
+        elif agent_id == 'dormancy-intelligence':
+            eid = outputs.get('evidence', '')
+            if eid:
+                row = r.one('select * from dormancy_assessments where id=?', (eid,))
+                if row:
+                    evidence = json.loads(row['evidence'] or '{}')
+                    a = {'title': 'Dormancy Assessment', 'format': 'report',
+                         'sections': [
+                             {'heading': 'Classification', 'content': row['classification']},
+                             {'heading': 'Confidence', 'content': '%.0f%%' % (float(row['confidence'] or 0) * 100)},
+                             {'heading': 'Signals', 'table': [
+                                 {'signal': 'Traffic count', 'value': str(evidence.get('traffic_count', '—'))},
+                                 {'signal': 'Last seen (days)', 'value': str(evidence.get('last_seen_days', '—'))},
+                                 {'signal': 'Deployed', 'value': str(evidence.get('deployed', '—'))},
+                                 {'signal': 'Already migrated', 'value': str(evidence.get('already_migrated', '—'))},
+                             ]},
+                             {'heading': 'Rationale', 'content': row['rationale']},
+                         ]}
+        elif agent_id == 'framework-baseline':
+            fid = outputs.get('framework_template', '')
+            if fid:
+                row = r.one('select template_md,standards,conflicts,version from framework_baselines where id=?', (fid,))
+                if row:
+                    a = {'title': 'Framework Baseline Template', 'format': 'markdown',
+                         'markdown': row['template_md'],
+                         'sections': [
+                             {'heading': 'Conflicts', 'items': json.loads(row['conflicts'] or '[]')},
+                             {'heading': 'Standards', 'json': json.loads(row['standards'] or '{}')},
+                         ]}
+        elif agent_id == 'ace-analysis':
+            aid = outputs.get('analysis_document', '')
+            if aid:
+                row = r.one('select analysis_md,semantic_model,ambiguities,dependencies from ace_analyses where id=?', (aid,))
+                if row:
+                    model = json.loads(row['semantic_model'] or '{}')
+                    a = {'title': 'ACE Analysis', 'format': 'markdown',
+                         'markdown': row['analysis_md'],
+                         'sections': [
+                             {'heading': 'Ambiguities', 'items': [x.get('question', str(x)) for x in json.loads(row['ambiguities'] or '[]')]},
+                             {'heading': 'Semantic Model Summary', 'table': [
+                                 {'area': k, 'count': len(model.get(k, []))}
+                                 for k in ('flows', 'subflows', 'esql', 'maps', 'schemas', 'policies', 'interfaces')
+                             ]},
+                         ]}
+        elif agent_id == 'migration-specification':
+            sid = outputs.get('migration_specification_yaml', '')
+            if sid:
+                row = r.one('select yaml_text,validation_status,validation_errors from migration_specs where id=?', (sid,))
+                if row:
+                    a = {'title': 'Migration Specification', 'format': 'yaml',
+                         'yaml': row['yaml_text'],
+                         'validation_status': row['validation_status'],
+                         'validation_errors': json.loads(row['validation_errors'] or '[]')}
+        elif agent_id == 'planning':
+            pid = outputs.get('plan', '')
+            mid = outputs.get('mapping', '')
+            if pid:
+                row = r.one('select tasks,risks,acceptance from migration_plans where id=?', (pid,))
+                if row:
+                    tasks = json.loads(row['tasks'] or '[]')
+                    a = {'title': 'Migration Plan', 'format': 'plan',
+                         'tasks': [{'id': t.get('id'), 'source': t.get('source_reference', ''),
+                                    'pattern': t.get('spring_pattern', ''), 'module': t.get('target_module', ''),
+                                    'boundary': t.get('boundary', ''), 'tests': t.get('tests', [])}
+                                   for t in tasks],
+                         'risk_register': outputs.get('risk_register', []),
+                         'acceptance': json.loads(row['acceptance'] or '[]')}
+            if mid:
+                cat = r.one('select mappings from mapping_catalogues where id=?', (mid,))
+                if cat:
+                    mappings = json.loads(cat['mappings'] or '[]')
+                    a.setdefault('title', 'Migration Plan')
+                    a['mappings'] = [{'source': m.get('source_reference', ''), 'construct': m.get('ace_construct', ''),
+                                      'pattern': m.get('spring_pattern', ''), 'module': m.get('target_module', '')}
+                                     for m in mappings]
+        elif agent_id == 'code-generation':
+            a = {'title': 'Generated Spring Boot Project', 'format': 'code',
+                 'files': [], 'quality': None}
+            artifacts = r.rows('select path,content,provenance from generated_artifacts where job_id=? order by path', (job_id,))
+            a['files'] = [{'path': x['path'], 'content': x['content'], 'language': 'java' if x['path'].endswith('.java') else 'xml' if x['path'].endswith('.xml') else 'yaml'} for x in artifacts[:50]]
+            qr = r.one('select status,payload from quality_runs where job_id=? order by created_at desc limit 1', (job_id,))
+            if qr:
+                a['quality'] = {'status': qr['status'], 'checks': json.loads(qr['payload'] or '{}').get('checks', [])}
+        elif agent_id == 'variance-analysis':
+            variances = r.rows('select path,expected,actual,severity,kind,disposition from variances where job_id=? order by severity,path', (job_id,))
+            a = {'title': 'Variance Analysis', 'format': 'variances',
+                 'items': [{'path': v['path'], 'expected': v['expected'][:200], 'actual': v['actual'][:200],
+                            'severity': v['severity'], 'kind': v['kind'], 'disposition': v['disposition']}
+                           for v in variances[:100]]}
+        elif agent_id == 'rca':
+            causes = r.rows('select hypothesis,confidence,affected_scope,status from root_causes where job_id=? order by confidence desc', (job_id,))
+            a = {'title': 'Root Cause Analysis', 'format': 'rca',
+                 'hypotheses': [{'hypothesis': c['hypothesis'], 'confidence': c['confidence'],
+                                 'scope': c['affected_scope'], 'status': c['status']} for c in causes]}
+        elif agent_id == 'remediation':
+            rems = r.rows('select proposal,approved_pattern,regression_tests,status from remediations where job_id=? order by created_at desc', (job_id,))
+            a = {'title': 'Remediation Proposals', 'format': 'remediation',
+                 'proposals': [{'proposal': rem['proposal'][:500], 'pattern': rem['approved_pattern'],
+                                'tests': json.loads(rem['regression_tests'] or '[]'), 'status': rem['status']}
+                               for rem in rems]}
+        elif agent_id == 'governance':
+            a = {'title': 'Governance Evaluation', 'format': 'governance',
+                 'decision': outputs.get('allow_deny_decision', {}),
+                 'approval_requirement': outputs.get('approval_requirement', {}),
+                 'evidence_requirement': outputs.get('evidence_requirement', {})}
+        elif agent_id == 'knowledge-evidence':
+            a = {'title': 'Knowledge & Evidence Index', 'format': 'knowledge',
+                 'cited_context': outputs.get('cited_context', []),
+                 'version_lineage': outputs.get('version_lineage', [])}
+        elif agent_id == 'test-engineering':
+            pkg_id = outputs.get('test_suites', '')
+            if pkg_id:
+                row = r.one('select payload from differential_packages where id=?', (pkg_id,))
+                if row:
+                    payload = json.loads(row['payload'] or '{}')
+                    a = {'title': 'Test Engineering — Differential Test Package', 'format': 'test',
+                         'cases': payload.get('cases', []),
+                         'policy': payload.get('policy', {})}
+    except Exception:
+        pass
+    return a or None
+
+
 def _enrich_job_risks(r, items):
     """Compute a per-job risk level from signal tables and write it into each item dict.
 
@@ -331,12 +481,27 @@ class H(BaseHTTPRequestHandler):
                 if ar:
                     prov=json.loads(ar['model_provenance'] or '{}')
                     model_info={'model_alias':ar['effective_model_alias'] or '','binding_source':ar['binding_source'] or '','model_mode':prov.get('mode',''),'model_reason':prov.get('reason','')}
-            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info})
+            # Structured step logs: [timestamp, level, message] tuples the UI
+            # Logs tab already renders.  Written by StepLogger during execution.
+            logs=[[r['created_at'],r['level'],r['message']] for r in repo.rows('select created_at,level,message from pipeline_step_logs where step_id=? order by created_at',(step['id'],))]
+            # Resolved artefact content: the rich displayable output for this
+            # agent (markdown, YAML, source code, structured tables) resolved
+            # from the service tables using the output IDs.
+            artefact=_resolve_agent_artefacts(repo,step.get('agent_id',''),outputs,detail['job_id']) if step.get('agent_id') else None
+            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.
         if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})
         if p=='/api/v2/skill-runtimes':return self.sendj(200,{'items':skill7.list_runtimes()})
         if p=='/api/v2/skill-agent-bindings':return self.sendj(200,{'items':skill7.list_bindings((q.get('skill_id') or [None])[0],(q.get('agent_id') or [None])[0])})
+        if p=='/api/v7/notifications/mine':
+            pr=self.principal();user=self.current_user(pr)
+            if not user: return self.stale_session()
+            return self.sendj(200,{'items':notify7.for_user(user['email']),'unread':notify7.unread_count(user['email'])})
+        if p=='/api/v7/notifications/unread-count':
+            pr=self.principal();user=self.current_user(pr)
+            if not user: return self.stale_session()
+            return self.sendj(200,{'count':notify7.unread_count(user['email'])})
         if p=='/api/v7/approval-inbox': return self.sendj(200,{'items':approvals7.inbox_for(self.principal())})
         if p=='/api/v7/gates': return self.sendj(200,{'items':approvals7.gates(),'source':'live_database','generated_at':now()})
         if p=='/api/v7/knowledge/search': return self.sendj(200,{'items':knowledge7.search((q.get('q') or [''])[0],(q.get('job_id') or [''])[0])})
@@ -490,6 +655,14 @@ class H(BaseHTTPRequestHandler):
             if p=='/api/v7/delivery/request':
                 self.require('DELIVERY_ENGINEER','RELEASE_MANAGER');return self.sendj(202,delivery7.request(d))
             if p=='/api/v7/notifications': self.require('NOTIFICATION_PUBLISHER','GOVERNANCE_ADMIN');return self.sendj(201,notify7.queue(d))
+            if p=='/api/v7/notifications/mark-read':
+                pr=self.principal();user=self.current_user(pr)
+                if not user: return self.stale_session()
+                return self.sendj(200,notify7.mark_read(d.get('id',''),user['email']))
+            if p=='/api/v7/notifications/mark-all-read':
+                pr=self.principal();user=self.current_user(pr)
+                if not user: return self.stale_session()
+                return self.sendj(200,notify7.mark_all_read(user['email']))
             if p=='/api/v7/observability': self.require('OBSERVABILITY_PUBLISHER','GOVERNANCE_ADMIN');return self.sendj(201,observe7.emit(d))
             if p=='/api/v3/workflow/schedule': return self.sendj(201,workflow.schedule(d['job_id'],d['activity'],d.get('payload'),d.get('max_attempts',3),d.get('idempotency_key')))
             if p=='/api/v3/workflow/claim': return self.sendj(200,workflow.claim(d.get('worker_id','local-worker'),d.get('lease_seconds',60),d.get('activity')) or {})

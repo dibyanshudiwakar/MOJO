@@ -69,7 +69,14 @@ class AccountService:
         name = str(d.get('name', '')).strip()
         email = str(d.get('email', '')).strip().lower()
         password = str(d.get('password', ''))
-        role = str(d.get('role', '')).strip().upper()
+        # Accept either a single 'role' string (legacy) or a 'roles' list.
+        raw_roles = d.get('roles') or []
+        if isinstance(raw_roles, str):
+            raw_roles = [r.strip() for r in raw_roles.split(',') if r.strip()]
+        if not raw_roles:
+            single = str(d.get('role', '')).strip().upper()
+            raw_roles = [single] if single else []
+        roles = [r.strip().upper() for r in raw_roles if r.strip()]
         if len(name) < 2:
             raise ValueError('name_required')
         if not EMAIL.match(email) or len(email) > 254:
@@ -78,27 +85,30 @@ class AccountService:
             raise ValueError('password_too_short_minimum_%d' % MIN_PASSWORD)
         if password.lower() in (name.lower(), email, email.split('@')[0].lower()):
             raise ValueError('password_must_not_match_identity')
-        if role in ELEVATED_ROLES:
-            # Named explicitly so the caller learns the role exists but needs
-            # granting, rather than being told it is simply invalid.
-            raise PermissionError('role_requires_administrator_grant:' + role)
-        if role not in SELF_SERVICE_ROLES:
-            raise ValueError('unsupported_role')
-        return name, email, password, role
+        if not roles:
+            raise ValueError('at_least_one_role_required')
+        for role in roles:
+            if role in ELEVATED_ROLES:
+                raise PermissionError('role_requires_administrator_grant:' + role)
+            if role not in SELF_SERVICE_ROLES:
+                raise ValueError('unsupported_role:' + role)
+        return name, email, password, roles
 
     def sign_up(self, d):
-        name, email, password, role = self._validate(d)
+        name, email, password, roles = self._validate(d)
         if self.repo.one('select id from users where email=?', (email,)):
             raise ValueError('email_already_registered')
         first = not self.repo.one('select id from users limit 1')
-        roles = [role] + ([r for r in BOOTSTRAP_ROLES if r != role] if first else [])
+        # The first role in the list is stored as the primary display role.
+        primary = roles[0]
+        all_roles = list(dict.fromkeys(roles + ([r for r in BOOTSTRAP_ROLES if r not in roles] if first else [])))
         pw, salt, rounds = hash_password(password)
         i = uid()
         ts = now()
         with self.repo.connect() as c:
             self.repo.insert(c, 'users', {
                 'id': i, 'name': name, 'email': email, 'password_hash': pw, 'password_salt': salt,
-                'password_iterations': rounds, 'role': role, 'granted_roles': ','.join(roles),
+                'password_iterations': rounds, 'role': primary, 'granted_roles': ','.join(all_roles),
                 'status': 'ACTIVE', 'failed_attempts': 0, 'locked_until': '',
                 'created_at': ts, 'updated_at': ts, 'last_login_at': ''})
         return self.public(self.repo.one('select * from users where id=?', (i,)))

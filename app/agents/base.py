@@ -96,7 +96,7 @@ class AgentContext:
     def __init__(self, repo, job_id, identity='system', roles=(), params=None,
                  correlation_id='', iteration=1, provider=None, channel='API',
                  default_model_alias='', effective_model_alias='', binding_source='DEFAULT',
-                 agent_id=''):
+                 logger=None, agent_id=''):
         self.repo = repo
         # Which catalogue agent this invocation is for. Only used to look up the
         # agent's skill; it confers no capability and is not read from a request.
@@ -120,6 +120,11 @@ class AgentContext:
         self.effective_model_alias = effective_model_alias
         # 'DEFAULT' or 'AGENT_OVERRIDE' — recorded in model_provenance.
         self.binding_source = binding_source
+        # Optional StepLogger for structured pipeline step logs.
+        self.logger = logger
+        # The catalogue agent_id, used by ReasoningGateway to load the
+        # agent's skill from agent-skills/.
+        self.agent_id = agent_id
 
     def param(self, name, default=_REQUIRED):
         value = self.params.get(name, default)
@@ -154,8 +159,21 @@ class AgentContext:
         return row
 
     @property
+    def pipeline_context(self):
+        """The accumulated context from all prior agents in this pipeline.
+
+        Contains outputs, evidence, reasoning provenance, metrics and skill
+        summaries from every agent that has already completed.  ``None`` when
+        the agent is not running inside a pipeline or is the first in the chain.
+        """
+        return self.params.get('_pipeline_context')
+
+    @property
     def params_hash(self):
-        return digest(json.dumps(self.params, sort_keys=True, default=str))
+        # Exclude _pipeline_context from the hash — it changes with every step
+        # and would make idempotency keys useless.
+        filtered = {k: v for k, v in self.params.items() if k != '_pipeline_context'}
+        return digest(json.dumps(filtered, sort_keys=True, default=str))
 
 
 class BaseAgent:

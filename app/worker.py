@@ -30,9 +30,12 @@ from app.repository import Repository
 from app.services.accounts import AccountService
 from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
-from app.services.pipelines import PipelineService
+from app.repository import now as _now
+from app.services.pipelines import PipelineService, StepLogger, PipelineContextAccumulator
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
+from app.services.platform_v7 import NotificationService
+from app.agents.skills import skill_for, SkillIntegrityError
 
 ACTIVITY = 'pipeline_step'
 
@@ -43,12 +46,12 @@ ACTIVITY = 'pipeline_step'
 # here parks the step immediately as WAITING_APPROVAL without executing the
 # agent at all.
 #
-# Mapping: agent_id → list of gates whose approval is checked internally by
-# the agent's service.  Sourced from MappingAndPlanningService (G1/G2/G3)
-# and PlanningGenerationService (G1/G2).
+# G1 (framework) is NOT listed here because framework-baseline is optional.
+# When no framework was used, G1 is skipped entirely and planning/code-gen
+# proceed without it.  The G1 check in the services is conditional on
+# framework_id being present.
 AGENT_PREFLIGHT_GATES = {
-    'ace-analysis':            ['G1'],
-    'planning':                ['G1', 'G2'],
+    'planning':                ['G2'],
     'code-generation':         ['G3'],
 }
 
@@ -126,7 +129,48 @@ class WorkerLoop:
                 pass
             self.workflow.complete(item['id'], False, str(exc), worker_id=self.worker_id)
         self.pipelines.advance(pipeline_id, self.workflow)
+        # Emit user-facing notifications for key pipeline events.
+        self._emit_notifications(pipeline_id, step_id)
         return True
+
+    def _emit_notifications(self, pipeline_id, step_id):
+        """Emit notifications the bell icon picks up for gate holds, failures and completion."""
+        try:
+            notifier = NotificationService(self.repo)
+            pipeline = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
+            if not pipeline:
+                return
+            step = self.repo.one('select * from pipeline_steps where id=?', (step_id,))
+            job_id = pipeline['job_id']
+            owner = pipeline['created_by']
+            ws = pipeline.get('workspace_dir') or ''
+            if step and step['status'] == 'WAITING_APPROVAL':
+                gate = ''
+                from app.services.pipelines import _gate_from_error
+                gate = _gate_from_error(step.get('error') or '')
+                agent_label = (step.get('agent_id') or '').replace('-', ' ').title()
+                notifier.emit(job_id, 'GATE_APPROVAL_REQUIRED', owner,
+                              '%s is waiting for %s approval' % (agent_label, gate or 'gate'),
+                              {'step_id': step_id, 'gate': gate, 'agent_id': step.get('agent_id')},
+                              link='pipelines/' + pipeline_id)
+            elif step and step['status'] == 'FAILED':
+                agent_label = (step.get('agent_id') or step.get('kind') or '').replace('-', ' ').title()
+                notifier.emit(job_id, 'STEP_FAILED', owner,
+                              '%s failed in %s' % (agent_label, ws),
+                              {'step_id': step_id, 'error': (step.get('error') or '')[:200]},
+                              link='pipelines/' + pipeline_id)
+            if pipeline['status'] == 'COMPLETED':
+                notifier.emit(job_id, 'PIPELINE_COMPLETED', owner,
+                              'Pipeline %s completed successfully' % ws,
+                              {'pipeline_id': pipeline_id},
+                              link='pipelines/' + pipeline_id)
+            elif pipeline['status'] == 'FAILED':
+                notifier.emit(job_id, 'PIPELINE_FAILED', owner,
+                              'Pipeline %s failed' % ws,
+                              {'pipeline_id': pipeline_id},
+                              link='pipelines/' + pipeline_id)
+        except Exception:
+            pass  # Notifications are best-effort; never crash the worker.
 
     def _gate_approved(self, job_id, gate):
         """Return True if there is at least one valid approval for *gate* at the current iteration."""
@@ -138,7 +182,7 @@ class WorkerLoop:
         )
         return bool(row)
 
-    def _preflight_gate_check(self, job_id, step):
+    def _preflight_gate_check(self, job_id, step, log=None):
         """Park the step immediately if its agent needs a gate that is not yet approved.
 
         Returns True if the step was parked (caller should skip execution),
@@ -151,10 +195,29 @@ class WorkerLoop:
             return False
         for gate in required:
             if not self._gate_approved(job_id, gate):
+                if log:
+                    log.warn('Gate %s pre-flight: not approved — holding step until gate is signed' % gate)
                 error_msg = 'required_gate_approval_missing:%s' % gate
                 self.pipelines._enter_gate_wait(
                     step['id'], job_id, '', error_msg, needs_retry=True)
+                # Verify the step was actually parked.  _enter_gate_wait may
+                # have failed to transition the job lifecycle (the state
+                # machine may not allow WAITING_Gx from the current state) but
+                # it now always parks the step and creates the approval package
+                # regardless.  This check is belt-and-suspenders.
+                after = self.repo.one('select status from pipeline_steps where id=?', (step['id'],))
+                if not after or after['status'] != 'WAITING_APPROVAL':
+                    # Fallback: force the step to WAITING_APPROVAL directly.
+                    tag = 'gate_retry:%s;%s' % (gate, error_msg)
+                    with self.repo.connect() as c:
+                        c.execute("update pipeline_steps set status='WAITING_APPROVAL',error=?,updated_at=? where id=?",
+                                  (tag, _now(), step['id']))
+                    if log:
+                        log.warn('Forced step to WAITING_APPROVAL (lifecycle transition was deferred)')
                 return True
+            else:
+                if log:
+                    log.info('Gate %s pre-flight: approved ✓' % gate)
         return False
 
     def _execute(self, pipeline_id, step_id):
@@ -163,23 +226,29 @@ class WorkerLoop:
             raise ValueError('pipeline_step_not_found:' + step_id)
         pipeline = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
         job_id = pipeline['job_id']
+        log = StepLogger(self.repo, step_id)
+        kind_label = {'CLONE': 'Clone', 'AGENT': 'Agent', 'DELIVERY': 'Delivery'}.get(step['kind'], step['kind'])
+        agent_label = step['agent_id'].replace('-', ' ').title() if step['agent_id'] else ''
+        log.info('Step started: %s%s' % (kind_label, (' — ' + agent_label) if agent_label else ''))
         self.pipelines.mark_step(step_id, 'RUNNING')
         # Pre-flight: if the agent needs a gate that is not yet approved, park
         # the step immediately as WAITING_APPROVAL without running the agent.
-        if self._preflight_gate_check(job_id, step):
+        if self._preflight_gate_check(job_id, step, log):
             return
         try:
             if step['kind'] == 'AGENT':
-                outputs = self._dispatch_agent(job_id, step, pipeline['created_by'])
+                outputs = self._dispatch_agent(job_id, step, pipeline['created_by'], log)
             elif step['kind'] == 'CLONE':
-                outputs = self._clone(pipeline, step)
+                outputs = self._clone(pipeline, step, log)
             elif step['kind'] == 'DELIVERY':
-                outputs = self._deliver(pipeline, step)
+                outputs = self._deliver(pipeline, step, log)
             else:
                 raise ValueError('unsupported_pipeline_step_kind:' + step['kind'])
         except Exception as exc:
+            log.error('Step failed: %s' % str(exc)[:300])
             self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
             raise
+        log.success('Step completed successfully')
         self.pipelines.mark_step(step_id, 'COMPLETED', outputs=outputs)
 
     def _principal(self, email):
@@ -195,10 +264,51 @@ class WorkerLoop:
             raise PermissionError('pipeline_owner_account_not_found:' + email)
         return user, AccountService.roles_of(user)
 
-    def _dispatch_agent(self, job_id, step, created_by):
+    def _dispatch_agent(self, job_id, step, created_by, log=None):
         user, roles = self._principal(created_by)
+        if log:
+            log.info('Resolved pipeline owner: %s (%d roles)' % (created_by, len(roles)))
         params = self.pipelines.resolved_params(step)
-        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [])
+        # Load accumulated pipeline context from all prior agents and merge it
+        # into the params so the agent (and its LLM reasoning) sees everything
+        # the pipeline has produced so far.
+        accumulator = PipelineContextAccumulator(self.repo)
+        prior = accumulator.snapshot(step['pipeline_id'], job_id)
+        if prior:
+            params['_pipeline_context'] = prior
+            if log:
+                n_agents = len(prior.get('agent_chain', []))
+                n_evidence = len(prior.get('evidence_summary', []))
+                log.info('Loaded pipeline context: %d prior agent%s, %d evidence item%s' % (
+                    n_agents, '' if n_agents == 1 else 's',
+                    n_evidence, '' if n_evidence == 1 else 's'))
+                if prior.get('agent_chain'):
+                    log.info('Prior agents: %s' % ' → '.join(prior['agent_chain']))
+        elif log:
+            log.info('No prior pipeline context (first agent in this pipeline)')
+        if log:
+            log.info('Dispatching agent %s v%s' % (step['agent_id'], step['version']))
+        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [], logger=log)
+        evidence_ids = [e.get('id') for e in result.get('evidence', [])]
+        if log:
+            status = result.get('status', 'UNKNOWN')
+            n_evidence = len(evidence_ids)
+            log.info('Agent returned %s with %d evidence item%s' % (status, n_evidence, '' if n_evidence == 1 else 's'))
+            if result.get('error'):
+                log.warn('Agent reported error: %s' % str(result['error'])[:200])
+            reasoning = result.get('reasoning') or {}
+            if reasoning.get('mode'):
+                log.info('Reasoning mode: %s' % reasoning['mode'])
+        # Record this agent's full context into the shared store so subsequent
+        # agents see it.
+        skill = None
+        try:
+            skill = skill_for(step['agent_id'])
+        except SkillIntegrityError:
+            pass
+        accumulator.record(step['pipeline_id'], step['id'], step['agent_id'], job_id, result, skill)
+        if log:
+            log.info('Pipeline context updated with %s outputs' % step['agent_id'])
         # Everything the agent itself declared as output stays at the top
         # level -- resolved_params() (and any later step that forwards a
         # value from this one) reads outputs[key] directly. Execution
@@ -206,19 +316,31 @@ class WorkerLoop:
         # underscore so it can never collide with a real output key.
         return {**result.get('outputs', {}), '_run_id': result.get('run_id'),
                 '_agent_status': result.get('status'), '_metrics': result.get('metrics'),
-                '_evidence_ids': [e.get('id') for e in result.get('evidence', [])]}
+                '_evidence_ids': evidence_ids}
 
-    def _clone(self, pipeline, step):
+    def _clone(self, pipeline, step, log=None):
         params = json.loads(step['params'] or '{}')
+        role = params.get('role', '')
+        if log:
+            log.info('Resolving GitHub credentials for %s repository' % (role or 'source'))
         user, _ = self._principal(pipeline['created_by'])
+        if log:
+            log.info('Cloning %s @ %s → %s' % (params['repo_url'], params['branch'], params['dest']))
         result = self.repo_clone.clone(user['id'], params['repo_url'], params['branch'], params['dest'])
-        self.pipelines.mark_repo_cloned(pipeline['job_id'], params.get('role', ''), result['path'], result['commit'])
+        self.pipelines.mark_repo_cloned(pipeline['job_id'], role, result['path'], result['commit'])
+        if log:
+            log.success('Clone complete — commit %s at %s' % (result.get('commit', '?')[:12], result.get('path', '?')))
         return result
 
-    def _deliver(self, pipeline, step):
+    def _deliver(self, pipeline, step, log=None):
         params = json.loads(step['params'] or '{}')
+        if log:
+            log.info('Pushing generated code to %s @ %s' % (params['repo_url'], params['branch']))
         user, _ = self._principal(pipeline['created_by'])
-        return self.repo_clone.push(user['id'], params['repo_url'], params['branch'], params['source_dir'])
+        result = self.repo_clone.push(user['id'], params['repo_url'], params['branch'], params['source_dir'])
+        if log:
+            log.success('Push complete — commit %s on branch %s' % (result.get('commit', '?')[:12], result.get('branch', '?')))
+        return result
 
 
 if __name__ == '__main__':

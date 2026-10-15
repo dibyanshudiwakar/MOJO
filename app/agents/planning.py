@@ -35,9 +35,12 @@ class PlanningAgent(BaseAgent):
     def execute(self, context):
         version = context.param('version', '1.0.0')
         service = MappingAndPlanningService(self.repo)
+        # framework_id is optional: when framework-baseline was skipped, the
+        # param resolves to '' and planning proceeds with default conventions.
+        framework_id = context.param('framework_id', '') or ''
         catalogue = service.create_mapping_catalogue(
             context.job_id,
-            context.param('framework_id'),
+            framework_id,
             context.param('analysis_id'),
             context.param('specification_id'),
             version,

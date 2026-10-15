@@ -66,6 +66,8 @@ create table if not exists agent_templates(id text primary key,name text not nul
 create table if not exists skill_runtimes(id text primary key,name text not null unique,display_name text default '',language text not null,language_version text default '',framework text default '',framework_version_range text default '',build_tool text default '',base_image text default '',config text default '{}',enabled integer default 1,created_at text,updated_at text,created_by text default '');
 create table if not exists skills(id text primary key,skill_key text not null,version text not null,display_name text default '',description text default '',target_runtime_id text not null,toolchain_runtime_id text default '',source_path text default '',content_hash text default '',accepted_source_types text default '[]',produced_artifact_types text default '[]',backend_types text default '[]',status text default 'DRAFT',approved_by text default '',approved_at text default '',deprecated_by text default '',deprecated_at text default '',superseded_by_id text default '',created_at text,updated_at text,created_by text default '',unique(skill_key,version));
 create table if not exists skill_agent_bindings(id text primary key,skill_id text not null,agent_id text not null,binding_type text default 'PRIMARY',created_at text,updated_at text,created_by text default '',unique(skill_id,agent_id));
+create table if not exists pipeline_step_logs(id text primary key,step_id text not null,level text not null,message text not null,created_at text not null);
+create table if not exists pipeline_context(id text primary key,pipeline_id text not null,step_id text not null,agent_id text not null,job_id text not null,outputs text default '{}',evidence_ids text default '[]',metrics text default '{}',reasoning text default '{}',error text default '',skill_name text default '',skill_hash text default '',skill_summary text default '',run_id text default '',status text default '',created_at text not null,unique(pipeline_id,agent_id));
 """
 def now(): return datetime.now(timezone.utc).isoformat()
 def uid(): return str(uuid.uuid4())
@@ -88,6 +90,7 @@ class Repository:
    self._upgrade_governance(c)
    self._upgrade_agent_llm_bindings(c)
    self._upgrade_skill_registry(c)
+   self._upgrade_notifications(c)
    self._seed_skill_runtimes(c)
  def _catalogue(self):
   p=Path(__file__).resolve().parents[1]/'config'/'agent-catalogue.v1.json'
@@ -175,6 +178,10 @@ class Repository:
    if col not in {r[1] for r in c.execute('pragma table_info(skills)').fetchall()}:c.execute(f'alter table skills add column {col} {typ}')
   for col,typ in {'updated_at':"text default ''",'created_by':"text default ''"}.items():
    if col not in {r[1] for r in c.execute('pragma table_info(skill_agent_bindings)').fetchall()}:c.execute(f'alter table skill_agent_bindings add column {col} {typ}')
+ def _upgrade_notifications(self,c):
+  existing={r[1] for r in c.execute('pragma table_info(notifications)').fetchall()}
+  for col,typ in {'is_read':"integer default 0",'title':"text default ''",'link':"text default ''"}.items():
+   if col not in existing:c.execute(f'alter table notifications add column {col} {typ}')
  def _seed_skill_runtimes(self,c):
   defaults=[
    {'name':'java-21-spring-boot','display_name':'Java Runtime','language':'java','language_version':'21','framework':'spring-boot','framework_version_range':'3.2.x','build_tool':'maven','base_image':'eclipse-temurin:21-jre-alpine','config':'{"jvm_flags":"-XX:+UseContainerSupport","framework_starter":"3.2.2","cvs_phases":["1","2"]}'},

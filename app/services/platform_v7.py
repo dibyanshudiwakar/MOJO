@@ -214,8 +214,28 @@ class NotificationService:
   for k in ('job_id','event_type','recipient'):
    if not d.get(k):raise ValueError('missing_'+k)
   i=uid();ts=now()
-  with self.repo.connect() as c:c.execute('insert into notifications values(?,?,?,?,?,?,?,?,?)',(i,d['job_id'],d['event_type'],d['recipient'],json.dumps(d.get('payload',{})),'QUEUED',d.get('profile_id',''),ts,ts))
+  with self.repo.connect() as c:
+   self.repo.insert(c,'notifications',{'id':i,'job_id':d['job_id'],'event_type':d['event_type'],'recipient':d['recipient'],'payload':json.dumps(d.get('payload',{})),'status':'QUEUED','profile_id':d.get('profile_id',''),'created_at':ts,'updated_at':ts,'is_read':0,'title':d.get('title',''),'link':d.get('link','')})
   return self.repo.one('select * from notifications where id=?',(i,))
+ def emit(self,job_id,event_type,recipient,title,payload=None,link=''):
+  """Convenience: queue a notification with a human-readable title and optional deep-link."""
+  return self.queue({'job_id':job_id,'event_type':event_type,'recipient':recipient,'title':title,'payload':payload or {},'link':link})
+ def for_user(self,email,limit=50):
+  """Notifications addressed to this user or to 'ALL', newest first."""
+  return self.repo.rows("select * from notifications where recipient in (?,'ALL') order by created_at desc limit ?",(email,limit))
+ def unread_count(self,email):
+  r=self.repo.one("select count(*) n from notifications where recipient in (?,'ALL') and is_read=0",(email,))
+  return r['n'] if r else 0
+ def mark_read(self,notification_id,email):
+  """Mark one notification as read. Only the recipient may mark it."""
+  row=self.repo.one('select * from notifications where id=?',(notification_id,))
+  if not row:raise ValueError('notification_not_found')
+  if row['recipient'] not in (email,'ALL'):raise PermissionError('notification_not_yours')
+  with self.repo.connect() as c:c.execute('update notifications set is_read=1,updated_at=? where id=?',(now(),notification_id))
+  return self.repo.one('select * from notifications where id=?',(notification_id,))
+ def mark_all_read(self,email):
+  with self.repo.connect() as c:c.execute("update notifications set is_read=1,updated_at=? where recipient in (?,'ALL') and is_read=0",(now(),email))
+  return {'status':'ok'}
 
 class ObservabilityService:
  def __init__(self,repo):self.repo=repo

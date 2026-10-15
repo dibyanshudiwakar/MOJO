@@ -47,12 +47,10 @@ def test_impact_prunes_dependents_with_clear_reasons(env):
     runnable = set(out['runnable'])
     skipped = {x['agent_id']: x['reason'] for x in out['skipped']}
     assert 'repository-intake' in runnable and 'ace-analysis' in runnable
-    # planning depends on framework-baseline too, and code-generation depends on planning:
-    # both must be visibly skipped, not silently vanish.
-    assert 'planning' not in runnable and 'code-generation' not in runnable
+    # framework-baseline is optional: planning no longer depends on it,
+    # so planning and code-generation remain runnable even without it.
+    assert 'planning' in runnable and 'code-generation' in runnable
     assert skipped['framework-baseline'] == 'explicitly disabled'
-    assert 'framework-baseline' in skipped['planning']
-    assert 'planning' in skipped['code-generation']
 
 
 def test_impact_matches_what_create_builds(env):

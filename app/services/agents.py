@@ -92,7 +92,7 @@ class AgentRegistry:
  def implementations(self):
   report=self.conformance()
   return {'status':'UP' if all(x['status']=='CONFORMANT' for x in report) else 'DEGRADED','agents':report}
- def dispatch(self,job_id,agent_id,version,roles,identity,params=None,input_evidence=None,provider=None,channel='API'):
+ def dispatch(self,job_id,agent_id,version,roles,identity,params=None,input_evidence=None,provider=None,channel='API',logger=None):
   """Run an agent under its approved contract and record everything it produced.
 
   This is the worker flow ``docs/AGENTS_DEVELOPMENT.md`` specifies: authenticate
@@ -102,12 +102,24 @@ class AgentRegistry:
   live here rather than in ``start`` because ``start`` is the contract-level
   admission check that the ``/api/v2/agents/start`` route exposes for an external
   worker that performs its own execution.
+
+  ``logger`` is an optional ``StepLogger`` from the pipeline worker.  When
+  present, each governance check and execution milestone writes a structured
+  log entry visible in the step's Logs tab.
   """
+  _log_info = logger.info if logger else (lambda m: None)
+  _log_warn = logger.warn if logger else (lambda m: None)
   a=self.contract(agent_id,version)
+  _log_info('Contract validated for %s v%s (role: %s)' % (agent_id, version, a['required_role']))
   drift=[x for x in self.conformance(agent_id) if x['status']!='CONFORMANT']
   if drift: raise PermissionError('agent_implementation_drift:'+json.dumps(drift[0]['findings']))
+  _log_info('Conformance check passed — implementation matches contract')
   deps=self.dependency_status(job_id,agent_id)
   if deps['outstanding']: raise PermissionError('agent_dependency_not_satisfied:'+','.join(deps['outstanding']))
+  if deps['required']:
+   _log_info('Dependencies satisfied: %s' % ', '.join(deps['satisfied']))
+  else:
+   _log_info('No dependencies required')
   impl=load_implementation(agent_id)(self.repo)
   # Opt-in strict mode: an agent that declares a skill does not run without it. Checked
   # before start() so a refusal leaves no RUNNING row behind.
@@ -115,8 +127,10 @@ class AgentRegistry:
    try:skill_for(agent_id)
    except SkillIntegrityError as e:raise PermissionError('agent_skill_unavailable:'+str(e))
   run=self.start(job_id,agent_id,version,input_evidence or [],roles,impl.TOOLS,identity)
+  _log_info('Run started: %s (correlation: %s)' % (run['id'][:12], run['correlation_id'][:12]))
   job=self.repo.one('select iteration from jobs where id=?',(job_id,))
   effective_alias,binding_source=self.bindings.resolve(agent_id,a.get('default_model_alias') or '')
+  _log_info('LLM binding resolved: %s (%s)' % (effective_alias or '(none)', binding_source))
   # AT-05 fail-closed: an ACTIVE override whose alias has been removed from (or
   # never entered) model_registry must not silently fall back to the default.
   if binding_source=='AGENT_OVERRIDE' and effective_alias:
@@ -136,7 +150,8 @@ class AgentRegistry:
   with self.repo.connect() as c:
    c.execute('update agent_runs set effective_model_alias=?,binding_source=? where id=?',(effective_alias,binding_source,run['id']))
   if provider is None: provider=default_provider()
-  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source)
+  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source,logger=logger,agent_id=agent_id)
+  _log_info('Executing agent %s…' % agent_id)
   try:result=impl.execute(context)
   except Exception as e:
    self.complete(run['id'],[],type(e).__name__+':'+str(e),identity)
@@ -156,12 +171,15 @@ class AgentRegistry:
   registered=[]
   for ref in result.evidence:
    meta=dict(ref.metadata or {});meta.update({'agent_id':agent_id,'agent_version':version,'run_id':run['id'],'model_provenance':result.reasoning or {},'skill':skill_prov})
-   registered.append(self.evidence.register(job_id,ref.kind,ref.version,ref.uri,ref.content,agent_id,meta))
+   ev=self.evidence.register(job_id,ref.kind,ref.version,ref.uri,ref.content,agent_id,meta)
+   registered.append(ev)
+   _log_info('Evidence registered: %s → %s' % (ref.kind, ev['id'][:12]))
   opened=[]
   # Clarification blocking is disabled — agents may still return
   # clarifications in their result but they are not persisted or acted on.
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
+  _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))
   detail={'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence_ids':evidence_ids,'clarification_ids':opened,'requested_tools':sorted(impl.TOOLS),'params_hash':context.params_hash,'reasoning':result.reasoning,'channel':channel,'contract_hash':a['contract_hash'],'effective_model_alias':effective_alias,'binding_source':binding_source,'skill':skill_prov}
   with self.repo.connect() as c:
    self.repo.event(c,job_id,identity,'AGENT_RUN_COMPLETED',details=detail,correlation=run['correlation_id'])

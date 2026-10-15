@@ -70,6 +70,8 @@ SELECTABLE_AGENTS_EXCLUDED = {'migration-orchestrator'}
 # app/agents/*.py -- see ace_analysis.py (analysis_document), framework_baseline.py
 # (framework_template), migration_specification.py (migration_specification_yaml),
 # planning.py (plan).
+# framework_id is optional: when framework-baseline was skipped, the resolved
+# value stays '' and the downstream service proceeds with default conventions.
 PARAM_SOURCES = {
     'migration-specification': {'analysis_id': ('ace-analysis', 'analysis_document'),
                                  'framework_id': ('framework-baseline', 'framework_template')},
@@ -172,6 +174,141 @@ def _artefact_ready(repo, job_id, target):
 
 class PipelineError(ValueError):
     pass
+
+
+class PipelineContextAccumulator:
+    """Shared context that accumulates across every agent in a pipeline.
+
+    Each agent's execution result — outputs, evidence, reasoning provenance,
+    metrics, and the skill that guided it — is recorded after the agent
+    completes.  Before the next agent runs, the full accumulated snapshot is
+    loaded and passed to it via ``AgentContext.params['_pipeline_context']``,
+    so every agent sees what every prior agent produced and which skill drove
+    each decision.  Nothing is lost at agent boundaries.
+    """
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def record(self, pipeline_id, step_id, agent_id, job_id, dispatch_result, skill=None):
+        """Write what this agent produced into the shared context store."""
+        evidence_ids = [e.get('id', '') for e in (dispatch_result.get('evidence') or [])]
+        skill_summary = ''
+        if skill:
+            # First paragraph of SKILL.md as a compact summary.
+            lines = (skill.text or '').strip().split('\n\n')
+            skill_summary = lines[0].strip() if lines else ''
+            # Cap at 500 chars to keep the accumulated payload reasonable.
+            if len(skill_summary) > 500:
+                skill_summary = skill_summary[:497] + '...'
+        row = {
+            'id': uid(),
+            'pipeline_id': pipeline_id,
+            'step_id': step_id,
+            'agent_id': agent_id,
+            'job_id': job_id,
+            'outputs': json.dumps(dispatch_result.get('outputs') or {}, default=str),
+            'evidence_ids': json.dumps(evidence_ids),
+            'metrics': json.dumps(dispatch_result.get('metrics') or {}, default=str),
+            'reasoning': json.dumps(dispatch_result.get('reasoning') or {}, default=str),
+            'error': dispatch_result.get('error') or '',
+            'skill_name': skill.name if skill else '',
+            'skill_hash': skill.content_hash if skill else '',
+            'skill_summary': skill_summary,
+            'run_id': dispatch_result.get('run_id') or '',
+            'status': dispatch_result.get('status') or '',
+            'created_at': now(),
+        }
+        with self.repo.connect() as c:
+            # Upsert: a retried step replaces its previous context row.
+            c.execute('delete from pipeline_context where pipeline_id=? and agent_id=?',
+                      (pipeline_id, agent_id))
+            self.repo.insert(c, 'pipeline_context', row)
+
+    def snapshot(self, pipeline_id, job_id):
+        """Build the full accumulated context from all completed agents.
+
+        Returns a dict with:
+          'agents'          — dict keyed by agent_id, each carrying outputs, evidence,
+                              metrics, reasoning, skill info
+          'agent_chain'     — ordered list of agent_ids in execution order
+          'skills_summary'  — combined skill summaries from all agents
+          'evidence_summary'— flat list of {kind, id, producer} across all agents
+        """
+        rows = self.repo.rows(
+            'select * from pipeline_context where pipeline_id=? order by created_at',
+            (pipeline_id,))
+        if not rows:
+            return {}
+        agents = {}
+        agent_chain = []
+        all_skills = []
+        all_evidence = []
+        for r in rows:
+            aid = r['agent_id']
+            agent_chain.append(aid)
+            evidence_ids = json.loads(r['evidence_ids'] or '[]')
+            entry = {
+                'agent_id': aid,
+                'status': r['status'],
+                'run_id': r['run_id'],
+                'outputs': json.loads(r['outputs'] or '{}'),
+                'evidence_ids': evidence_ids,
+                'metrics': json.loads(r['metrics'] or '{}'),
+                'reasoning': json.loads(r['reasoning'] or '{}'),
+                'skill_name': r['skill_name'],
+                'skill_hash': r['skill_hash'],
+                'skill_summary': r['skill_summary'],
+                'error': r['error'],
+            }
+            agents[aid] = entry
+            if r['skill_name'] and r['skill_summary']:
+                all_skills.append('[%s] %s' % (aid, r['skill_summary']))
+            # Build evidence summary from the evidence table for richer detail.
+            for eid in evidence_ids:
+                ev = self.repo.one('select id, kind, producer from evidence where id=?', (eid,))
+                if ev:
+                    all_evidence.append({'id': ev['id'], 'kind': ev['kind'], 'producer': ev['producer']})
+        return {
+            'agents': agents,
+            'agent_chain': agent_chain,
+            'skills_summary': '\n'.join(all_skills),
+            'evidence_summary': all_evidence,
+        }
+
+
+class StepLogger:
+    """Append-only structured log for a single pipeline step.
+
+    Each call writes one row to ``pipeline_step_logs``.  The front-end's Logs
+    tab already renders ``[timestamp, level, message]`` tuples with CSS classes
+    for INFO, WARN, ERROR and SUCCESS — this is the back-end half of that
+    contract.  The 5-second auto-refresh on a RUNNING pipeline means entries
+    appear live while the step is executing.
+    """
+
+    def __init__(self, repo, step_id):
+        self.repo = repo
+        self.step_id = step_id
+
+    def info(self, msg):
+        self._write('INFO', msg)
+
+    def warn(self, msg):
+        self._write('WARN', msg)
+
+    def error(self, msg):
+        self._write('ERROR', msg)
+
+    def success(self, msg):
+        self._write('SUCCESS', msg)
+
+    def _write(self, level, message):
+        with self.repo.connect() as c:
+            self.repo.insert(c, 'pipeline_step_logs', {
+                'id': uid(), 'step_id': self.step_id,
+                'level': level, 'message': str(message),
+                'created_at': now()})
 
 
 class PipelineService:
@@ -446,15 +583,46 @@ class PipelineService:
         return self.detail(pipeline_id)
 
     def _ready_steps(self, pipeline_id):
+        """Steps whose dependencies are all satisfied and that can be scheduled.
+
+        A dependency is satisfied when it is COMPLETED or SKIPPED.  When every
+        dependency of a PENDING step is either COMPLETED or SKIPPED, and at
+        least one is SKIPPED, the step is cascade-skipped rather than
+        scheduled — an intentionally omitted agent must not block its
+        dependents, but those dependents must not run either since they would
+        be operating on missing inputs.
+        """
         rows = self.repo.rows('select * from pipeline_steps where pipeline_id=? order by sequence', (pipeline_id,))
         status = {r['id']: r['status'] for r in rows}
         ready = []
+        cascade_skip = []
         for r in rows:
             if r['status'] != 'PENDING':
                 continue
             deps = json.loads(r['depends_on'] or '[]')
-            if all(status.get(d) == 'COMPLETED' for d in deps):
-                ready.append(r)
+            dep_statuses = [status.get(d, 'PENDING') for d in deps]
+            if not deps or all(s in ('COMPLETED', 'SKIPPED') for s in dep_statuses):
+                if any(s == 'SKIPPED' for s in dep_statuses):
+                    # At least one dependency was skipped — cascade-skip this step.
+                    cascade_skip.append(r)
+                else:
+                    ready.append(r)
+        # Apply cascade skips immediately so downstream steps see the SKIPPED
+        # status on the next _ready_steps call.
+        if cascade_skip:
+            with self.repo.connect() as c:
+                for r in cascade_skip:
+                    skipped_dep = ''
+                    for d in json.loads(r['depends_on'] or '[]'):
+                        if status.get(d) == 'SKIPPED':
+                            # Find the agent name of the skipped dependency for a readable reason.
+                            dep_step = next((s for s in rows if s['id'] == d), None)
+                            skipped_dep = dep_step['agent_id'] if dep_step and dep_step['agent_id'] else d[:12]
+                            break
+                    reason = 'skip_kind:dependency;depends on skipped agent %s' % skipped_dep
+                    c.execute("update pipeline_steps set status='SKIPPED',error=?,updated_at=? where id=? and status='PENDING'",
+                              (reason, now(), r['id']))
+                    status[r['id']] = 'SKIPPED'
         return ready, rows
 
     def _schedule_ready(self, pipeline_id, workflow):
@@ -971,23 +1139,42 @@ class PipelineService:
         return pkg_id
 
     def _enter_gate_wait(self, step_id, job_id, blocked_target, error_msg, needs_retry=False):
-        """Transition job → WAITING_Gx, create approval package, and park the step."""
+        """Park the step, create an approval package, and optionally move the job to WAITING_Gx.
+
+        The approval package and the step park are pipeline-level operations
+        that must happen regardless of whether the job lifecycle state machine
+        accepts the WAITING_Gx transition.  The lifecycle transition is
+        attempted best-effort — when the job is not yet at the state that
+        permits WAITING_Gx (e.g. the job is at FRAMEWORK_BASELINED but
+        WAITING_G2 is only legal from ACE_ANALYSED), the transition is
+        skipped but the step is still parked and the approval inbox still
+        shows the pending gate.  This was the root cause of the "logs show
+        the gate hold but the inbox is empty" bug.
+        """
         gate = _gate_from_error(error_msg)
         if not gate:
             return
         waiting_state = 'WAITING_' + gate
+        # Best-effort lifecycle transition.  The job may not be at the right
+        # state for WAITING_Gx yet (the state machine constrains which edges
+        # exist), so a failure here is logged but does not prevent the step
+        # park and approval package creation below.
         try:
             FactoryService(self.repo).transition(
                 job_id, waiting_state, 'pipeline-system',
                 {'source': 'gate_block', 'blocked_target': blocked_target, 'gate': gate},
             )
         except Exception as exc:
-            _log.debug('failed to enter %s for job %s: %s', waiting_state, job_id, exc)
-            return
+            _log.info('lifecycle transition to %s deferred for job %s: %s '
+                      '(step will still be parked and approval package created)',
+                      waiting_state, job_id, exc)
+        # Always create the approval package so the inbox shows the pending
+        # gate.  Idempotent: a second call for the same gate returns the
+        # existing package.
         try:
             self._auto_create_approval_package(job_id, gate)
         except Exception as exc:
-            _log.debug('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
+            _log.warning('failed to create approval package for job %s gate %s: %s', job_id, gate, exc)
         # The tag records which gate parked this step; the original message is
         # kept after it so the UI's error pane still has something to show and
         # ``_gate_from_error`` can still read the gate back out.
@@ -1086,7 +1273,13 @@ class PipelineService:
         return True
 
     def resolved_params(self, step):
-        """A step's params with any forward-references filled from completed predecessors."""
+        """A step's params with any forward-references filled from completed predecessors.
+
+        When a source agent was SKIPPED (intentionally disabled), the param is
+        set to ``''`` so the downstream service receives an explicit empty value
+        and can proceed with default behaviour, rather than raising
+        ``missing_param`` because the key was never set.
+        """
         params = json.loads(step['params'] or '{}')
         sources = PARAM_SOURCES.get(step['agent_id'], {})
         if not sources:
@@ -1099,6 +1292,10 @@ class PipelineService:
                 outputs = json.loads(source.get('outputs') or '{}')
                 if key in outputs:
                     params[param] = outputs[key]
+            elif source and source['status'] == 'SKIPPED':
+                # Source agent was intentionally skipped — provide an empty
+                # value so the downstream agent can proceed with defaults.
+                params.setdefault(param, '')
         return params
 
     def detail(self, pipeline_id):
