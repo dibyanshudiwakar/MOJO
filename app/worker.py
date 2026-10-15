@@ -34,6 +34,7 @@ from app.repository import now as _now
 from app.services.pipelines import PipelineService, StepLogger, PipelineContextAccumulator
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
+from app.services.platform_v7 import NotificationService
 from app.agents.skills import skill_for, SkillIntegrityError
 
 ACTIVITY = 'pipeline_step'
@@ -128,7 +129,48 @@ class WorkerLoop:
                 pass
             self.workflow.complete(item['id'], False, str(exc), worker_id=self.worker_id)
         self.pipelines.advance(pipeline_id, self.workflow)
+        # Emit user-facing notifications for key pipeline events.
+        self._emit_notifications(pipeline_id, step_id)
         return True
+
+    def _emit_notifications(self, pipeline_id, step_id):
+        """Emit notifications the bell icon picks up for gate holds, failures and completion."""
+        try:
+            notifier = NotificationService(self.repo)
+            pipeline = self.repo.one('select * from pipelines where id=?', (pipeline_id,))
+            if not pipeline:
+                return
+            step = self.repo.one('select * from pipeline_steps where id=?', (step_id,))
+            job_id = pipeline['job_id']
+            owner = pipeline['created_by']
+            ws = pipeline.get('workspace_dir') or ''
+            if step and step['status'] == 'WAITING_APPROVAL':
+                gate = ''
+                from app.services.pipelines import _gate_from_error
+                gate = _gate_from_error(step.get('error') or '')
+                agent_label = (step.get('agent_id') or '').replace('-', ' ').title()
+                notifier.emit(job_id, 'GATE_APPROVAL_REQUIRED', owner,
+                              '%s is waiting for %s approval' % (agent_label, gate or 'gate'),
+                              {'step_id': step_id, 'gate': gate, 'agent_id': step.get('agent_id')},
+                              link='pipelines/' + pipeline_id)
+            elif step and step['status'] == 'FAILED':
+                agent_label = (step.get('agent_id') or step.get('kind') or '').replace('-', ' ').title()
+                notifier.emit(job_id, 'STEP_FAILED', owner,
+                              '%s failed in %s' % (agent_label, ws),
+                              {'step_id': step_id, 'error': (step.get('error') or '')[:200]},
+                              link='pipelines/' + pipeline_id)
+            if pipeline['status'] == 'COMPLETED':
+                notifier.emit(job_id, 'PIPELINE_COMPLETED', owner,
+                              'Pipeline %s completed successfully' % ws,
+                              {'pipeline_id': pipeline_id},
+                              link='pipelines/' + pipeline_id)
+            elif pipeline['status'] == 'FAILED':
+                notifier.emit(job_id, 'PIPELINE_FAILED', owner,
+                              'Pipeline %s failed' % ws,
+                              {'pipeline_id': pipeline_id},
+                              link='pipelines/' + pipeline_id)
+        except Exception:
+            pass  # Notifications are best-effort; never crash the worker.
 
     def _gate_approved(self, job_id, gate):
         """Return True if there is at least one valid approval for *gate* at the current iteration."""

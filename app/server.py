@@ -340,6 +340,14 @@ class H(BaseHTTPRequestHandler):
         if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})
         if p=='/api/v2/skill-runtimes':return self.sendj(200,{'items':skill7.list_runtimes()})
         if p=='/api/v2/skill-agent-bindings':return self.sendj(200,{'items':skill7.list_bindings((q.get('skill_id') or [None])[0],(q.get('agent_id') or [None])[0])})
+        if p=='/api/v7/notifications/mine':
+            pr=self.principal();user=self.current_user(pr)
+            if not user: return self.stale_session()
+            return self.sendj(200,{'items':notify7.for_user(user['email']),'unread':notify7.unread_count(user['email'])})
+        if p=='/api/v7/notifications/unread-count':
+            pr=self.principal();user=self.current_user(pr)
+            if not user: return self.stale_session()
+            return self.sendj(200,{'count':notify7.unread_count(user['email'])})
         if p=='/api/v7/approval-inbox': return self.sendj(200,{'items':approvals7.inbox_for(self.principal())})
         if p=='/api/v7/gates': return self.sendj(200,{'items':approvals7.gates(),'source':'live_database','generated_at':now()})
         if p=='/api/v7/knowledge/search': return self.sendj(200,{'items':knowledge7.search((q.get('q') or [''])[0],(q.get('job_id') or [''])[0])})
@@ -493,6 +501,14 @@ class H(BaseHTTPRequestHandler):
             if p=='/api/v7/delivery/request':
                 self.require('DELIVERY_ENGINEER','RELEASE_MANAGER');return self.sendj(202,delivery7.request(d))
             if p=='/api/v7/notifications': self.require('NOTIFICATION_PUBLISHER','GOVERNANCE_ADMIN');return self.sendj(201,notify7.queue(d))
+            if p=='/api/v7/notifications/mark-read':
+                pr=self.principal();user=self.current_user(pr)
+                if not user: return self.stale_session()
+                return self.sendj(200,notify7.mark_read(d.get('id',''),user['email']))
+            if p=='/api/v7/notifications/mark-all-read':
+                pr=self.principal();user=self.current_user(pr)
+                if not user: return self.stale_session()
+                return self.sendj(200,notify7.mark_all_read(user['email']))
             if p=='/api/v7/observability': self.require('OBSERVABILITY_PUBLISHER','GOVERNANCE_ADMIN');return self.sendj(201,observe7.emit(d))
             if p=='/api/v3/workflow/schedule': return self.sendj(201,workflow.schedule(d['job_id'],d['activity'],d.get('payload'),d.get('max_attempts',3),d.get('idempotency_key')))
             if p=='/api/v3/workflow/claim': return self.sendj(200,workflow.claim(d.get('worker_id','local-worker'),d.get('lease_seconds',60),d.get('activity')) or {})

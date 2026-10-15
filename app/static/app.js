@@ -94,7 +94,7 @@ async function afterLogin(){
  try{githubState=await api('/api/v2/integrations/github/test',{method:'POST'});renderIdentity()}
  catch(e){if(e.reauth)return signOut('Your session is no longer valid. Sign in again.',true);return openGithub(githubErr(e))}
  if(githubState.status!=='CONNECTED')return openGithub(githubState.last_error||'GitHub connection could not be verified. Enter a valid token to continue.');
- render()}
+ render();notifStartPolling()}
 function githubErr(e){
  // The service encodes reason|status|detail so the operator sees what GitHub
  // actually said rather than a generic failure.
@@ -137,7 +137,7 @@ async function signOut(message,bad){
  // silently erased the credential and forced reconnecting on every sign-in,
  // defeating the entire point of storing it per account. Disconnecting is now
  // a deliberate action (the Disconnect button in the GitHub dialog).
- sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;renderIdentity();
+ sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;notifStopPolling();renderIdentity();
  const d=$('#githubDialog');if(d.open)d.close();authScreen('login',message||'Signed out.',!!bad)}
 const _I=n=>`<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">${n}</svg>`;
 const NAV_ICON={
@@ -1802,6 +1802,52 @@ $('#githubDisconnect').onclick=async()=>{
  }catch(x){
   if(x.reauth){$('#githubDialog').close();return signOut('Your session is no longer valid. Sign in again.',true)}
   $('#githubError').textContent=friendly(x.message)}};
+// ---- Notification bell: dropdown, badge, polling -----------------------------
+let notifPollTimer=null;
+function notifTimeAgo(iso){if(!iso)return '';const d=new Date(iso),s=Math.floor((Date.now()-d)/1000);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+async function notifRefresh(){
+ if(!token()||!session)return;
+ try{
+  const r=await api('/api/v7/notifications/unread-count');
+  const n=r.count||0;const dot=$('#notifDot'),cnt=$('#notifCount');
+  if(n>0){dot.hidden=false;cnt.hidden=false;cnt.textContent=n>99?'99+':n}
+  else{dot.hidden=true;cnt.hidden=true}
+ }catch(e){}}
+function notifRenderItems(items){
+ const list=$('#notifList');
+ if(!items||!items.length){list.innerHTML='<div class="notif-dd-empty">No notifications yet</div>';return}
+ list.innerHTML=items.slice(0,20).map(n=>{
+  const unread=!n.is_read;
+  const title=esc(n.title||n.event_type||'Notification');
+  const time=notifTimeAgo(n.created_at);
+  const type=esc((n.event_type||'').replace(/_/g,' '));
+  return `<div class="notif-dd-item${unread?' unread':''}" data-nid="${esc(n.id)}" data-link="${esc(n.link||'')}"><div class="notif-dd-item-dot"></div><div class="notif-dd-item-body"><div class="notif-dd-item-title">${title}</div><div class="notif-dd-item-meta"><span class="notif-dd-item-type">${type}</span><span>${time}</span></div></div></div>`}).join('')}
+async function notifOpen(){
+ const dd=$('#notifDropdown');
+ if(!dd.hidden){dd.hidden=true;return}
+ dd.hidden=false;
+ const list=$('#notifList');list.innerHTML='<div class="notif-dd-empty">Loading…</div>';
+ try{
+  const r=await api('/api/v7/notifications/mine');
+  notifRenderItems(r.items||[]);
+  const n=r.unread||0;const dot=$('#notifDot'),cnt=$('#notifCount');
+  if(n>0){dot.hidden=false;cnt.hidden=false;cnt.textContent=n>99?'99+':n}
+  else{dot.hidden=true;cnt.hidden=true}
+  // Click-to-read and navigate
+  list.querySelectorAll('.notif-dd-item').forEach(el=>{el.onclick=async()=>{
+   const nid=el.dataset.nid,link=el.dataset.link;
+   if(el.classList.contains('unread')){
+    try{await api('/api/v7/notifications/mark-read',{method:'POST',body:JSON.stringify({id:nid})})}catch(e){}
+    el.classList.remove('unread');notifRefresh()}
+   if(link){dd.hidden=true;location.hash=link}}})
+ }catch(e){list.innerHTML='<div class="notif-dd-empty">Could not load notifications</div>'}}
+$('#notifBell').onclick=e=>{e.stopPropagation();notifOpen()};
+$('#notifMarkAll').onclick=async e=>{e.stopPropagation();try{await api('/api/v7/notifications/mark-all-read',{method:'POST',body:'{}'});$('#notifDropdown').querySelectorAll('.unread').forEach(el=>el.classList.remove('unread'));notifRefresh();notice('All notifications marked as read')}catch(e){}};
+$('#notifViewAll').onclick=()=>{$('#notifDropdown').hidden=true;location.hash='notifications'};
+document.addEventListener('click',e=>{const dd=$('#notifDropdown');if(!dd.hidden&&!$('#notifWrap').contains(e.target))dd.hidden=true});
+function notifStartPolling(){clearInterval(notifPollTimer);notifRefresh();notifPollTimer=setInterval(notifRefresh,15000)}
+function notifStopPolling(){clearInterval(notifPollTimer)}
+
 window.addEventListener('hashchange',()=>{if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();if(session)render()});
 document.getElementById('themeToggle')?.addEventListener('click',()=>{
  const curr=document.documentElement.dataset.theme;

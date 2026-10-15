@@ -90,6 +90,7 @@ class Repository:
    self._upgrade_governance(c)
    self._upgrade_agent_llm_bindings(c)
    self._upgrade_skill_registry(c)
+   self._upgrade_notifications(c)
    self._seed_skill_runtimes(c)
  def _catalogue(self):
   p=Path(__file__).resolve().parents[1]/'config'/'agent-catalogue.v1.json'
@@ -177,6 +178,10 @@ class Repository:
    if col not in {r[1] for r in c.execute('pragma table_info(skills)').fetchall()}:c.execute(f'alter table skills add column {col} {typ}')
   for col,typ in {'updated_at':"text default ''",'created_by':"text default ''"}.items():
    if col not in {r[1] for r in c.execute('pragma table_info(skill_agent_bindings)').fetchall()}:c.execute(f'alter table skill_agent_bindings add column {col} {typ}')
+ def _upgrade_notifications(self,c):
+  existing={r[1] for r in c.execute('pragma table_info(notifications)').fetchall()}
+  for col,typ in {'is_read':"integer default 0",'title':"text default ''",'link':"text default ''"}.items():
+   if col not in existing:c.execute(f'alter table notifications add column {col} {typ}')
  def _seed_skill_runtimes(self,c):
   defaults=[
    {'name':'java-21-spring-boot','display_name':'Java Runtime','language':'java','language_version':'21','framework':'spring-boot','framework_version_range':'3.2.x','build_tool':'maven','base_image':'eclipse-temurin:21-jre-alpine','config':'{"jvm_flags":"-XX:+UseContainerSupport","framework_starter":"3.2.2","cvs_phases":["1","2"]}'},
