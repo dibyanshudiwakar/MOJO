@@ -20,16 +20,34 @@ SELF_SERVICE_ROLES = (
     'TEST_ENGINEER', 'RCA_ANALYST', 'REPOSITORY_INTAKE', 'DORMANCY_ANALYST',
     'DELIVERY_ENGINEER', 'MIGRATION_VIEWER',
 )
+# The six roles approval_policies names as the approver for G0-G5. They must be
+# grantable, or a pending package is invisible to everyone:
+# ApprovalWorkspaceService.inbox_for drops any package whose gate's
+# required_role the caller does not hold, so a gate with no possible approver
+# can never be actioned from the console. Five of these were previously in
+# neither list below, which made them unreachable through both registration and
+# grant_role -- only scripts/grant_tester_roles.py writing straight to the
+# database could set them.
+GATE_APPROVER_ROLES = (
+    'SERVICE_OWNER',    # G0
+    'JAVA_ARCHITECT',   # G1
+    'ACE_SME',          # G2
+    'PRODUCT_OWNER',    # G3
+    'QA_LEAD',          # G4
+    'RELEASE_MANAGER',  # G5
+)
 # Roles that decide whether governed work may proceed. Section 13's rule that an
 # approval is never self-asserted applies to the granting of approver roles too:
 # if registration could hand out SOLUTION_ARCHITECT, anyone could sign up and
 # approve their own gate. These are granted by an existing administrator.
-ELEVATED_ROLES = (
+# GATE_APPROVER_ROLES are folded in here, deliberately NOT into
+# SELF_SERVICE_ROLES, for exactly that reason.
+ELEVATED_ROLES = tuple(dict.fromkeys((
     'GOVERNANCE_ADMIN', 'AI_GOVERNANCE_ADMIN', 'SOLUTION_ARCHITECT', 'CHIEF_ARCHITECT',
     'AUDITOR', 'GATE_ADMIN', 'CONNECTOR_ADMIN', 'RELEASE_MANAGER', 'SERVICE_REGISTRAR',
     'KNOWLEDGE_CURATOR', 'NOTIFICATION_PUBLISHER', 'OBSERVABILITY_PUBLISHER',
     'CLARIFICATION_ADMIN', 'ORCHESTRATOR', 'AGENT_OPERATOR', 'AGENT_REGISTRY_ADMIN',
-)
+) + GATE_APPROVER_ROLES))
 # The first account bootstraps administration, otherwise a fresh deployment has
 # no one able to grant an elevated role to anyone.
 BOOTSTRAP_ROLES = ('GOVERNANCE_ADMIN', 'CONNECTOR_ADMIN', 'GATE_ADMIN', 'AUDITOR')
