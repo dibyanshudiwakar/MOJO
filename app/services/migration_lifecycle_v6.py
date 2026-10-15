@@ -49,18 +49,27 @@ class MappingAndPlanningService:
    if content_hash in bindings.values():return a
   return None
  def _inputs(self,job_id,framework_id,analysis_id,specification_id):
-  f=self.repo.one('select * from framework_baselines where id=? and job_id=?',(framework_id,job_id));a=self.repo.one('select * from ace_analyses where id=? and job_id=?',(analysis_id,job_id));s=self.repo.one("select * from migration_specs where id=? and job_id=? and validation_status='VALID'",(specification_id,job_id))
-  if not f or not a or not s:raise ValueError('approved_planning_inputs_missing')
-  if not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('g1_framework_approval_required')
+  """Resolve and gate-check the planning inputs.
+
+  Framework is optional: when ``framework_id`` is empty or resolves to no
+  row, planning proceeds without it and the G1 gate check is skipped.
+  Analysis and specification are always required.
+  """
+  f=self.repo.one('select * from framework_baselines where id=? and job_id=?',(framework_id,job_id)) if framework_id else None
+  a=self.repo.one('select * from ace_analyses where id=? and job_id=?',(analysis_id,job_id))
+  s=self.repo.one("select * from migration_specs where id=? and job_id=? and validation_status='VALID'",(specification_id,job_id))
+  if not a or not s:raise ValueError('approved_planning_inputs_missing')
+  if f and not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('g1_framework_approval_required')
   if not self._approved(job_id,'G2',a['content_hash']) or not self._approved(job_id,'G2',s['content_hash']):raise PermissionError('g2_analysis_and_yaml_approval_required')
   return f,a,s
  def create_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,version='1.0.0',overrides=None):
   f,a,s=self._inputs(job_id,framework_id,analysis_id,specification_id);model=json.loads(a['semantic_model']);approved=dict(DEFAULT_MAPPINGS);approved.update(overrides or {})
+  fw_hash=f['content_hash'] if f else ''
   mappings=[];unsupported=[];risks=[]
   def add(source,kind,name):
    key=mapping_key(name,approved)
    if key:
-    target=approved[key];mappings.append({'id':uid(),'source_reference':source,'ace_construct':name,'mapping_key':key,'spring_pattern':target['pattern'],'target_module':target['module'],'boundary':'GENERATED' if target['generated'] else 'HAND_WRITTEN_PROTECTED','tests':target['tests'],'framework_hash':f['content_hash'],'analysis_hash':a['content_hash'],'specification_hash':s['content_hash']})
+    target=approved[key];mappings.append({'id':uid(),'source_reference':source,'ace_construct':name,'mapping_key':key,'spring_pattern':target['pattern'],'target_module':target['module'],'boundary':'GENERATED' if target['generated'] else 'HAND_WRITTEN_PROTECTED','tests':target['tests'],'framework_hash':fw_hash,'analysis_hash':a['content_hash'],'specification_hash':s['content_hash']})
    else:
     item={'id':uid(),'source_reference':source,'ace_construct':name or 'UNKNOWN','reason':'NO_APPROVED_SPRING_PATTERN','status':'OPEN','owner':'ACE_SME_AND_JAVA_ARCHITECT'};unsupported.append(item);risks.append({'id':uid(),'category':'UNSUPPORTED_MAPPING','severity':'HIGH','source_reference':source,'statement':'No approved Spring mapping for '+str(name),'response':'Clarify or implement approved plug-in mapping','owner':'ACE_SME_AND_JAVA_ARCHITECT','status':'OPEN'})
   for flow in model.get('flows',[])+model.get('subflows',[]):
@@ -97,10 +106,14 @@ class MappingAndPlanningService:
   p=self.repo.one('select * from migration_plans where id=? and job_id=?',(plan_id,job_id))
   if not p:raise ValueError('plan_not_found')
   if not self._approved(job_id,'G3',p['content_hash']):raise PermissionError('g3_plan_approval_required')
-  a=self.repo.one('select * from ace_analyses where id=?',(p['analysis_id'],));f=self.repo.one('select * from framework_baselines where id=?',(p['framework_id'],));s=self.repo.one('select * from migration_specs where id=?',(p['specification_id'],))
-  if not a or not f or not s:raise ValueError('generation_inputs_missing')
-  framework={'standards':json.loads(f['standards']),'version':f['version'],'content_hash':f['content_hash']};model=json.loads(a['semantic_model']);result=self.generator.generate(output_root,service_name,package_name,model,plan_id,framework)
-  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'],'framework_hash':f['content_hash'],'files':result['manifest'],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2));return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+  a=self.repo.one('select * from ace_analyses where id=?',(p['analysis_id'],))
+  f=self.repo.one('select * from framework_baselines where id=?',(p['framework_id'],)) if p['framework_id'] else None
+  s=self.repo.one('select * from migration_specs where id=?',(p['specification_id'],))
+  if not a or not s:raise ValueError('generation_inputs_missing')
+  # Framework is optional: when absent, generate with default conventions.
+  framework={'standards':json.loads(f['standards']),'version':f['version'],'content_hash':f['content_hash']} if f else {'standards':{},'version':'0.0.0','content_hash':''}
+  model=json.loads(a['semantic_model']);result=self.generator.generate(output_root,service_name,package_name,model,plan_id,framework)
+  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2));return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True))}
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
   checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists()))

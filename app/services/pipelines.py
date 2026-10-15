@@ -70,6 +70,8 @@ SELECTABLE_AGENTS_EXCLUDED = {'migration-orchestrator'}
 # app/agents/*.py -- see ace_analysis.py (analysis_document), framework_baseline.py
 # (framework_template), migration_specification.py (migration_specification_yaml),
 # planning.py (plan).
+# framework_id is optional: when framework-baseline was skipped, the resolved
+# value stays '' and the downstream service proceeds with default conventions.
 PARAM_SOURCES = {
     'migration-specification': {'analysis_id': ('ace-analysis', 'analysis_document'),
                                  'framework_id': ('framework-baseline', 'framework_template')},
@@ -1252,7 +1254,13 @@ class PipelineService:
         return True
 
     def resolved_params(self, step):
-        """A step's params with any forward-references filled from completed predecessors."""
+        """A step's params with any forward-references filled from completed predecessors.
+
+        When a source agent was SKIPPED (intentionally disabled), the param is
+        set to ``''`` so the downstream service receives an explicit empty value
+        and can proceed with default behaviour, rather than raising
+        ``missing_param`` because the key was never set.
+        """
         params = json.loads(step['params'] or '{}')
         sources = PARAM_SOURCES.get(step['agent_id'], {})
         if not sources:
@@ -1265,6 +1273,10 @@ class PipelineService:
                 outputs = json.loads(source.get('outputs') or '{}')
                 if key in outputs:
                     params[param] = outputs[key]
+            elif source and source['status'] == 'SKIPPED':
+                # Source agent was intentionally skipped — provide an empty
+                # value so the downstream agent can proceed with defaults.
+                params.setdefault(param, '')
         return params
 
     def detail(self, pipeline_id):

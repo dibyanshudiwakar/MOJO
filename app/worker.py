@@ -44,12 +44,12 @@ ACTIVITY = 'pipeline_step'
 # here parks the step immediately as WAITING_APPROVAL without executing the
 # agent at all.
 #
-# Mapping: agent_id → list of gates whose approval is checked internally by
-# the agent's service.  Sourced from MappingAndPlanningService (G1/G2/G3)
-# and PlanningGenerationService (G1/G2).
+# G1 (framework) is NOT listed here because framework-baseline is optional.
+# When no framework was used, G1 is skipped entirely and planning/code-gen
+# proceed without it.  The G1 check in the services is conditional on
+# framework_id being present.
 AGENT_PREFLIGHT_GATES = {
-    'ace-analysis':            ['G1'],
-    'planning':                ['G1', 'G2'],
+    'planning':                ['G2'],
     'code-generation':         ['G3'],
 }
 

@@ -165,9 +165,13 @@ class PlanningGenerationService:
    if x['decision']=='APPROVE' and evidence_hash in json.loads(x.get('artifact_bindings') or '{}').values():return True
   return False
  def plan(self,job_id,analysis_id,framework_id,specification_id,version='1.0.0'):
-  a=self.repo.one('select * from ace_analyses where id=? and job_id=?',(analysis_id,job_id));f=self.repo.one('select * from framework_baselines where id=? and job_id=?',(framework_id,job_id));sp=self.repo.one("select * from migration_specs where id=? and job_id=? and validation_status='VALID'",(specification_id,job_id))
-  if not a or not f or not sp:raise ValueError('approved_inputs_missing')
-  if not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('framework_not_approved')
+  a=self.repo.one('select * from ace_analyses where id=? and job_id=?',(analysis_id,job_id))
+  f=self.repo.one('select * from framework_baselines where id=? and job_id=?',(framework_id,job_id)) if framework_id else None
+  sp=self.repo.one("select * from migration_specs where id=? and job_id=? and validation_status='VALID'",(specification_id,job_id))
+  if not a or not sp:raise ValueError('approved_inputs_missing')
+  # Framework is optional: when present, G1 approval is required; when absent,
+  # planning proceeds with default conventions and the G1 gate is skipped.
+  if f and not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('framework_not_approved')
   if not self._approved(job_id,'G2',a['content_hash']) or not self._approved(job_id,'G2',sp['content_hash']):raise PermissionError('analysis_or_specification_not_approved')
   model=json.loads(a['semantic_model']);tasks=[];maps=[]
   for n,x in enumerate(model['flows'],1):

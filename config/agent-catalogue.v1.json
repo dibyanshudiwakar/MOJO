@@ -204,8 +204,7 @@
         "clarification.create"
       ],
       "dependencies": [
-        "migration-specification",
-        "framework-baseline"
+        "migration-specification"
       ],
       "status": "APPROVED",
       "effective_from": "2026-09-09",
