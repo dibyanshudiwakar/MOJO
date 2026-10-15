@@ -1529,8 +1529,63 @@ function renderStepError(detail){
   <button class="err-tech-toggle" id="errTechToggle">${chevron} Technical details</button>
   <div class="err-tech-body">${esc(technical)}</div>
  </div>`}
-function renderOutputPane(outputs){
- if(!Object.keys(outputs).length)return'<p class="authhint">No output recorded for this step.</p>';
+function renderArtefact(art){
+ if(!art)return '';
+ const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+ let html=`<div class="artefact-title">${esc(art.title||'Agent Output')}</div>`;
+ // Markdown content (framework-baseline, ace-analysis)
+ if(art.markdown){
+  html+=`<div class="artefact-md"><pre class="artefact-pre">${esc(art.markdown)}</pre></div>`}
+ // YAML content (migration-specification)
+ if(art.yaml){
+  const vBadge=art.validation_status==='VALID'?'<span class="badge badge-success" style="margin-left:8px"><span class="badge-dot"></span>VALID</span>':'<span class="badge badge-error" style="margin-left:8px"><span class="badge-dot"></span>INVALID</span>';
+  html+=`<div class="artefact-yaml-header">Migration Specification ${vBadge}</div><div class="artefact-yaml"><pre class="artefact-pre">${esc(art.yaml)}</pre></div>`;
+  if(art.validation_errors&&art.validation_errors.length){html+=`<div class="artefact-errors"><div class="artefact-sub">Validation Errors</div><ul>${art.validation_errors.map(e=>`<li>${esc(e.path||'')} — ${esc(e.message||JSON.stringify(e))}</li>`).join('')}</ul></div>`}}
+ // Plan: task table, mappings table, risk register
+ if(art.format==='plan'){
+  if(art.tasks&&art.tasks.length){
+   html+=`<div class="artefact-sub">Implementation Tasks (${art.tasks.length})</div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Boundary</th><th>Tests</th></tr></thead><tbody>${art.tasks.map(t=>`<tr><td><code>${esc(t.id)}</code></td><td style="font-size:11px">${esc(t.source)}</td><td><code>${esc(t.pattern)}</code></td><td>${esc(t.module)}</td><td><span class="badge badge-${t.boundary==='GENERATED'?'info':'warning'}">${esc(t.boundary)}</span></td><td style="font-size:11px">${(t.tests||[]).map(x=>esc(x)).join(', ')}</td></tr>`).join('')}</tbody></table></div>`}
+  if(art.mappings&&art.mappings.length){
+   html+=`<details class="op-raw-section"><summary>${chev} Construct Mappings (${art.mappings.length})</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody>${art.mappings.map(m=>`<tr><td style="font-size:11px">${esc(m.source)}</td><td>${esc(m.construct)}</td><td><code>${esc(m.pattern)}</code></td><td>${esc(m.module)}</td></tr>`).join('')}</tbody></table></div></details>`}
+  if(art.risk_register&&art.risk_register.length){
+   html+=`<div class="artefact-sub">Risk Register (${art.risk_register.length})</div><div class="table-wrap"><table><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${art.risk_register.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td style="font-size:11px">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}}
+ // Code generation: file list with content
+ if(art.format==='code'&&art.files&&art.files.length){
+  html+=`<div class="artefact-sub">Generated Files (${art.files.length})</div>`;
+  art.files.forEach(f=>{html+=`<details class="op-raw-section"><summary>${chev} ${esc(f.path)}</summary><pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre></details>`});
+  if(art.quality){
+   const qs=art.quality.status;const qcls=qs==='PASS'?'success':qs==='FAIL'?'error':'warning';
+   html+=`<div class="artefact-sub">Quality Gate: <span class="badge badge-${qcls}">${esc(qs)}</span></div>`;
+   if(art.quality.checks){html+=`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${art.quality.checks.map(c=>`<tr><td>${esc(c.name)}</td><td><span class="badge badge-${c.status==='PASS'?'success':c.status==='FAIL'?'error':'neutral'}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div>`}}}
+ // Variances
+ if(art.format==='variances'&&art.items&&art.items.length){
+  html+=`<div class="table-wrap"><table><thead><tr><th>Path</th><th>Kind</th><th>Severity</th><th>Expected</th><th>Actual</th><th>Disposition</th></tr></thead><tbody>${art.items.map(v=>`<tr><td><code style="font-size:11px">${esc(v.path)}</code></td><td>${esc(v.kind)}</td><td><span class="badge badge-${v.severity==='HIGH'?'error':v.severity==='MEDIUM'?'warning':'success'}">${esc(v.severity)}</span></td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.expected)}</td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.actual)}</td><td>${esc(v.disposition)}</td></tr>`).join('')}</tbody></table></div>`}
+ // RCA
+ if(art.format==='rca'&&art.hypotheses&&art.hypotheses.length){
+  html+=art.hypotheses.map(h=>`<div class="artefact-rca-item"><div class="artefact-rca-hyp">${esc(h.hypothesis)}</div><div class="artefact-rca-meta">Confidence: <strong>${(h.confidence*100).toFixed(0)}%</strong> · Scope: ${esc(h.scope||'—')} · ${esc(h.status)}</div></div>`).join('')}
+ // Remediation
+ if(art.format==='remediation'&&art.proposals&&art.proposals.length){
+  html+=art.proposals.map(p=>`<div class="artefact-rem-item"><div class="artefact-sub">${esc(p.pattern||'Proposal')} <span class="badge badge-neutral">${esc(p.status)}</span></div><div style="font-size:12px;color:var(--text-2);margin:4px 0">${esc(typeof p.proposal==='string'?p.proposal:JSON.stringify(p.proposal))}</div>${p.tests&&p.tests.length?`<div style="font-size:11px;color:var(--text-3)">Regression tests: ${p.tests.map(t=>esc(t)).join(', ')}</div>`:''}</div>`).join('')}
+ // Governance
+ if(art.format==='governance'&&art.decision){
+  html+=`<div class="artefact-sub">Gate Decisions</div><div class="table-wrap"><table><thead><tr><th>Target State</th><th>Decision</th></tr></thead><tbody>${Object.entries(art.decision).map(([k,v])=>`<tr><td>${esc(k)}</td><td><span class="badge badge-${v==='ALLOW'?'success':'error'}">${esc(v)}</span></td></tr>`).join('')}</tbody></table></div>`}
+ // Knowledge
+ if(art.format==='knowledge'&&art.cited_context&&art.cited_context.length){
+  html+=`<div class="artefact-sub">Citations (${art.cited_context.length})</div><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Reference</th><th>Version</th><th>Score</th></tr></thead><tbody>${art.cited_context.map(c=>`<tr><td>${esc(c.kind)}</td><td style="font-size:11px">${esc(c.reference)}</td><td>${esc(c.version)}</td><td>${c.score}</td></tr>`).join('')}</tbody></table></div>`}
+ // Report-style sections (intake, dormancy)
+ if(art.sections){
+  art.sections.forEach(s=>{
+   html+=`<div class="artefact-sub">${esc(s.heading)}</div>`;
+   if(s.content)html+=`<div style="font-size:13px;color:var(--text);margin:4px 0 12px">${esc(s.content)}</div>`;
+   if(s.items&&s.items.length)html+=`<ul class="artefact-list">${s.items.map(i=>`<li>${esc(typeof i==='string'?i:JSON.stringify(i))}</li>`).join('')}</ul>`;
+   if(s.table)html+=`<div class="table-wrap"><table><thead><tr>${Object.keys(s.table[0]||{}).map(k=>`<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${s.table.map(r=>`<tr>${Object.values(r).map(v=>`<td>${esc(String(v))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+   if(s.json)html+=`<div class="op-json" style="margin:4px 0 12px">${syntaxHighlightJson(s.json)}</div>`})}
+ return html}
+function renderOutputPane(outputs,artefact){
+ const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+ // Formatted artefact content takes priority when available.
+ const artHtml=renderArtefact(artefact);
+ if(!Object.keys(outputs).length&&!artHtml)return'<p class="authhint">No output recorded for this step.</p>';
  const METRIC_KEYS={file_count:'Files',flow_count:'Flows',gap_count:'Gaps',findings_count:'Findings',lines_generated:'Lines Generated',test_count:'Test Cases',knowledge_items:'Knowledge Items',evidence_count:'Evidence Items',dormant_flows:'Dormant Flows',specification_count:'Specifications',plan_count:'Plans',class_count:'Classes',method_count:'Methods'};
  const metrics=Object.entries(METRIC_KEYS).filter(([k])=>typeof outputs[k]==='number').map(([k,label])=>({label,value:outputs[k]}));
  const metricsHtml=metrics.length?`<div class="op-metrics">${metrics.map(m=>`<div class="op-metric-card"><div class="op-metric-val">${m.value}</div><div class="op-metric-label">${esc(m.label)}</div></div>`).join('')}</div>`:'';
@@ -1544,8 +1599,7 @@ function renderOutputPane(outputs){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
- return`${metricsHtml}${findingsHtml}${msgHtml}<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`}
+ return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`}
 async function openStepOutput(pipelineId,stepId,step){
  let detail=step;
  try{detail=await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/output`)}catch(e){}
@@ -1594,7 +1648,7 @@ async function openStepOutput(pipelineId,stepId,step){
   </div>
   <div class="op-body">
    <div class="op-pane active" id="pane-output">
-    ${renderOutputPane(outputs)}
+    ${renderOutputPane(outputs,detail.artefact)}
    </div>
    <div class="op-pane" id="pane-logs">${logsHtml}</div>
    <div class="op-pane" id="pane-meta">

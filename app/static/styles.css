@@ -956,6 +956,22 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .op-findings-list{margin:0;padding:0 0 0 16px;font-size:12.5px;color:var(--text-2);line-height:1.75}
 .op-finding-note{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-bottom:16px}
 .op-output-message{font-size:13px;color:var(--text-2);line-height:1.6;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);margin-bottom:16px}
+/* ── Artefact rendering ───────────────────────────────────────────────────── */
+.artefact-title{font-size:14px;font-weight:700;color:var(--text);margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.artefact-sub{font-size:12px;font-weight:600;color:var(--text);margin:14px 0 6px;display:flex;align-items:center;gap:6px}
+.artefact-pre{font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.6;background:var(--bg-2);border:1px solid var(--border-2);border-radius:6px;padding:12px 14px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;color:var(--text-2)}
+.artefact-code{max-height:300px}
+.artefact-md{margin-bottom:12px}
+.artefact-yaml{margin-bottom:8px}
+.artefact-yaml-header{font-size:13px;font-weight:600;color:var(--text);margin:8px 0 6px;display:flex;align-items:center}
+.artefact-errors{margin:8px 0;padding:8px 12px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.2);border-radius:6px}
+.artefact-errors ul{margin:4px 0 0;padding-left:18px;font-size:12px;color:var(--error-text)}
+.artefact-list{margin:2px 0 10px;padding-left:18px;font-size:12px;color:var(--text-2);line-height:1.8}
+.artefact-rca-item{padding:10px 0;border-bottom:1px solid var(--border-2)}
+.artefact-rca-hyp{font-size:13px;color:var(--text);line-height:1.5}
+.artefact-rca-meta{font-size:11px;color:var(--text-3);margin-top:4px}
+.artefact-rem-item{padding:10px 0;border-bottom:1px solid var(--border-2)}
+
 .op-raw-section{margin-top:4px}
 .op-raw-section>summary{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--text-3);cursor:pointer;list-style:none;padding:6px 0;user-select:none;transition:color .12s}
 .op-raw-section>summary::-webkit-details-marker{display:none}
