@@ -90,13 +90,36 @@ def test_clone_never_puts_token_in_argv_or_url(env, monkeypatch):
     assert '@' not in [a for a in captured['cmd'] if a.startswith('https://')][0]
 
 
-def test_clone_rejects_nonempty_destination(env, monkeypatch, tmp_path):
+def test_clone_clears_unusable_destination_and_reclones(env, monkeypatch, tmp_path):
+    """Debris in the destination is cleared rather than failing the run.
+
+    This used to raise clone_destination_not_empty, which permanently blocked
+    every later run against the same workspace directory -- a partially cleared
+    workspace could only be recovered by deleting the folder by hand. The
+    destination is scratch space confined to the workspace root by
+    workspace.resolve, so it is cleared and cloned fresh.
+    """
     repo, github, svc, uid = env
     _configure_github(github, uid)
+    calls = []
+
+    def fake_run(cmd, cwd=None, env=None, **kwargs):
+        calls.append(cmd)
+        if 'remote' in cmd and 'get-url' in cmd:
+            return _FakeCompleted(1, stdout='')          # not a git repo at all
+        if 'rev-parse' in cmd:
+            return _FakeCompleted(0, stdout='newsha1\n')
+        return _FakeCompleted(0, stdout='ok')
+
+    monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
     dest = workspace.resolve('ace-repo', must_exist=False, create=True)
     (dest / 'existing.txt').write_text('already here')
-    with pytest.raises(RepoCloneError, match='clone_destination_not_empty'):
-        svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+
+    result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+
+    assert result['commit'] == 'newsha1'
+    assert not (dest / 'existing.txt').exists()          # debris removed
+    assert any('clone' in c for c in calls)              # and cloned fresh
 
 
 def test_clone_idempotent_when_same_url_already_cloned(env, monkeypatch):
@@ -134,14 +157,24 @@ def test_clone_idempotent_when_same_url_already_cloned(env, monkeypatch):
     assert not any('clone' in c for c in calls)
 
 
-def test_clone_rejects_nonempty_destination_with_different_remote(env, monkeypatch):
-    """Non-empty directory pointing at a DIFFERENT repo must still be rejected."""
+def test_clone_replaces_destination_pointing_at_a_different_remote(env, monkeypatch):
+    """A stale clone of a different repo is replaced, not treated as reusable.
+
+    Reusing it would hand the agents the wrong source tree, and refusing
+    outright meant re-pointing a pipeline at a different repository could never
+    run in a workspace that had already been used. Only an existing clone of
+    the *same* remote is reused (see the idempotency test above).
+    """
     repo, github, svc, uid = env
     _configure_github(github, uid)
+    calls = []
 
     def fake_run(cmd, cwd=None, env=None, **kwargs):
+        calls.append(cmd)
         if 'remote' in cmd and 'get-url' in cmd:
             return _FakeCompleted(0, stdout='https://github.com/org/OTHER-repo.git\n')
+        if 'rev-parse' in cmd:
+            return _FakeCompleted(0, stdout='freshsha\n')
         return _FakeCompleted(0, stdout='ok')
 
     monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
@@ -149,8 +182,11 @@ def test_clone_rejects_nonempty_destination_with_different_remote(env, monkeypat
     dest = workspace.resolve('ace-repo', must_exist=False, create=True)
     (dest / 'existing.txt').write_text('already here')
 
-    with pytest.raises(RepoCloneError, match='clone_destination_not_empty'):
-        svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+    result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
+
+    assert result['commit'] == 'freshsha'
+    assert not (dest / 'existing.txt').exists()
+    assert any('clone' in c for c in calls)
 
 
 def test_clone_surfaces_git_failure_detail(env, monkeypatch):

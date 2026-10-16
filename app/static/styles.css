@@ -634,6 +634,7 @@ code{background:var(--border-2);padding:2px 5px;border-radius:4px;font-size:11px
 .gate-form label{font-size:12px}
 .gate-form input,.gate-form select{width:100%;margin-top:5px}
 .gate-form .wide{grid-column:1/-1}
+.gate-form .gate-save{margin-top:14px}
 .gate-form button{background:var(--primary);color:white;border:0;margin-top:12px}
 .gate-meta{font-size:11px;color:var(--text-2);margin-top:10px}
 @media(max-width:700px){.gate-grid{grid-template-columns:1fr}}

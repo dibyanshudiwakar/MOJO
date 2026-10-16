@@ -50,6 +50,28 @@ def _host(url):
     return (urlparse(url).hostname or '').lower()
 
 
+def _force_rmtree(path):
+    """Remove a tree even when git has left read-only files behind.
+
+    Git marks everything under ``.git/objects`` read-only. On Windows
+    ``os.unlink`` then raises PermissionError, and ``shutil.rmtree`` with
+    ``ignore_errors=True`` silently skips those entries -- which is how a
+    "cleared" workspace ends up as a shell of empty ``ace``/``framework``
+    directories rather than actually being gone. Clearing the read-only bit and
+    retrying removes them properly.
+    """
+    def _retry(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+    try:
+        shutil.rmtree(path, onexc=_retry)          # Python 3.12+
+    except TypeError:                              # older signature
+        shutil.rmtree(path, onerror=_retry)
+
+
 class _Askpass:
     """A short-lived helper git can invoke instead of prompting interactively.
 
@@ -166,7 +188,15 @@ class RepoCloneService:
                         'branch': ref,
                         'commit': commit.stdout.strip() if commit.returncode == 0 else '',
                     }
-            raise RepoCloneError('clone_destination_not_empty')
+            # Leftover content that is not a usable clone of this repository:
+            # a partially cleared workspace, or a clone of a different repo.
+            # Failing here permanently blocked every later run against the same
+            # workspace directory, so the scratch copy is cleared and cloned
+            # fresh instead. ``workspace.resolve`` above has already confined
+            # ``target`` to the workspace root, so this cannot reach outside it.
+            sys.stderr.write('clone destination not reusable, clearing and re-cloning: %s\n' % target)
+            sys.stderr.flush()
+            _force_rmtree(str(target))
         target.parent.mkdir(parents=True, exist_ok=True)
         token = self._credential(user_id, url)
         with _Askpass(token) as env:

@@ -15,10 +15,27 @@ from app.repository import uid, now
 
 # Roles a person may choose for themselves at registration. These grant the
 # ability to *do* migration work.
+#
+# Every required_role in config/agent-catalogue.v1.json for an agent the
+# pipeline wizard can select must appear here, or picking that agent produces
+# required_agent_role_missing at dispatch for an account that ticked every box
+# on the signup form. MIGRATION_PLANNER, VARIANCE_ANALYST,
+# REMEDIATION_ENGINEER and GOVERNANCE_ENGINE were in neither this list nor
+# ELEVATED_ROLES, so planning, variance-analysis, remediation and governance
+# were unrunnable by any account the console could create; KNOWLEDGE_CURATOR
+# was elevated-only for the same reason. None of the five grants approval
+# authority -- they only execute agents -- so self-service is correct for them.
+#
+# ORCHESTRATOR stays in ELEVATED_ROLES deliberately: it also authorises
+# POST /api/v2/jobs/<id>/transition, i.e. driving the lifecycle by hand, and
+# migration-orchestrator is excluded from wizard selection by
+# SELECTABLE_AGENTS_EXCLUDED, so no pipeline needs it.
 SELF_SERVICE_ROLES = (
     'ACE_ANALYST', 'FRAMEWORK_ANALYST', 'SPECIFICATION_AUTHOR', 'CODE_GENERATOR',
     'TEST_ENGINEER', 'RCA_ANALYST', 'REPOSITORY_INTAKE', 'DORMANCY_ANALYST',
     'DELIVERY_ENGINEER', 'MIGRATION_VIEWER',
+    'MIGRATION_PLANNER', 'VARIANCE_ANALYST', 'REMEDIATION_ENGINEER',
+    'GOVERNANCE_ENGINE', 'KNOWLEDGE_CURATOR',
 )
 # The six roles approval_policies names as the approver for G0-G5. They must be
 # grantable, or a pending package is invisible to everyone:
@@ -42,12 +59,16 @@ GATE_APPROVER_ROLES = (
 # approve their own gate. These are granted by an existing administrator.
 # GATE_APPROVER_ROLES are folded in here, deliberately NOT into
 # SELF_SERVICE_ROLES, for exactly that reason.
-ELEVATED_ROLES = tuple(dict.fromkeys((
+# Anything already self-service is filtered out, so the two lists cannot
+# disagree. _validate tests ELEVATED_ROLES first and refuses those outright, so
+# a role appearing in both would be elevated-only and the self-service entry
+# would silently do nothing.
+ELEVATED_ROLES = tuple(r for r in dict.fromkeys((
     'GOVERNANCE_ADMIN', 'AI_GOVERNANCE_ADMIN', 'SOLUTION_ARCHITECT', 'CHIEF_ARCHITECT',
     'AUDITOR', 'GATE_ADMIN', 'CONNECTOR_ADMIN', 'RELEASE_MANAGER', 'SERVICE_REGISTRAR',
     'KNOWLEDGE_CURATOR', 'NOTIFICATION_PUBLISHER', 'OBSERVABILITY_PUBLISHER',
     'CLARIFICATION_ADMIN', 'ORCHESTRATOR', 'AGENT_OPERATOR', 'AGENT_REGISTRY_ADMIN',
-) + GATE_APPROVER_ROLES))
+) + GATE_APPROVER_ROLES) if r not in SELF_SERVICE_ROLES)
 # The first account bootstraps administration, otherwise a fresh deployment has
 # no one able to grant an elevated role to anyone.
 BOOTSTRAP_ROLES = ('GOVERNANCE_ADMIN', 'CONNECTOR_ADMIN', 'GATE_ADMIN', 'AUDITOR')
