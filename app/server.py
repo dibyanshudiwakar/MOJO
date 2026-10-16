@@ -18,7 +18,7 @@ from app.services.pipelines import PipelineService, PipelineError
 from app.services.agent_admin import AgentAdminService, AgentAdminError
 from app.services.agent_llm_bindings import AgentLLMBindingService, AgentLLMBindingError
 from app.services.agent_templates import AgentTemplateService
-from app.services import workspace
+from app.services import static_check_reports, workspace
 from app.services.priority1 import PriorityOneService
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 from app.services.platform_v7 import RegistryService,AIRegistryService,KnowledgeService,ApprovalWorkspaceService,DeliveryAutomationService,NotificationService,ObservabilityService,SkillRegistryService
@@ -283,7 +283,7 @@ class H(BaseHTTPRequestHandler):
     server_version='ACEMigrationFactory'
     sys_version=''
     def end_headers(self):
-        for k,v in {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:",'Permissions-Policy':'camera=(), microphone=(), geolocation=()','Cache-Control':'no-store'}.items(): self.send_header(k,v)
+        for k,v in {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':getattr(self,'csp_override',None) or "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:",'Permissions-Policy':'camera=(), microphone=(), geolocation=()','Cache-Control':'no-store'}.items(): self.send_header(k,v)
         super().end_headers()
     def disconnected(self,e):
         """A client that went away is not a server fault.
@@ -494,6 +494,18 @@ class H(BaseHTTPRequestHandler):
             detail=pipelines.detail(m.group(1))
             self.authorize_job(self.principal(),detail['job_id'])
             return self.sendj(200,detail)
+        # The HTML form of a stored parity / hardcoding report, rendered from its JSON on request.
+        m=re.fullmatch(r'/api/v2/reports/([^/]+)/html',p)
+        if m:
+            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS')",(m.group(1),))
+            if not row: return self.sendj(404,{'error':'report_not_found'})
+            self.authorize_job(self.principal(),row['job_id'])
+            stored=json.loads(row['payload'] or '{}')
+            page=static_check_reports.render_html(stored.get('report'),static_check_reports.meta_from_stored(stored,row))
+            # This page has its own inline stylesheet and no script; give it exactly that policy, for this response only.
+            self.csp_override=static_check_reports.CONTENT_SECURITY_POLICY
+            try: return self.respond(200,'text/html; charset=utf-8',page.encode('utf-8'))
+            finally: self.csp_override=None
         m=re.fullmatch(r'/api/v2/pipelines/([^/]+)/steps/([^/]+)/output',p)
         if m:
             detail=pipelines.detail(m.group(1))
