@@ -10,172 +10,417 @@
       "additionalProperties": true,
       "properties": {
         "flows": {
-          "type": "array", "maxItems": 64,
+          "type": "array",
+          "maxItems": 64,
           "items": {
             "type": "object",
-            "required": ["path", "nodes"],
+            "required": [
+              "path",
+              "nodes"
+            ],
             "properties": {
-              "path": {"type": "string", "minLength": 1},
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
               "nodes": {
-                "type": "array", "maxItems": 512,
+                "type": "array",
+                "maxItems": 512,
                 "items": {
                   "type": "object",
-                  "required": ["id", "type"],
+                  "required": [
+                    "id",
+                    "type"
+                  ],
                   "properties": {
-                    "id": {"type": "string", "minLength": 1},
-                    "type": {"type": "string", "minLength": 1},
-                    "properties": {"type": "object"}
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "type": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "properties": {
+                      "type": "object"
+                    }
                   }
                 }
               },
               "connections": {
-                "type": "array", "maxItems": 1024,
+                "type": "array",
+                "maxItems": 1024,
                 "items": {
                   "type": "object",
-                  "properties": {"from": {"type": "string"}, "to": {"type": "string"}}
-                }
-              }
-            }
-          }
-        },
-        "subflows": {"type": "array", "maxItems": 64},
-        "esql": {
-          "type": "array", "maxItems": 64,
-          "items": {
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-              "path": {"type": "string", "minLength": 1},
-              "modules": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-              "procedures": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-              "functions": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-              "databases": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-              "calls": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-              "assignments": {
-                "type": "array", "maxItems": 1024,
-                "description": "The SET statements, resolved. This is what the generated transformer bodies are built from, so target/source are paths into the message tree, not free text.",
-                "items": {
-                  "type": "object",
-                  "required": ["target", "kind"],
                   "properties": {
-                    "target": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-                    "source": {"type": ["array", "null"], "items": {"type": "string"}},
-                    "literal": {"type": ["string", "null"]},
-                    "kind": {"enum": ["COPY", "LITERAL", "EXPRESSION", "UNRESOLVED"]},
-                    "esql": {"type": "string"},
-                    "java": {"type": ["string", "null"], "maxLength": 2000}
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    }
                   }
                 }
               }
             }
           }
         },
-        "maps": {"type": "array", "maxItems": 64},
-        "schemas": {"type": "array", "maxItems": 128},
-        "policies": {"type": "array", "maxItems": 64},
+        "subflows": {
+          "type": "array",
+          "maxItems": 64
+        },
+        "esql": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modules": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256
+              },
+              "procedures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256
+              },
+              "functions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256
+              },
+              "databases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256
+              },
+              "calls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 512
+              },
+              "assignments": {
+                "type": "array",
+                "maxItems": 1024,
+                "description": "The SET statements, resolved. This is what the generated transformer bodies are built from, so target/source are paths into the message tree, not free text.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "target",
+                    "kind"
+                  ],
+                  "properties": {
+                    "target": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "source": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "literal": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "COPY",
+                        "LITERAL",
+                        "EXPRESSION",
+                        "UNRESOLVED"
+                      ]
+                    },
+                    "esql": {
+                      "type": "string"
+                    },
+                    "java": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 2000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "maps": {
+          "type": "array",
+          "maxItems": 64
+        },
+        "schemas": {
+          "type": "array",
+          "maxItems": 128
+        },
+        "policies": {
+          "type": "array",
+          "maxItems": 64
+        },
         "interfaces": {
-          "type": "array", "maxItems": 256,
+          "type": "array",
+          "maxItems": 256,
           "items": {
             "type": "object",
-            "required": ["protocol"],
+            "required": [
+              "protocol"
+            ],
             "properties": {
-              "source": {"type": "string"},
-              "node": {"type": "string"},
-              "protocol": {"enum": ["HTTP", "SOAP", "MQ", "KAFKA", "FILE", "DATABASE", "SCHEDULED", "UNKNOWN"]},
-              "endpoint": {"type": "string"}
+              "source": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "protocol": {
+                "enum": [
+                  "HTTP",
+                  "SOAP",
+                  "MQ",
+                  "KAFKA",
+                  "FILE",
+                  "DATABASE",
+                  "SCHEDULED",
+                  "UNKNOWN"
+                ]
+              },
+              "endpoint": {
+                "type": "string"
+              }
             }
           }
         },
-        "dependencies": {"type": "array", "maxItems": 512},
-        "behaviour": {"type": "object"},
+        "dependencies": {
+          "type": "array",
+          "maxItems": 512
+        },
+        "behaviour": {
+          "type": "object"
+        },
         "ambiguities": {
-          "type": "array", "maxItems": 128,
+          "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
-            "required": ["question"],
+            "required": [
+              "question"
+            ],
             "properties": {
-              "question": {"type": "string", "minLength": 1},
-              "owner": {"type": "string"},
-              "impact": {"type": "string"},
-              "evidenceReference": {"type": "string"},
-              "status": {"type": "string"}
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner": {
+                "type": "string"
+              },
+              "impact": {
+                "type": "string"
+              },
+              "evidenceReference": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
             }
           }
         },
-        "backend_type": {"type": "string"},
-        "backend_properties": {"type": "object"}
+        "backend_type": {
+          "type": "string"
+        },
+        "backend_properties": {
+          "type": "object"
+        }
       }
     },
-
     "agent/ace-analysis/ambiguity-triage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["ambiguities"],
+      "required": [
+        "ambiguities"
+      ],
       "properties": {
         "ambiguities": {
-          "type": "array", "maxItems": 128,
+          "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
-            "required": ["question", "owner", "impact"],
+            "required": [
+              "question",
+              "owner",
+              "impact"
+            ],
             "properties": {
-              "question": {"type": "string", "minLength": 1},
-              "owner": {"type": "string", "minLength": 1},
-              "impact": {"type": "string", "minLength": 1},
-              "evidenceReference": {"type": "string"}
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner": {
+                "type": "string",
+                "minLength": 1
+              },
+              "impact": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidenceReference": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "agent/repository-intake/inventory": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Repository inventory and intake gaps",
       "type": "object",
-      "required": ["inventory"],
+      "required": [
+        "inventory"
+      ],
       "properties": {
         "inventory": {
           "type": "object",
           "properties": {
-            "files": {"type": "array", "items": {"type": "string"}, "maxItems": 4096},
-            "flows": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "subflows": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "esql": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "schemas": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "maps": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "policies": {"type": "array", "items": {"type": "string"}, "maxItems": 512}
-          }
-        },
-        "gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 128}
-      }
-    },
-
-    "agent/repository-intake/gap-triage": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "required": ["ranked_gaps"],
-      "properties": {
-        "ranked_gaps": {
-          "type": "array", "maxItems": 128,
-          "items": {
-            "type": "object",
-            "required": ["gap"],
-            "properties": {
-              "gap": {"type": "string", "minLength": 1},
-              "severity": {"enum": ["BLOCKING", "MAJOR", "MINOR", "UNKNOWN"]},
-              "closes_with": {"type": "string"}
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4096
+            },
+            "flows": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "subflows": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "esql": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "schemas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "maps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "policies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
             }
           }
         },
-        "notes": {"type": ["string", "array", "null"]}
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128
+        }
       }
     },
-
+    "agent/repository-intake/gap-triage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "ranked_gaps"
+      ],
+      "properties": {
+        "ranked_gaps": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "required": [
+              "gap"
+            ],
+            "properties": {
+              "gap": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "enum": [
+                  "BLOCKING",
+                  "MAJOR",
+                  "MINOR",
+                  "UNKNOWN"
+                ]
+              },
+              "closes_with": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": [
+            "string",
+            "array",
+            "null"
+          ]
+        }
+      }
+    },
     "agent/framework-baseline/standards": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Target framework standards extracted from the reference project",
       "type": "object",
-      "required": ["standards"],
+      "required": [
+        "standards"
+      ],
       "properties": {
         "standards": {
           "type": "object",
@@ -183,502 +428,1104 @@
             "build": {
               "type": "object",
               "properties": {
-                "tool": {"enum": ["MAVEN", "GRADLE", "UNKNOWN"]},
-                "javaVersion": {"type": ["string", "number", "null"]},
-                "springBootVersion": {"type": ["string", "null"]}
+                "tool": {
+                  "enum": [
+                    "MAVEN",
+                    "GRADLE",
+                    "UNKNOWN"
+                  ]
+                },
+                "javaVersion": {
+                  "type": [
+                    "string",
+                    "number",
+                    "null"
+                  ]
+                },
+                "springBootVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             },
-            "dependencies": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-            "projectStructure": {"type": "array", "items": {"type": "string"}, "maxItems": 2048},
-            "api": {"type": "array", "maxItems": 256},
-            "messaging": {"type": "array", "maxItems": 256},
-            "security": {"type": "array", "maxItems": 256},
-            "configuration": {"type": "array", "maxItems": 256},
-            "logging": {"type": "array", "maxItems": 256},
-            "errorHandling": {"type": "array", "maxItems": 256},
-            "observability": {"type": "array", "maxItems": 256}
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 512
+            },
+            "projectStructure": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 2048
+            },
+            "api": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "messaging": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "security": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "configuration": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "logging": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "errorHandling": {
+              "type": "array",
+              "maxItems": 256
+            },
+            "observability": {
+              "type": "array",
+              "maxItems": 256
+            }
           }
         },
-        "conflicts": {"type": "array", "items": {"type": "string"}, "maxItems": 128}
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128
+        }
       }
     },
-
     "agent/framework-baseline/convention-conflict-triage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["conflicts"],
+      "required": [
+        "conflicts"
+      ],
       "properties": {
         "conflicts": {
-          "type": "array", "maxItems": 128,
+          "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
-            "required": ["conflict"],
+            "required": [
+              "conflict"
+            ],
             "properties": {
-              "conflict": {"type": "string", "minLength": 1},
-              "decision_required": {"type": "string"},
-              "owner": {"type": "string"}
+              "conflict": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decision_required": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "agent/migration-specification/authoring": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "The migration specification",
       "description": "Validated a second time against schemas/migration-specification.schema.json by SpecificationService before it is stored, so this schema only has to catch a shape the authoring step cannot use at all.",
       "type": "object",
       "properties": {
-        "specification": {"type": "object"},
-        "springModules": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-        "approvedDependencies": {"type": "array", "items": {"type": "string"}, "maxItems": 512},
-        "notes": {"type": "array", "items": {"type": "string"}, "maxItems": 128}
+        "specification": {
+          "type": "object"
+        },
+        "springModules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256
+        },
+        "approvedDependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 512
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128
+        }
       },
       "anyOf": [
-        {"required": ["specification"]},
-        {"required": ["springModules"]}
+        {
+          "required": [
+            "specification"
+          ]
+        },
+        {
+          "required": [
+            "springModules"
+          ]
+        }
       ]
     },
-
     "agent/planning/mapping-catalogue": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ACE construct to Spring pattern mappings",
       "description": "Replaces the hardcoded DEFAULT_MAPPINGS dict. spring_pattern is open rather than enumerated on purpose -- the point of moving this to the model is that a construct with no entry in that dict can still be mapped -- but boundary stays closed because generation and the G3 package both branch on it.",
       "type": "object",
-      "required": ["mappings"],
+      "required": [
+        "mappings"
+      ],
       "properties": {
         "mappings": {
-          "type": "array", "maxItems": 2048,
+          "type": "array",
+          "maxItems": 2048,
           "items": {
             "type": "object",
-            "required": ["source_reference", "ace_construct", "spring_pattern", "target_module"],
+            "required": [
+              "source_reference",
+              "ace_construct",
+              "spring_pattern",
+              "target_module"
+            ],
             "properties": {
-              "source_reference": {"type": "string", "minLength": 1},
-              "ace_construct": {"type": "string", "minLength": 1},
-              "mapping_key": {"type": "string"},
-              "spring_pattern": {"type": "string", "minLength": 1},
-              "target_module": {"type": "string", "minLength": 1},
-              "boundary": {"enum": ["GENERATED", "HAND_WRITTEN_PROTECTED"]},
-              "tests": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
-              "rationale": {"type": "string", "maxLength": 1000}
+              "source_reference": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ace_construct": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mapping_key": {
+                "type": "string"
+              },
+              "spring_pattern": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target_module": {
+                "type": "string",
+                "minLength": 1
+              },
+              "boundary": {
+                "enum": [
+                  "GENERATED",
+                  "HAND_WRITTEN_PROTECTED"
+                ]
+              },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32
+              },
+              "rationale": {
+                "type": "string",
+                "maxLength": 1000
+              }
             }
           }
         },
         "unsupported": {
-          "type": "array", "maxItems": 512,
+          "type": "array",
+          "maxItems": 512,
           "items": {
             "type": "object",
-            "required": ["source_reference", "ace_construct", "reason"],
+            "required": [
+              "source_reference",
+              "ace_construct",
+              "reason"
+            ],
             "properties": {
-              "source_reference": {"type": "string"},
-              "ace_construct": {"type": "string"},
-              "reason": {"type": "string"},
-              "owner": {"type": "string"}
+              "source_reference": {
+                "type": "string"
+              },
+              "ace_construct": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
             }
           }
         },
         "risks": {
-          "type": "array", "maxItems": 512,
+          "type": "array",
+          "maxItems": 512,
           "items": {
             "type": "object",
-            "required": ["category", "severity", "statement"],
+            "required": [
+              "category",
+              "severity",
+              "statement"
+            ],
             "properties": {
-              "category": {"type": "string"},
-              "severity": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-              "source_reference": {"type": "string"},
-              "statement": {"type": "string", "minLength": 1},
-              "response": {"type": "string"},
-              "owner": {"type": "string"}
+              "category": {
+                "type": "string"
+              },
+              "severity": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              "source_reference": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "response": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "agent/planning/implementation-plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Ordered implementation tasks",
       "type": "object",
-      "required": ["tasks"],
+      "required": [
+        "tasks"
+      ],
       "properties": {
         "tasks": {
-          "type": "array", "maxItems": 2048,
+          "type": "array",
+          "maxItems": 2048,
           "items": {
             "type": "object",
-            "required": ["id", "source_reference", "spring_pattern"],
+            "required": [
+              "id",
+              "source_reference",
+              "spring_pattern"
+            ],
             "properties": {
-              "id": {"type": "string", "minLength": 1},
-              "sequence": {"type": "integer", "minimum": 1},
-              "source_reference": {"type": "string"},
-              "mapping_id": {"type": "string"},
-              "spring_pattern": {"type": "string"},
-              "target_module": {"type": "string"},
-              "boundary": {"enum": ["GENERATED", "HAND_WRITTEN_PROTECTED"]},
-              "depends_on": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-              "tests": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
-              "acceptance": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
-              "security_checks": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
-              "rollback_checkpoint": {"type": "string"}
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_reference": {
+                "type": "string"
+              },
+              "mapping_id": {
+                "type": "string"
+              },
+              "spring_pattern": {
+                "type": "string"
+              },
+              "target_module": {
+                "type": "string"
+              },
+              "boundary": {
+                "enum": [
+                  "GENERATED",
+                  "HAND_WRITTEN_PROTECTED"
+                ]
+              },
+              "depends_on": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32
+              },
+              "acceptance": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32
+              },
+              "security_checks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32
+              },
+              "rollback_checkpoint": {
+                "type": "string"
+              }
             }
           }
         },
-        "acceptance": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/planning/risk-assessment": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["risks"],
+      "required": [
+        "risks"
+      ],
       "properties": {
         "risks": {
-          "type": "array", "maxItems": 256,
+          "type": "array",
+          "maxItems": 256,
           "items": {
             "type": "object",
-            "required": ["statement"],
+            "required": [
+              "statement"
+            ],
             "properties": {
-              "statement": {"type": "string", "minLength": 1},
-              "severity": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-              "response": {"type": "string"},
-              "owner": {"type": "string"}
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              "response": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "agent/code-generation/business-logic-synthesis": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Targeted edits filling generated placeholder bodies",
       "description": "Edits, not whole files, and deliberately so: the model never has to reproduce bytes it was not shown, and an old_str that does not match the real file is skipped rather than corrupting it. This is the ESQL-to-Java step -- it replaces the TODO bodies the deterministic generator leaves behind.",
       "type": "object",
-      "required": ["edits"],
+      "required": [
+        "edits"
+      ],
       "properties": {
         "edits": {
-          "type": "array", "maxItems": 40,
+          "type": "array",
+          "maxItems": 40,
           "items": {
             "type": "object",
-            "required": ["path", "old_str", "new_str"],
+            "required": [
+              "path",
+              "old_str",
+              "new_str"
+            ],
             "properties": {
               "path": {
-                "type": "string", "minLength": 1, "maxLength": 400,
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 400,
                 "description": "Project-relative. Confined by workspace.resolve() before any write -- the model cannot direct a write outside the project.",
                 "pattern": "^[^/\\\\][^:*?\"<>|]*$"
               },
-              "old_str": {"type": "string", "minLength": 1},
-              "new_str": {"type": "string", "maxLength": 20000},
-              "why": {"type": "string", "maxLength": 1000}
+              "old_str": {
+                "type": "string",
+                "minLength": 1
+              },
+              "new_str": {
+                "type": "string",
+                "maxLength": 20000
+              },
+              "why": {
+                "type": "string",
+                "maxLength": 1000
+              }
             }
           }
         }
       }
     },
-
     "agent/code-generation/file-synthesis": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "A whole generated source file",
       "description": "One file per call, for the files the model authors outright rather than filling in. 'content' is written to disk, hashed into the provenance manifest and then compiled, so a partial or fenced response is a schema failure rather than something to repair later.",
       "type": "object",
-      "required": ["path", "content"],
+      "required": [
+        "path",
+        "content"
+      ],
       "properties": {
         "path": {
-          "type": "string", "minLength": 1, "maxLength": 400,
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
           "description": "Project-relative, forward slashes. Confined by workspace.resolve() before any write.",
           "pattern": "^[^/\\\\][^:*?\"<>|]*$"
         },
-        "content": {"type": "string", "maxLength": 200000},
-        "language": {"type": "string"},
+        "content": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "language": {
+          "type": "string"
+        },
         "provenance": {
           "type": "object",
           "description": "Which ACE construct this file implements, so the manifest stays traceable to the approved plan.",
           "properties": {
-            "source_reference": {"type": "string"},
-            "esql_module": {"type": "string"},
-            "spring_pattern": {"type": "string"}
+            "source_reference": {
+              "type": "string"
+            },
+            "esql_module": {
+              "type": "string"
+            },
+            "spring_pattern": {
+              "type": "string"
+            }
           }
         },
-        "action_items": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "action_items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/code-generation/quality-failure-triage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "failures": {
-          "type": "array", "maxItems": 64,
+          "type": "array",
+          "maxItems": 64,
           "items": {
             "type": "object",
             "properties": {
-              "check": {"type": "string"},
-              "cause": {"type": "string"},
-              "remedy": {"type": "string"}
+              "check": {
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "remedy": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "agent/test-engineering/case-design": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Differential test cases",
       "type": "object",
-      "required": ["cases"],
+      "required": [
+        "cases"
+      ],
       "properties": {
         "cases": {
-          "type": "array", "maxItems": 512,
+          "type": "array",
+          "maxItems": 512,
           "items": {
             "type": "object",
-            "required": ["id"],
+            "required": [
+              "id"
+            ],
             "properties": {
-              "id": {"type": "string", "minLength": 1},
-              "description": {"type": "string"},
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
               "input": {},
-              "headers": {"type": "object"},
-              "timing": {"type": "object"},
-              "side_effect_observations": {"type": "array", "maxItems": 64},
-              "secure_references": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-              "covers": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+              "headers": {
+                "type": "object"
+              },
+              "timing": {
+                "type": "object"
+              },
+              "side_effect_observations": {
+                "type": "array",
+                "maxItems": 64
+              },
+              "secure_references": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              },
+              "covers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              }
             }
           }
         },
-        "policy": {"type": "object"}
+        "policy": {
+          "type": "object"
+        }
       }
     },
-
     "agent/test-engineering/case-coverage-review": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "uncovered": {"type": "array", "items": {"type": "string"}, "maxItems": 256},
-        "cases": {"type": "array", "maxItems": 512}
+        "uncovered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256
+        },
+        "cases": {
+          "type": "array",
+          "maxItems": 512
+        }
       }
     },
-
     "agent/variance-analysis/findings": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Behavioural variances and their materiality",
       "description": "The byte-level comparison stays deterministic -- it is the evidence. The model judges materiality and explains each divergence; it does not decide whether the bytes differ.",
       "type": "object",
-      "required": ["findings"],
+      "required": [
+        "findings"
+      ],
       "properties": {
         "findings": {
-          "type": "array", "maxItems": 1024,
+          "type": "array",
+          "maxItems": 1024,
           "items": {
             "type": "object",
-            "required": ["path", "kind", "severity"],
+            "required": [
+              "path",
+              "kind",
+              "severity"
+            ],
             "properties": {
-              "path": {"type": "string", "minLength": 1},
-              "kind": {"enum": ["VALUE", "TYPE", "STRUCTURAL", "TIMING", "SIDE_EFFECT"]},
-              "severity": {"enum": ["HIGH", "MEDIUM", "LOW"]},
-              "material": {"type": "boolean"},
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "VALUE",
+                  "TYPE",
+                  "STRUCTURAL",
+                  "TIMING",
+                  "SIDE_EFFECT"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              "material": {
+                "type": "boolean"
+              },
               "expected": {},
               "actual": {},
-              "explanation": {"type": "string", "maxLength": 2000}
+              "explanation": {
+                "type": "string",
+                "maxLength": 2000
+              }
             }
           }
         }
       }
     },
-
     "agent/variance-analysis/severity-rationale": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "Per-variance assessment. The comparator already decided that the values differ; this says whether the difference is behavioural or a permitted representation difference, and the prompt forbids dismissing one without naming the normalisation rule that permits it.",
       "type": "object",
-      "required": ["assessments"],
+      "required": [
+        "assessments"
+      ],
       "properties": {
         "assessments": {
-          "type": "array", "maxItems": 512,
+          "type": "array",
+          "maxItems": 512,
           "items": {
             "type": "object",
-            "required": ["path", "behavioural"],
+            "required": [
+              "path",
+              "behavioural"
+            ],
             "properties": {
-              "path": {"type": "string", "minLength": 1},
-              "behavioural": {"type": "boolean"},
-              "rationale": {"type": "string", "maxLength": 2000}
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "behavioural": {
+                "type": "boolean"
+              },
+              "rationale": {
+                "type": "string",
+                "maxLength": 2000
+              }
             }
           }
         }
       }
     },
-
     "agent/variance-analysis/parity-check": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "findings": {"type": "array", "maxItems": 512},
-        "status": {"type": "string"}
+        "findings": {
+          "type": "array",
+          "maxItems": 512
+        },
+        "status": {
+          "type": "string"
+        }
       }
     },
-
     "agent/variance-analysis/hardcoding-check": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "findings": {"type": "array", "maxItems": 512},
-        "status": {"type": "string"}
+        "findings": {
+          "type": "array",
+          "maxItems": 512
+        },
+        "status": {
+          "type": "string"
+        }
       }
     },
-
     "agent/rca/hypothesis": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Root cause hypotheses",
       "description": "confidence is not required: the prompt forbids asserting a cause the evidence cannot support, and RCAService scores confidence from evidence coverage deterministically. A model-supplied number here is advisory.",
       "type": "object",
-      "required": ["hypotheses"],
+      "required": [
+        "hypotheses"
+      ],
       "properties": {
         "hypotheses": {
-          "type": "array", "maxItems": 64,
+          "type": "array",
+          "maxItems": 64,
           "items": {
             "type": "object",
-            "required": ["hypothesis"],
+            "required": [
+              "hypothesis"
+            ],
             "properties": {
-              "hypothesis": {"type": "string", "minLength": 1},
-              "supporting_evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-              "missing_evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-              "affected_scope": {"type": "string"},
-              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+              "hypothesis": {
+                "type": "string",
+                "minLength": 1
+              },
+              "supporting_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              },
+              "missing_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              },
+              "affected_scope": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
             }
           }
         }
       }
     },
-
     "agent/remediation/patch-plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "A bounded remediation proposal",
       "description": "Proposals only. remediation holds no repository.write tool, so nothing here is applied by this agent -- the contract, not the prompt, is what enforces that. 'bounded' is the model declaring the change stays inside the governed blast radius; the deterministic eligibility check still has to agree.",
       "type": "object",
-      "required": ["pattern"],
+      "required": [
+        "pattern"
+      ],
       "properties": {
-        "pattern": {"type": "string", "minLength": 1},
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
         "changes": {
-          "type": "array", "maxItems": 128,
+          "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
-            "required": ["path", "intent"],
+            "required": [
+              "path",
+              "intent"
+            ],
             "properties": {
-              "path": {"type": "string", "minLength": 1},
-              "intent": {"type": "string", "minLength": 1}
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "intent": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
-        "tests": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-        "bounded": {"type": "boolean"},
-        "clarification": {"type": "string"}
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        },
+        "bounded": {
+          "type": "boolean"
+        },
+        "clarification": {
+          "type": "string"
+        }
       }
     },
-
     "agent/dormancy-intelligence/classification-rationale": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "required": ["classification"],
+      "required": [
+        "classification"
+      ],
       "properties": {
-        "classification": {"enum": ["ACTIVE", "DORMANT", "ALREADY_MIGRATED", "UNKNOWN"]},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "decisive_evidence": {"type": "string"},
-        "rationale": {"type": "string", "maxLength": 4000},
-        "missing_evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "classification": {
+          "enum": [
+            "ACTIVE",
+            "DORMANT",
+            "ALREADY_MIGRATED",
+            "UNKNOWN"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "decisive_evidence": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "missing_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/governance/gate-assessment": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Gate assessment: the model's reading of a transition",
       "description": "A recommendation and its reasoning. The decision stays deterministic -- RBAC, quorum and the artefact hash binding are enforcement, and ACE source text reaches these payloads. Where recommendation and decision disagree, the disagreement is recorded as evidence rather than either side silently winning.",
       "type": "object",
-      "required": ["recommendation"],
+      "required": [
+        "recommendation"
+      ],
       "properties": {
-        "recommendation": {"enum": ["ALLOW", "DENY", "INSUFFICIENT_EVIDENCE"]},
-        "target_state": {"type": "string"},
-        "rationale": {"type": "string", "maxLength": 4000},
-        "evidence_sufficient": {"type": "boolean"},
-        "missing_evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-        "risks": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "recommendation": {
+          "enum": [
+            "ALLOW",
+            "DENY",
+            "INSUFFICIENT_EVIDENCE"
+          ]
+        },
+        "target_state": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "evidence_sufficient": {
+          "type": "boolean"
+        },
+        "missing_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/governance/blocking-explanation": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "explanation": {"type": "string", "maxLength": 4000},
-        "blocking": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "explanation": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "blocking": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/knowledge-evidence/citations": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Cited context",
       "type": "object",
-      "required": ["citations"],
+      "required": [
+        "citations"
+      ],
       "properties": {
         "citations": {
-          "type": "array", "maxItems": 256,
+          "type": "array",
+          "maxItems": 256,
           "items": {
             "type": "object",
-            "required": ["evidence_id"],
+            "required": [
+              "evidence_id"
+            ],
             "properties": {
-              "evidence_id": {"type": "string", "minLength": 1},
-              "claim": {"type": "string"},
-              "locator": {"type": "string"}
+              "evidence_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claim": {
+                "type": "string"
+              },
+              "locator": {
+                "type": "string"
+              }
             }
           }
         },
-        "uncited_claims": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "uncited_claims": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/knowledge-evidence/citation-sufficiency": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "sufficient": {"type": "boolean"},
-        "missing": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "sufficient": {
+          "type": "boolean"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/migration-orchestrator/next-action": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "A proposal. The orchestrator still dispatches through AgentRegistry, which re-checks dependencies, roles and the tool allow-list -- so a next_agent the model should not have proposed is refused there, not here.",
       "type": "object",
       "properties": {
-        "next_agent": {"type": ["string", "null"]},
-        "params": {"type": "object"},
-        "next_state": {"type": ["string", "null"]},
-        "blocked_by": {"type": ["string", "array", "null"]},
-        "rationale": {"type": "string", "maxLength": 2000}
+        "next_agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "type": "object"
+        },
+        "next_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "blocked_by": {
+          "type": [
+            "string",
+            "array",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 2000
+        }
       }
     },
-
     "agent/feedback/finding-triage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "findings": {"type": "array", "maxItems": 256},
-        "unfixable": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+        "findings": {
+          "type": "array",
+          "maxItems": 256
+        },
+        "unfixable": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
       }
     },
-
     "agent/feedback/code-repair": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Targeted repair edits",
       "description": "Search/replace rather than whole files, so the model never has to reproduce bytes it was not shown and an old_str that does not match the real file is simply skipped.",
       "type": "object",
-      "required": ["edits"],
+      "required": [
+        "edits"
+      ],
       "properties": {
         "edits": {
-          "type": "array", "maxItems": 20,
+          "type": "array",
+          "maxItems": 20,
           "items": {
             "type": "object",
-            "required": ["path", "old_str", "new_str"],
+            "required": [
+              "path",
+              "old_str",
+              "new_str"
+            ],
             "properties": {
-              "path": {"type": "string", "minLength": 1},
-              "old_str": {"type": "string", "minLength": 1},
-              "new_str": {"type": "string", "maxLength": 20000},
-              "reason": {"type": "string"}
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "old_str": {
+                "type": "string",
+                "minLength": 1
+              },
+              "new_str": {
+                "type": "string",
+                "maxLength": 20000
+              },
+              "reason": {
+                "type": "string"
+              }
             }
           }
+        }
+      }
+    },
+    "agent/code-generation/project-layout": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "The file set the skill requires for this service",
+      "description": "Paths only, decided before any content is written. This is the step springgen.py cannot do: its layout is hardcoded plain Spring Boot, so a skill requiring EIPMS_cvs-v1-<service>-oci with parent and web Maven modules could never be honoured. Each path is confined by workspace.resolve() before it is written, and 'purpose' is what the per-file synthesis call is then asked to produce.",
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "root": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Repository root directory name the skill prescribes, e.g. EIPMS_cvs-v1-<service>-oci. Empty means generate flat.",
+          "pattern": "^[A-Za-z0-9._-]*$"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 400,
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "purpose"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 400,
+                "description": "Relative to root, forward slashes, no traversal.",
+                "pattern": "^[^/\\\\][^:*?\"<>|]*$"
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600
+              },
+              "source_reference": {
+                "type": "string"
+              },
+              "skill_reference": {
+                "type": "string",
+                "description": "Which skill reference prescribes this file, so a reviewer can check the layout against the standard rather than against taste."
+              }
+            }
+          }
+        },
+        "omitted": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string"
+          },
+          "description": "Files the skill prescribes that this service does not need, each with why. An omission stated is reviewable; a silent one is not."
         }
       }
     }
