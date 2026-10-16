@@ -114,6 +114,28 @@ def test_the_agent_contract_outputs_are_unchanged_by_parity(repo, job, executed_
     assert set(result.outputs) == {'variance_records', 'severity'}
 
 
+# ---- static checks do not need a runtime replay --------------------------------------------------
+
+def test_parity_runs_even_when_the_package_was_never_replayed(repo, job, seeded, gateway):
+    """Parity/hardcoding read ACE source and the generated code directly -- a
+    package that test-engineering only prepared (no runtime adapters configured,
+    so no RUNTIME_EXECUTION report exists at all) must not block them."""
+    gateway(PARITY_PROMPT)
+    package_id = uid()
+    payload = json.dumps({'plan_id': 'plan-1', 'cases': [{'id': 'CASE-001'}]}, sort_keys=True)
+    with repo.connect() as c:
+        repo.insert(c, 'differential_packages',
+                    {'id': package_id, 'job_id': job['id'], 'plan_id': 'plan-1',
+                     'status': 'READY_FOR_EXECUTION', 'payload': payload,
+                     'content_hash': digest(payload), 'created_at': now()})
+    result = VarianceAnalysisAgent(repo).run(job['id'], params={
+        'package_id': package_id, 'parity': True}, provider=ParityProvider())
+    assert result.outputs == {'variance_records': [], 'severity': 'NONE'}
+    assert result.metrics['runtime_comparison'] == 'NOT_EXECUTED'
+    assert result.metrics['parity']['status'] == 'ANALYSED'
+    assert result.metrics['parity']['counts'] == REPORT['counts']
+
+
 # ---- the opt-in step -----------------------------------------------------------------------------
 
 def test_parity_runs_with_the_parity_skill_as_the_guidance(repo, job, executed_package, seeded, gateway):

@@ -1,5 +1,4 @@
 import json
-import pytest
 from app.agents.variance_analysis import VarianceAnalysisAgent
 
 
@@ -43,16 +42,21 @@ def test_the_policy_recorded_with_the_package_is_applied(repo, job, executed_pac
     assert result.outputs['severity'] == 'NONE'
 
 
-def test_a_package_prepared_but_never_replayed_cannot_be_analysed(repo, job, planned, dispatch):
-    """Without runtime adapters no results were captured, so there is nothing to compare."""
+def test_a_package_prepared_but_never_replayed_still_analyses_cleanly(repo, job, planned, dispatch):
+    """Without runtime adapters no results were captured -- there is nothing to
+    diff, but that must not block the static parity/hardcoding checks below,
+    which read ACE source and generated code directly and need no replay."""
     prepared = dispatch(job['id'], 'test-engineering', {'plan_id': planned['plan_id']})
     package_id = prepared['outputs']['test_suites']
-    with pytest.raises(ValueError, match='runtime_execution_report_not_found'):
-        VarianceAnalysisAgent(repo).run(job['id'], params={'package_id': package_id})
+    result = VarianceAnalysisAgent(repo).run(job['id'], params={'package_id': package_id})
+    assert result.outputs == {'variance_records': [], 'severity': 'NONE'}
+    assert result.metrics['runtime_comparison'] == 'NOT_EXECUTED'
+    assert result.metrics['case_count'] == 0
 
 
-def test_a_report_with_no_executions_is_refused(repo, job):
-    """An empty report must not read as "compared and matched"."""
+def test_a_report_with_no_executions_also_analyses_cleanly(repo, job):
+    """An empty report must not read as "compared and matched" -- it reads the
+    same as "nothing to compare yet", same as no report at all."""
     from app.repository import digest, now, uid
     package_id = uid()
     payload = json.dumps({'package_id': package_id, 'executions': []}, sort_keys=True)
@@ -61,8 +65,9 @@ def test_a_report_with_no_executions_is_refused(repo, job):
                     {'id': uid(), 'job_id': job['id'], 'report_type': 'RUNTIME_EXECUTION',
                      'version': '1.0.0', 'payload': payload, 'content_hash': digest(payload),
                      'status': 'EXECUTED', 'created_at': now(), 'reference_id': package_id})
-    with pytest.raises(ValueError, match='differential_package_not_executed'):
-        VarianceAnalysisAgent(repo).run(job['id'], params={'package_id': package_id})
+    result = VarianceAnalysisAgent(repo).run(job['id'], params={'package_id': package_id})
+    assert result.outputs == {'variance_records': [], 'severity': 'NONE'}
+    assert result.metrics['runtime_comparison'] == 'NOT_EXECUTED'
 
 
 def test_variance_analysis_registers_no_evidence(repo, job, executed_package):

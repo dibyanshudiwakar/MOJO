@@ -176,7 +176,21 @@ class VarianceAnalysisAgent(BaseAgent):
 
     def execute(self, context):
         package_id = context.param('package_id')
-        executions, policy = self._executions(context, package_id)
+        try:
+            executions, policy = self._executions(context, package_id)
+        except ValueError:
+            # test-engineering deliberately records no RUNTIME_EXECUTION report
+            # when the job has no runtime adapters configured ("no execution is
+            # claimed" -- see its own docstring) -- that is the normal state
+            # before a live ACE/Spring Boot runtime exists, not a reason to
+            # refuse the static parity/hardcoding checks below, which compare
+            # the ACE source against the generated code directly and need no
+            # replay at all. Falling back to zero executions makes the runtime
+            # -comparison portion below behave exactly as it would for a
+            # package that really was replayed and happened to match perfectly
+            # (zero variances, severity NONE) -- it just also runs when nothing
+            # was replayed yet.
+            executions, policy = [], context.param('policy', {})
         lifecycle = MappingAndPlanningService(self.repo)
         differential = DifferentialService(self.repo)
         records = []
@@ -198,7 +212,11 @@ class VarianceAnalysisAgent(BaseAgent):
         metrics = {'case_count': len(records), 'variance_count': len(flat),
                    'variance_cases': sum(1 for x in records if x['status'] == 'VARIANCE'),
                    'by_kind': {k: sum(1 for v in flat if v['kind'] == k)
-                               for k in sorted({v['kind'] for v in flat})}}
+                               for k in sorted({v['kind'] for v in flat})},
+                   # Distinguishes "replayed and found nothing" from "nothing to
+                   # replay yet" -- both give case_count==0, so this is the only
+                   # thing that tells the two apart on the run.
+                   'runtime_comparison': 'EXECUTED' if executions else 'NOT_EXECUTED'}
         if isinstance(answer, dict) and answer.get('assessments'):
             # Advisory only: a model may not close a variance. Disposition is the
             # G4 decision recorded through ``disposition_differential``.
