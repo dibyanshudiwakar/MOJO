@@ -43,6 +43,7 @@ framework that was not supplied would be inventing them.
 """
 import json
 import re
+import textwrap
 from pathlib import Path
 
 from app.repository import digest
@@ -86,6 +87,140 @@ def kebab(text):
 
 def _stem(path):
     return Path(str(path or '')).stem or 'flow'
+
+
+# ---------------------------------------------------------------------------
+# Java formatting
+# ---------------------------------------------------------------------------
+#: Line budget for generated Java. 120 is the Spring Framework's own limit, and
+#: the generated project is plain Spring Boot. Nothing here is cosmetic: a
+#: generated file is read by the reviewer who has to approve the migration and
+#: by the engineer who finishes the TODOs, and a 184-column constructor or an
+#: ESQL statement trailing off the right of the screen is not reviewable.
+WIDTH = 120
+
+
+def _wrap(text, width, break_words=False):
+    """Wrap to ``width``, by default never splitting a word or a ``{@code}`` tag.
+
+    ``break_words`` is for comments quoting ACE verbatim: an ESQL identifier can
+    be longer than the whole budget on its own, and in a comment splitting it is
+    better than overflowing.
+    """
+    return textwrap.wrap(text, max(width, 40), break_long_words=break_words,
+                         break_on_hyphens=False) or ['']
+
+
+def javadoc(*blocks, indent=0):
+    """A wrapped Javadoc comment.
+
+    Blocks are written as plain prose and wrapped here, rather than carrying
+    hand-placed line breaks that go ragged the moment a name changes length.
+    A block is a paragraph string, ``('pre', lines)`` for verbatim content such
+    as quoted ESQL, or ``('ul', items)`` for a list. The second and later
+    paragraphs get the ``<p>`` Javadoc expects.
+    """
+    pad = ' ' * indent
+    budget = WIDTH - indent - 3
+    body = []
+    for block in blocks:
+        if not block:
+            continue
+        if isinstance(block, tuple):
+            kind, items = block
+            items = [x for x in items if x]
+            if not items:
+                continue
+            if body:
+                body.append('')
+            if kind == 'pre':
+                # Verbatim content still has to fit. ESQL is whitespace
+                # insensitive, so a statement wrapped at a space with a hanging
+                # indent is the same statement -- unlike a truncated one, which
+                # is no longer what the translation can be reviewed against.
+                wrapped = []
+                for item in items:
+                    first, *rest = _wrap(item.strip(), budget - 2, break_words=True)
+                    wrapped.append('  ' + first)
+                    wrapped += ['      ' + line for line in rest]
+                body += ['<pre>'] + wrapped + ['</pre>']
+            else:
+                body.append('<ul>')
+                for item in items:
+                    body += _wrap('<li>%s</li>' % item, budget)
+                body.append('</ul>')
+            continue
+        text = ' '.join(str(block).split())
+        if not text:
+            continue
+        if body:
+            body.append('')
+            text = '<p>' + text
+        body += _wrap(text, budget)
+    lines = [pad + '/**'] + [(pad + ' * ' + line).rstrip() for line in body] + [pad + ' */']
+    return '\n'.join(lines)
+
+
+def signature(declaration, params, tail=' {', indent=4):
+    """``void f(a, b) {`` on one line, or one parameter per line if too long."""
+    pad = ' ' * indent
+    single = '%s%s(%s)%s' % (pad, declaration, ', '.join(params), tail)
+    if len(single) <= WIDTH or not params:
+        return single
+    continuation = ' ' * (indent + 8)
+    lines = ['%s%s(' % (pad, declaration)]
+    for index, param in enumerate(params):
+        last = index == len(params) - 1
+        lines.append(continuation + param + (')' + tail if last else ','))
+    return '\n'.join(lines)
+
+
+def annotation(name, attributes, indent=4):
+    """``@Name(a, b)``, continued at a hanging indent when it does not fit."""
+    pad = ' ' * indent
+    single = '%s@%s(%s)' % (pad, name, ', '.join(attributes))
+    if len(single) <= WIDTH or len(attributes) < 2:
+        return single
+    continuation = ' ' * (indent + 8)
+    lines = ['%s@%s(%s,' % (pad, name, attributes[0])]
+    for index, attribute in enumerate(attributes[1:], 1):
+        last = index == len(attributes) - 1
+        lines.append(continuation + attribute + (')' if last else ','))
+    return '\n'.join(lines)
+
+
+def argument(expression, separator, comment, indent):
+    """One constructor argument, with its provenance comment placed to fit.
+
+    A quoted ESQL statement is often longer than the line budget on its own, so
+    the comment moves above the argument rather than trailing off the screen.
+    It cannot be shortened -- it is what the translation is reviewed against --
+    so it wraps, and **every** wrapped line is prefixed with ``//``: a
+    continuation without one is bare Java and does not compile.
+    """
+    pad = ' ' * indent
+    if not comment:
+        return [pad + expression + separator]
+    trailing = '%s%s%s %s' % (pad, expression, separator, comment)
+    if len(trailing) <= WIDTH:
+        return [trailing]
+    text = comment[2:].strip() if comment.startswith('//') else comment
+    return ['%s// %s' % (pad, line)
+            for line in _wrap(text, WIDTH - indent - 3, break_words=True)] + \
+           [pad + expression + separator]
+
+
+def tidy(source):
+    """Trailing whitespace, runaway blank lines and a final newline."""
+    lines = [line.rstrip() for line in source.splitlines()]
+    out = []
+    for line in lines:
+        if not line and out and not out[-1]:
+            continue
+        out.append(line)
+    while out and not out[-1]:
+        out.pop()
+    return '\n'.join(out) + '\n'
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +585,11 @@ class SpringProjectGenerator:
         self.records = {}
         for flow in self.flows:
             self._shape_flow(flow)
+            # Which kinds of construct this project ended up containing. Recorded
+            # on the provenance manifest, so the reviewer can see that an
+            # MQ-and-database migration produced messaging and persistence code
+            # without opening the tree.
+            self.roles.update(flow['roles'])
         self.databases = sorted({
             table for entry in self.model.get('esql', []) for table in entry.get('databases', [])})
         if any('DB' in f['roles'] for f in self.flows):
@@ -682,6 +822,13 @@ class SpringProjectGenerator:
         deps = [self._dependency(boot, 'spring-boot-starter-web'),
                 self._dependency(boot, 'spring-boot-starter-validation'),
                 self._dependency(boot, 'spring-boot-starter-actuator')]
+        if self._has('SOAP_IN', 'SOAP_REPLY', 'SOAP_REQUEST'):
+            # Without this, a controller declaring text/xml still has only
+            # Jackson's JSON converter and answers 500 on the first request:
+            # there is no HttpMessageConverter that can read XML into the
+            # generated record. Version comes from the Spring Boot parent.
+            deps.append(self._dependency('com.fasterxml.jackson.dataformat',
+                                         'jackson-dataformat-xml'))
         if self._has('JMS_IN', 'JMS_OUT'):
             deps.append(self._dependency(boot, 'spring-boot-starter-artemis'))
         if self._has('KAFKA_IN', 'KAFKA_OUT'):
@@ -771,16 +918,42 @@ jobs:
         return '%s/%s/%s.java' % (self.pkg_dir, relative_package, class_name) if relative_package \
             else '%s/%s.java' % (self.pkg_dir, class_name)
 
-    def _header(self, relative_package, imports, javadoc, annotations, body):
+    def _header(self, relative_package, imports, comment, annotations, body):
+        """Assemble one compilation unit.
+
+        Static imports sort after the rest, as the convention is, and the whole
+        file goes through ``tidy`` so no generated line carries trailing
+        whitespace or a stray second blank line.
+        """
         package = self.package + ('.' + relative_package.replace('/', '.') if relative_package else '')
         blocks = ['package %s;' % package, '']
         if imports:
-            blocks.append('\n'.join('import %s;' % i for i in sorted(set(imports))))
+            plain = sorted({i for i in imports if not i.startswith('static ')})
+            static = sorted({i for i in imports if i.startswith('static ')})
+            blocks.append('\n'.join('import %s;' % i for i in plain))
+            if static:
+                if plain:
+                    blocks.append('')
+                blocks.append('\n'.join('import %s;' % i for i in static))
             blocks.append('')
-        blocks.append(javadoc.rstrip())
+        blocks.append(comment.rstrip())
         blocks.extend(annotations)
         blocks.append(body.rstrip())
-        return '\n'.join(blocks) + '\n'
+        return tidy('\n'.join(blocks))
+
+    def _inbound(self, flow, roles, suffix):
+        """The inbound nodes of one kind, each with the class name it gets.
+
+        A flow may declare more than one entry point -- an HTTP input and a SOAP
+        input, or an MQ input and a Kafka input. Naming the class after the flow
+        alone meant the second node's file overwrote the first's and that entry
+        point was silently dropped, so a flow with several gets one class per
+        node instead.
+        """
+        nodes = [n for n in flow['nodes'] if n['role'] in roles]
+        if len(nodes) == 1:
+            return [(flow['name'] + suffix, nodes[0])]
+        return [(flow['name'] + pascal(n['id']) + suffix, n) for n in nodes]
 
     def _java_files(self):
         files = {self._file('', self.app + 'Application'): self._application()}
@@ -788,14 +961,12 @@ jobs:
         files.update(self._transformer_files())
         for flow in self.flows:
             files[self._file('service', flow['name'] + 'Service')] = self._service(flow)
+            for name, node in self._inbound(flow, ('HTTP_IN', 'SOAP_IN'), 'Controller'):
+                files[self._file('controller', name)] = self._controller(flow, node, name)
+            for name, node in self._inbound(flow, ('JMS_IN', 'KAFKA_IN'), 'Listener'):
+                files[self._file('messaging', name)] = self._listener(flow, node, name)
             for node in flow['nodes']:
-                if node['role'] in ('HTTP_IN', 'SOAP_IN'):
-                    files[self._file('controller', flow['name'] + 'Controller')] = \
-                        self._controller(flow, node)
-                elif node['role'] in ('JMS_IN', 'KAFKA_IN'):
-                    files[self._file('messaging', flow['name'] + 'Listener')] = \
-                        self._listener(flow, node)
-                elif node['role'] in ('JMS_OUT', 'KAFKA_OUT'):
+                if node['role'] in ('JMS_OUT', 'KAFKA_OUT'):
                     files[self._file('messaging', pascal(node['id']) + 'Publisher')] = \
                         self._publisher(flow, node)
                 elif node['role'] in ('HTTP_REQUEST', 'SOAP_REQUEST'):
@@ -831,36 +1002,33 @@ jobs:
         if self._has('JMS_IN'):
             imports.append('org.springframework.jms.annotation.EnableJms')
             annotations.append('@EnableJms')
-        flows = ''.join('\n * <li>{@code %s} -> {@code %sService}</li>'
-                        % (flow['path'] or flow['name'], flow['name']) for flow in self.flows)
-        javadoc = '''/**
- * Entry point for the service migrated from IBM ACE/IIB.
- *
- * <p>Generated under migration plan {@code %s}. One Spring service per ACE
- * message flow:
- *
- * <ul>%s
- * </ul>
- */''' % (self.plan_id, flows)
+        comment = javadoc(
+            'Entry point for the service migrated from IBM ACE/IIB.',
+            'Generated under migration plan {@code %s}. One Spring service per ACE message flow:'
+            % self.plan_id,
+            ('ul', ['{@code %s} -> {@code %sService}' % (flow['path'] or flow['name'], flow['name'])
+                    for flow in self.flows]))
         body = '''public class %sApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(%sApplication.class, args);
     }
 }''' % (self.app, self.app)
-        return self._header('', imports, javadoc, annotations, body)
+        return self._header('', imports, comment, annotations, body)
 
     def _dto_files(self):
         files = {}
         for record in self.records.values():
-            components = ',\n'.join(
+            # One blank line between annotated components: a record whose
+            # components each carry an annotation reads as a list of fields, not
+            # as a parameter list.
+            components = ',\n\n'.join(
                 '        @JsonProperty("%s")\n        %s %s' % (json_name, java_type, component)
                 for java_type, component, json_name in record.components)
-            javadoc = '''/**
- * Message-tree fields of {@code %s}, as addressed by its ESQL.
- *
- * <p>Generated under migration plan {@code %s}.
- */''' % (record.provenance or self.service, self.plan_id)
+            comment = javadoc(
+                'Message-tree fields of {@code %s}, as addressed by its ESQL.'
+                % (record.provenance or self.service),
+                'Generated under migration plan {@code %s}.' % self.plan_id)
             body = '''@JsonInclude(JsonInclude.Include.NON_NULL)
 public record %s(
 %s) {
@@ -868,7 +1036,7 @@ public record %s(
             files[self._file('dto', record.name)] = self._header(
                 'dto', ['com.fasterxml.jackson.annotation.JsonInclude',
                         'com.fasterxml.jackson.annotation.JsonProperty'],
-                javadoc, [], body)
+                comment, [], body)
         return files
 
     def _transformer_files(self):
@@ -882,35 +1050,31 @@ public record %s(
     def _transformer(self, flow, module, class_name):
         request, response = flow['request'], flow['response']
         imports = ['org.springframework.stereotype.Component']
-        notes = ''.join('\n * <li>%s</li>' % _escape(note) for note in module.notes)
-        statements = ''.join('\n *   %s' % _escape(a['esql'])
-                             for a in module.assignments[:40]) or '\n *   (no SET statements found)'
-        javadoc = '''/**
- * Translation of ESQL module {@code %s} from {@code %s}.
- *
- * <p>Generated under migration plan {@code %s}. The ESQL this body was derived
- * from, verbatim:
- *
- * <pre>%s
- * </pre>%s
- */''' % (module.name, module.source_path or 'unknown', self.plan_id, statements,
-          ('\n *\n * <p>Statements needing a decision:\n * <ul>%s\n * </ul>' % notes) if notes else '')
+        # The module is quoted verbatim so the translation can be reviewed
+        # against its source, and left unwrapped inside <pre> because a wrapped
+        # ESQL statement is no longer the statement.
+        statements = [_escape(a['esql']) for a in module.assignments[:40]] \
+            or ['(no SET statements found)']
+        comment = javadoc(
+            'Translation of ESQL module {@code %s} from {@code %s}.'
+            % (module.name, module.source_path or 'unknown'),
+            'Generated under migration plan {@code %s}. The ESQL this body was derived from, '
+            'verbatim:' % self.plan_id,
+            ('pre', statements),
+            'Statements needing a decision:' if module.notes else None,
+            ('ul', [_escape(note) for note in module.notes]))
         if request is None or response is None:
             imports.append('java.util.LinkedHashMap')
             imports.append('java.util.Map')
-            body = '''@Component
-public class %s {
-
-    /**
-     * TODO No ESQL field assignments were resolvable for this module, so the
-     * message passes through unchanged. Translate the ESQL above by hand, or
-     * re-generate with the ACE repository available.
-     */
-    public Map<String, Object> transform(Map<String, Object> source) {
-        return new LinkedHashMap<>(source == null ? Map.of() : source);
-    }
-}''' % class_name
-            return self._header('transform', imports, javadoc, [], body)
+            body = '@Component\npublic class %s {\n\n%s\n%s\n        return new LinkedHashMap<>(' \
+                   'source == null ? Map.of() : source);\n    }\n}' % (
+                       class_name,
+                       javadoc('TODO No ESQL field assignments were resolvable for this module, so '
+                               'the message passes through unchanged. Translate the ESQL above by '
+                               'hand, or re-generate with the ACE repository available.', indent=4),
+                       signature('public Map<String, Object> transform',
+                                 ['Map<String, Object> source']))
+            return self._header('transform', imports, comment, [], body)
 
         locals_, expression, used = self._construct(request, response, module)
         imports.append('%s.dto.%s' % (self.package, request.name))
@@ -918,14 +1082,16 @@ public class %s {
         body = '''@Component
 public class %s {
 
-    public %s transform(%s source) {
+%s
         if (source == null) {
             return null;
         }
 %s        return %s;
     }
-}''' % (class_name, response.name, request.name, locals_, expression)
-        return self._header('transform', imports, javadoc, [], body)
+}''' % (class_name,
+        signature('public %s transform' % response.name, ['%s source' % request.name]),
+        locals_, expression)
+        return self._header('transform', imports, comment, [], body)
 
     def _construct(self, request, response, module):
         """Build the response record from the request, assignment by assignment.
@@ -955,8 +1121,12 @@ public class %s {
             if chain is None or parent is None:
                 return None
             name = camel('src ' + ' '.join(path))
-            locals_[key] = (name, '        var %s = %s == null ? null : %s.%s();\n'
-                            % (name, parent, parent, chain[-1][1]))
+            # ``source`` itself is already guarded at the top of the method, so
+            # only a nested parent needs the ternary.
+            accessor = '%s.%s()' % (parent, chain[-1][1])
+            value = accessor if parent == 'source' else \
+                '%s == null ? null : %s' % (parent, accessor)
+            locals_[key] = (name, '        var %s = %s;\n' % (name, value))
             return name
 
         def leaf(target):
@@ -997,7 +1167,6 @@ public class %s {
         def render(record, path, indent):
             """Lines for ``new Record(...)``: first ``new X(``, last ``)``."""
             used.add(record.name)
-            pad = ' ' * (indent + 8)
             arguments = []
             for index, (java_type, _component, json_name) in enumerate(record.components):
                 target = path + [json_name]
@@ -1005,13 +1174,12 @@ public class %s {
                 nested = next((n for n in record.nested if n.name == java_type), None)
                 if nested is not None:
                     block = render(nested, target, indent + 8)
-                    block[0] = pad + block[0]
+                    block[0] = ' ' * (indent + 8) + block[0]
                     block[-1] = block[-1] + separator
                     arguments.extend(block)
                     continue
                 expression, comment = leaf(target)
-                arguments.append(pad + expression + separator +
-                                 ((' ' + comment) if comment else ''))
+                arguments.extend(argument(expression, separator, comment, indent + 8))
             return ['new %s(' % record.name] + arguments + [' ' * indent + ')']
 
         expression = '\n'.join(render(response, [], 8))
@@ -1072,11 +1240,14 @@ public class %s {
                              '        log.info("flow=%s node=%s correlationId={}", correlationId);'
                              % (reference, node['type'], flow['name'], node['id']))
             elif role in ('FILTER', 'ROUTER'):
+                code = kebab(node['id']).upper().replace('-', '_') + '_REJECTED'
+                arguments = ['"%s"' % code, '"%s rejected the message"' % node['id'], '422']
                 steps.append('        // %s (%s)\n'
                              '        if (!%s.matches(request)) {\n'
-                             '            throw new FlowException("%s_REJECTED", "%s rejected the message", 422);\n'
+                             '%s\n'
                              '        }' % (reference, node['type'], node['field'],
-                                            kebab(node['id']).upper().replace('-', '_'), node['id']))
+                                            signature('throw new FlowException', arguments,
+                                                      tail=';', indent=12)))
             elif role == 'TRANSFORM' and transformer_field and not produced:
                 steps.append('        // %s (%s)\n        %s response = %s.transform(request);'
                              % (reference, node['type'], response_type, transformer_field))
@@ -1116,18 +1287,14 @@ public class %s {
         steps.append('        return response;')
         constructor = ''
         if constructor_params:
-            constructor = '''
-    public %sService(%s) {
-%s
-    }
-''' % (flow['name'], ', '.join(constructor_params), '\n'.join(assignments))
-        javadoc = '''/**
- * Executes the {@code %s} message flow.
- *
- * <p>Generated under migration plan {@code %s}. The statements below follow the
- * flow's own connection order, one per ACE node, each tagged with the node it
- * was generated from.
- */''' % (flow['path'] or flow['name'], self.plan_id)
+            constructor = '\n%s\n%s\n    }\n' % (
+                signature('public %sService' % flow['name'], constructor_params),
+                '\n'.join(assignments))
+        comment = javadoc(
+            'Executes the {@code %s} message flow.' % (flow['path'] or flow['name']),
+            "Generated under migration plan {@code %s}. The statements below follow the flow's own "
+            'connection order, one per ACE node, each tagged with the node it was generated from.'
+            % self.plan_id)
         body = '''@Service
 public class %(name)sService {
 
@@ -1135,13 +1302,14 @@ public class %(name)sService {
 
 %(fields)s
 %(constructor)s
-    public %(response)s process(%(request)s request, String correlationId) {
+%(process)s
 %(steps)s
     }
 }''' % {'name': flow['name'], 'fields': '\n'.join(fields), 'constructor': constructor,
-        'response': response_type, 'request': request_type,
+        'process': signature('public %s process' % response_type,
+                             ['%s request' % request_type, 'String correlationId']),
         'steps': '\n\n'.join(steps)}
-        return self._header('service', imports, javadoc, [], body)
+        return self._header('service', imports, comment, [], body)
 
     def _http_method(self, node):
         """The verb ACE allowed, defaulting to POST as an IIB HTTPInput does."""
@@ -1149,7 +1317,8 @@ public class %(name)sService {
                      or node['properties'].get('allowedMethods') or 'POST').split(',')[0].strip().upper()
         return method if method in ('GET', 'PUT', 'DELETE', 'PATCH', 'POST') else 'POST'
 
-    def _controller(self, flow, node):
+    def _controller(self, flow, node, class_name=None):
+        class_name = class_name or (flow['name'] + 'Controller')
         path = self._endpoint(node, flow)
         method = self._http_method(node)
         mapping = {'GET': 'GetMapping', 'PUT': 'PutMapping', 'DELETE': 'DeleteMapping',
@@ -1171,40 +1340,47 @@ public class %(name)sService {
         else:
             imports.append('java.util.Map')
         body_annotation = '@Valid @RequestBody' if flow['typed'] else '@RequestBody'
-        javadoc = '''/**
- * HTTP entry point replacing ACE node {@code %s}.
- *
- * <p>Generated under migration plan {@code %s}. The path is the one ACE
- * published (%s); the context root stays externalised so the deployed base path
- * is a configuration decision, not a code change.%s
- */''' % (node['reference'], self.plan_id, path,
-          '\n *\n * <p>TODO This replaces a SOAP node. The payload is exchanged as XML text;'
-          '\n * generate JAXB bindings from the WSDL if a typed contract is required.' if soap else '')
+        comment = javadoc(
+            'HTTP entry point replacing ACE node {@code %s}.' % node['reference'],
+            'Generated under migration plan {@code %s}. The path is the one ACE published (%s); the '
+            'context root stays externalised so the deployed base path is a configuration decision, '
+            'not a code change.' % (self.plan_id, path),
+            'This replaces a SOAP node, so the payload is XML, bound to the same record through '
+            'jackson-dataformat-xml. TODO it is the message body alone: if callers send a full '
+            'SOAP envelope, add spring-boot-starter-web-services and generate the contract from '
+            'the WSDL.' if soap else None)
         body = '''@RestController
 @RequestMapping("${%(prefix)s.%(flow_key)s.context-root:}")
-public class %(flow)sController {
+public class %(cls)s {
 
-    private static final Logger log = LoggerFactory.getLogger(%(flow)sController.class);
+    private static final Logger log = LoggerFactory.getLogger(%(cls)s.class);
 
     private final %(flow)sService service;
 
-    public %(flow)sController(%(flow)sService service) {
+%(constructor)s
         this.service = service;
     }
 
-    @%(mapping)s(path = "%(path)s", consumes = %(media)s, produces = %(media)s)
-    public ResponseEntity<%(response)s> handle(
-            %(body_annotation)s %(request)s request,
-            @RequestHeader(value = "X-Correlation-ID", required = false) String correlationId) {
+%(mapping)s
+%(handle)s
         log.info("received %(method)s %(path)s correlationId={}", correlationId);
         return ResponseEntity.ok(service.process(request, correlationId));
     }
 }''' % {'prefix': self.prefix, 'flow_key': kebab(flow['name']), 'flow': flow['name'],
-        'mapping': mapping, 'path': path, 'media': media, 'response': flow['response_type'],
-        'request': flow['request_type'], 'body_annotation': body_annotation, 'method': method}
-        return self._header('controller', imports, javadoc, [], body)
+        'cls': class_name,
+        'constructor': signature('public %s' % class_name,
+                                 ['%sService service' % flow['name']]),
+        'mapping': annotation(mapping, ['path = "%s"' % path, 'consumes = %s' % media,
+                                        'produces = %s' % media]),
+        'handle': signature(
+            'public ResponseEntity<%s> handle' % flow['response_type'],
+            ['%s %s request' % (body_annotation, flow['request_type']),
+             '@RequestHeader(value = "X-Correlation-ID", required = false) String correlationId']),
+        'path': path, 'method': method}
+        return self._header('controller', imports, comment, [], body)
 
-    def _listener(self, flow, node):
+    def _listener(self, flow, node, class_name=None):
+        class_name = class_name or (flow['name'] + 'Listener')
         kafka = node['role'] == 'KAFKA_IN'
         destination = self._destination(node, 'TOPIC' if kafka else 'QUEUE')
         key = kebab(node['id'])
@@ -1217,35 +1393,40 @@ public class %(flow)sController {
             imports.append('java.util.Map')
         if kafka:
             imports.append('org.springframework.kafka.annotation.KafkaListener')
-            annotation = '@KafkaListener(topics = "${%s.topics.%s}", groupId = "${spring.kafka.consumer.group-id}")' \
-                % (self.prefix, key)
+            listener = annotation('KafkaListener', [
+                'topics = "${%s.topics.%s}"' % (self.prefix, key),
+                'groupId = "${spring.kafka.consumer.group-id}"'])
         else:
             imports.append('org.springframework.jms.annotation.JmsListener')
-            annotation = '@JmsListener(destination = "${%s.queues.%s}")' % (self.prefix, key)
-        javadoc = '''/**
- * Inbound adapter replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE read from {@code %s};
- * that name is the configured default and overridable per environment.
- */''' % (node['reference'], node['type'], self.plan_id, destination)
+            listener = annotation('JmsListener',
+                                  ['destination = "${%s.queues.%s}"' % (self.prefix, key)])
+        comment = javadoc(
+            'Inbound adapter replacing ACE node {@code %s} (%s).'
+            % (node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. ACE read from {@code %s}; that name is the '
+            'configured default and overridable per environment.' % (self.plan_id, destination))
         body = '''@Component
-public class %(flow)sListener {
+public class %(cls)s {
 
-    private static final Logger log = LoggerFactory.getLogger(%(flow)sListener.class);
+    private static final Logger log = LoggerFactory.getLogger(%(cls)s.class);
 
     private final %(flow)sService service;
 
-    public %(flow)sListener(%(flow)sService service) {
+%(constructor)s
         this.service = service;
     }
 
-    %(annotation)s
-    public void onMessage(%(request)s message) {
+%(listener)s
+%(on_message)s
         log.info("consumed a message for flow=%(flow)s");
         service.process(message, null);
     }
-}''' % {'flow': flow['name'], 'annotation': annotation, 'request': flow['request_type']}
-        return self._header('messaging', imports, javadoc, [], body)
+}''' % {'flow': flow['name'], 'listener': listener, 'cls': class_name,
+        'constructor': signature('public %s' % class_name,
+                                 ['%sService service' % flow['name']]),
+        'on_message': signature('public void onMessage',
+                                ['%s message' % flow['request_type']])}
+        return self._header('messaging', imports, comment, [], body)
 
     def _publisher(self, flow, node):
         kafka = node['role'] == 'KAFKA_OUT'
@@ -1264,12 +1445,11 @@ public class %(flow)sListener {
             field, type_name = 'jmsTemplate', 'JmsTemplate'
             send = 'jmsTemplate.convertAndSend(destination, payload)'
             setting = '%s.queues.%s' % (self.prefix, key)
-        javadoc = '''/**
- * Outbound adapter replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE wrote to {@code %s};
- * that name is the configured default and overridable per environment.
- */''' % (node['reference'], node['type'], self.plan_id, destination)
+        comment = javadoc(
+            'Outbound adapter replacing ACE node {@code %s} (%s).'
+            % (node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. ACE wrote to {@code %s}; that name is the '
+            'configured default and overridable per environment.' % (self.plan_id, destination))
         body = '''@Component
 public class %(cls)sPublisher {
 
@@ -1278,7 +1458,7 @@ public class %(cls)sPublisher {
     private final %(type)s %(field)s;
     private final String destination;
 
-    public %(cls)sPublisher(%(type)s %(field)s, @Value("${%(setting)s}") String destination) {
+%(constructor)s
         this.%(field)s = %(field)s;
         this.destination = destination;
     }
@@ -1287,9 +1467,12 @@ public class %(cls)sPublisher {
         log.info("publishing to {}", destination);
         %(send)s;
     }
-}''' % {'cls': pascal(node['id']), 'type': type_name, 'field': field,
-        'setting': setting, 'send': send}
-        return self._header('messaging', imports, javadoc, [], body)
+}''' % {'cls': pascal(node['id']), 'type': type_name, 'field': field, 'send': send,
+        'constructor': signature(
+            'public %sPublisher' % pascal(node['id']),
+            ['%s %s' % (type_name, field),
+             '@Value("${%s}") String destination' % setting])}
+        return self._header('messaging', imports, comment, [], body)
 
     def _client(self, flow, node):
         key = kebab(node['id'])
@@ -1305,10 +1488,12 @@ public class %(cls)sPublisher {
             imports += ['org.springframework.core.ParameterizedTypeReference',
                         'org.springframework.web.client.RestClient',
                         'org.springframework.web.client.RestClientException']
-            construction = '''    public %(cls)sClient(RestClient.Builder builder,
-            @Value("${%(prefix)s.clients.%(key)s.base-url}") String baseUrl) {
+            construction = '''%s
         this.restClient = builder.baseUrl(baseUrl).build();
-    }''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key}
+    }''' % signature(
+                'public %sClient' % pascal(node['id']),
+                ['RestClient.Builder builder',
+                 '@Value("${%s.clients.%s.base-url}") String baseUrl' % (self.prefix, key)])
             field = '    private final RestClient restClient;'
             call = '''            return restClient.post()
                     .uri("%s")
@@ -1320,21 +1505,22 @@ public class %(cls)sPublisher {
             imports += ['org.springframework.boot.web.client.RestTemplateBuilder',
                         'org.springframework.web.client.RestClientException',
                         'org.springframework.web.client.RestTemplate']
-            construction = '''    public %(cls)sClient(RestTemplateBuilder builder,
-            @Value("${%(prefix)s.clients.%(key)s.base-url}") String baseUrl) {
+            construction = '''%s
         this.restTemplate = builder.rootUri(baseUrl).build();
-    }''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key}
+    }''' % signature(
+                'public %sClient' % pascal(node['id']),
+                ['RestTemplateBuilder builder',
+                 '@Value("${%s.clients.%s.base-url}") String baseUrl' % (self.prefix, key)])
             field = '    private final RestTemplate restTemplate;'
             call = '''            @SuppressWarnings("unchecked")
             Map<String, Object> body = restTemplate.postForObject("%s", payload, Map.class);
             return body;''' % path
-        javadoc = '''/**
- * Outbound call replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. The base URL is configuration,
- * never source: the address ACE used is recorded in the provenance manifest and
- * the README, and must be supplied per environment.
- */''' % (node['reference'], node['type'], self.plan_id)
+        comment = javadoc(
+            'Outbound call replacing ACE node {@code %s} (%s).'
+            % (node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. The base URL is configuration, never '
+            'source: the address ACE used is recorded in the provenance manifest and the README, '
+            'and must be supplied per environment.' % self.plan_id)
         body = '''@Component
 public class %(cls)sClient {
 
@@ -1355,7 +1541,7 @@ public class %(cls)sClient {
     }
 }''' % {'cls': pascal(node['id']), 'field': field, 'construction': construction,
         'call': call, 'key': key}
-        return self._header('client', imports, javadoc, [], body)
+        return self._header('client', imports, comment, [], body)
 
     def _file_in(self, flow, node):
         key = kebab(node['id'])
@@ -1365,13 +1551,12 @@ public class %(cls)sClient {
                    'org.springframework.stereotype.Component',
                    'java.io.IOException', 'java.nio.file.DirectoryStream', 'java.nio.file.Files',
                    'java.nio.file.Path', 'java.nio.file.Paths']
-        javadoc = '''/**
- * File ingress replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE polled {@code %s}. Each
- * file read is handed to the flow and then moved aside, so a restart does not
- * reprocess it.
- */''' % (node['reference'], node['type'], self.plan_id, self._destination(node, 'DIR'))
+        comment = javadoc(
+            'File ingress replacing ACE node {@code %s} (%s).'
+            % (node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. ACE polled {@code %s}. Each file read is '
+            'handed to the flow and then moved aside, so a restart does not reprocess it.'
+            % (self.plan_id, self._destination(node, 'DIR')))
         body = '''@Component
 public class %(cls)sIngest {
 
@@ -1379,7 +1564,7 @@ public class %(cls)sIngest {
 
     private final Path directory;
 
-    public %(cls)sIngest(@Value("${%(prefix)s.files.%(key)s.directory}") String directory) {
+%(constructor)s
         this.directory = Paths.get(directory);
     }
 
@@ -1401,8 +1586,11 @@ public class %(cls)sIngest {
             log.warn("ingress failed: {}", exception.getMessage());
         }
     }
-}''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key}
-        return self._header('file', imports, javadoc, [], body)
+}''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key,
+        'constructor': signature(
+            'public %sIngest' % pascal(node['id']),
+            ['@Value("${%s.files.%s.directory}") String directory' % (self.prefix, key)])}
+        return self._header('file', imports, comment, [], body)
 
     def _file_out(self, flow, node):
         key = kebab(node['id'])
@@ -1413,11 +1601,11 @@ public class %(cls)sIngest {
                    'java.io.IOException', 'java.nio.charset.StandardCharsets',
                    'java.nio.file.Files', 'java.nio.file.Path', 'java.nio.file.Paths',
                    'java.util.UUID']
-        javadoc = '''/**
- * File egress replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE wrote to {@code %s}.
- */''' % (node['reference'], node['type'], self.plan_id, self._destination(node, 'DIR'))
+        comment = javadoc(
+            'File egress replacing ACE node {@code %s} (%s).'
+            % (node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. ACE wrote to {@code %s}.'
+            % (self.plan_id, self._destination(node, 'DIR')))
         body = '''@Component
 public class %(cls)sWriter {
 
@@ -1425,7 +1613,7 @@ public class %(cls)sWriter {
 
     private final Path directory;
 
-    public %(cls)sWriter(@Value("${%(prefix)s.files.%(key)s.directory}") String directory) {
+%(constructor)s
         this.directory = Paths.get(directory);
     }
 
@@ -1439,20 +1627,21 @@ public class %(cls)sWriter {
             throw new FlowException("FILE_WRITE_FAILED", "could not write the outbound file", 500);
         }
     }
-}''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key}
-        return self._header('file', imports, javadoc, [], body)
+}''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key,
+        'constructor': signature(
+            'public %sWriter' % pascal(node['id']),
+            ['@Value("${%s.files.%s.directory}") String directory' % (self.prefix, key)])}
+        return self._header('file', imports, comment, [], body)
 
     def _scheduler(self, flow, node):
         key = kebab(node['id'])
         imports = ['org.slf4j.Logger', 'org.slf4j.LoggerFactory',
                    'org.springframework.scheduling.annotation.Scheduled',
                    'org.springframework.stereotype.Component']
-        javadoc = '''/**
- * Timer replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE's TimeoutNotification fired
- * on its own schedule; the cron expression is configuration.
- */''' % (node['reference'], node['type'], self.plan_id)
+        comment = javadoc(
+            'Timer replacing ACE node {@code %s} (%s).' % (node['reference'], node['type']),
+            "Generated under migration plan {@code %s}. ACE's TimeoutNotification fired on its own "
+            'schedule; the cron expression is configuration.' % self.plan_id)
         body = '''@Component
 public class %(cls)sScheduler {
 
@@ -1464,7 +1653,7 @@ public class %(cls)sScheduler {
         // TODO invoke the work ACE's timeout subflow performed on each tick.
     }
 }''' % {'cls': pascal(node['id']), 'prefix': self.prefix, 'key': key}
-        return self._header('scheduler', imports, javadoc, [], body)
+        return self._header('scheduler', imports, comment, [], body)
 
     def _routing(self, flow, node):
         suffix = 'Filter' if node['role'] == 'FILTER' else 'Router'
@@ -1474,68 +1663,62 @@ public class %(cls)sScheduler {
         else:
             imports.append('java.util.Map')
         notes = [note for module in flow['modules'] for note in module.notes]
-        javadoc = '''/**
- * %s replacing ACE node {@code %s} (%s).
- *
- * <p>Generated under migration plan {@code %s}. ACE decided the branch in ESQL;
- * the predicate below accepts every non-empty message until that condition is
- * translated.%s
- */''' % (suffix, node['reference'], node['type'], self.plan_id,
-          ('\n *\n * <p>Related ESQL: ' + _escape('; '.join(notes[:4]))) if notes else '')
+        comment = javadoc(
+            '%s replacing ACE node {@code %s} (%s).'
+            % (suffix, node['reference'], node['type']),
+            'Generated under migration plan {@code %s}. ACE decided the branch in ESQL; the '
+            'predicate below accepts every non-empty message until that condition is translated.'
+            % self.plan_id,
+            ('Related ESQL: ' + _escape('; '.join(notes[:4]))) if notes else None)
         body = '''@Component
 public class %(cls)s%(suffix)s {
 
-    /**
-     * TODO Translate the ACE routing condition for node {@code %(node)s}.
-     */
-    public boolean matches(%(request)s request) {
+%(doc)s
+%(matches)s
         return request != null;
     }
-}''' % {'cls': pascal(node['id']), 'suffix': suffix, 'node': node['id'],
-        'request': flow['request_type']}
-        return self._header('routing', imports, javadoc, [], body)
+}''' % {'cls': pascal(node['id']), 'suffix': suffix,
+        'doc': javadoc('TODO Translate the ACE routing condition for node {@code %s}.'
+                       % node['id'], indent=4),
+        'matches': signature('public boolean matches',
+                             ['%s request' % flow['request_type']])}
+        return self._header('routing', imports, comment, [], body)
 
     def _repository(self):
         imports = ['org.springframework.jdbc.core.JdbcTemplate',
                    'org.springframework.stereotype.Repository',
                    'java.util.List', 'java.util.Map']
-        tables = ''.join('\n * <li>{@code %s}</li>' % table for table in self.databases)
-        javadoc = '''/**
- * Database access for the tables the ACE ESQL referenced.
- *
- * <p>Generated under migration plan {@code %s}. Referenced tables:
- *
- * <ul>%s
- * </ul>
- */''' % (self.plan_id, tables)
+        comment = javadoc(
+            'Database access for the tables the ACE ESQL referenced.',
+            'Generated under migration plan {@code %s}. Referenced tables:' % self.plan_id,
+            ('ul', ['{@code %s}' % table for table in self.databases]))
         body = '''@Repository
 public class %(app)sRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public %(app)sRepository(JdbcTemplate jdbcTemplate) {
+%(constructor)s
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /**
-     * TODO Replace with the statement the ESQL ran. ACE referenced {@code %(table)s}
-     * but the ESQL's own SELECT list and predicate are not recoverable from the
-     * reference alone.
-     */
-    public List<Map<String, Object>> select() {
+%(doc)s
+%(select)s
         return jdbcTemplate.queryForList("select * from %(table)s");
     }
-}''' % {'app': self.app, 'table': self.databases[0]}
-        return self._header('persistence', imports, javadoc, [], body)
+}''' % {'app': self.app, 'table': self.databases[0],
+        'constructor': signature('public %sRepository' % self.app, ['JdbcTemplate jdbcTemplate']),
+        'doc': javadoc('TODO Replace with the statement the ESQL ran. ACE referenced {@code %s} '
+                       "but the ESQL's own SELECT list and predicate are not recoverable from the "
+                       'reference alone.' % self.databases[0], indent=4),
+        'select': signature('public List<Map<String, Object>> select', [])}
+        return self._header('persistence', imports, comment, [], body)
 
     def _flow_exception(self):
-        javadoc = '''/**
- * A failure inside a migrated flow, carrying the status the caller should see.
- *
- * <p>Generated under migration plan {@code %s}. ACE's Throw and error-handler
- * subflows composed an error response rather than propagating a stack trace;
- * this is the equivalent, and {@code GlobalExceptionHandler} renders it.
- */''' % self.plan_id
+        comment = javadoc(
+            'A failure inside a migrated flow, carrying the status the caller should see.',
+            "Generated under migration plan {@code %s}. ACE's Throw and error-handler subflows "
+            'composed an error response rather than propagating a stack trace; this is the '
+            'equivalent, and {@code GlobalExceptionHandler} renders it.' % self.plan_id)
         body = '''public class FlowException extends RuntimeException {
 
     private final String code;
@@ -1555,7 +1738,7 @@ public class %(app)sRepository {
         return status;
     }
 }'''
-        return self._header('exception', [], javadoc, [], body)
+        return self._header('exception', [], comment, [], body)
 
     def _exception_handler(self):
         imports = ['org.slf4j.Logger', 'org.slf4j.LoggerFactory',
@@ -1566,15 +1749,13 @@ public class %(app)sRepository {
                    '%s.dto.ErrorResponse' % self.package]
         timeout = any(_normal(node['type']).find('timeout') >= 0
                       for flow in self.flows for node in flow['nodes'])
-        javadoc = '''/**
- * Renders every failure as the error contract, in one place.
- *
- * <p>Generated under migration plan {@code %s}. ACE generated a Catch, Failure
- * and Timeout subflow per input node, each composing an error response; this
- * advice is their single equivalent.%s
- */''' % (self.plan_id,
-          '\n *\n * <p>A timeout answers 408, never 500 -- the ACE timeout subflow this '
-          '\n * replaces made that distinction.' if timeout else '')
+        comment = javadoc(
+            'Renders every failure as the error contract, in one place.',
+            'Generated under migration plan {@code %s}. ACE generated a Catch, Failure and Timeout '
+            'subflow per input node, each composing an error response; this advice is their single '
+            'equivalent.' % self.plan_id,
+            'A timeout answers 408, never 500 -- the ACE timeout subflow this replaces made that '
+            'distinction.' if timeout else None)
         body = '''@RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -1588,7 +1769,8 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> onInvalidRequest(MethodArgumentNotValidException exception) {
+    public ResponseEntity<ErrorResponse> onInvalidRequest(
+            MethodArgumentNotValidException exception) {
         log.warn("rejected an invalid request: {}", exception.getMessage());
         return ResponseEntity.badRequest()
                 .body(new ErrorResponse("REQUEST_INVALID", "the request failed validation"));
@@ -1598,25 +1780,27 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> onUnexpected(Exception exception) {
         log.error("unexpected failure", exception);
         return ResponseEntity.internalServerError()
-                .body(new ErrorResponse("INTERNAL_ERROR", "the service could not complete the request"));
+                .body(new ErrorResponse("INTERNAL_ERROR",
+                        "the service could not complete the request"));
     }
 }'''
-        return self._header('exception', imports, javadoc, [], body)
+        return self._header('exception', imports, comment, [], body)
 
     def _error_response(self):
-        javadoc = '''/**
- * The error contract every failed call answers with.
- *
- * <p>Generated under migration plan {@code %s}.
- */''' % self.plan_id
+        comment = javadoc(
+            'The error contract every failed call answers with.',
+            'Generated under migration plan {@code %s}.' % self.plan_id)
         body = '''@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ErrorResponse(
-        @JsonProperty("code") String code,
-        @JsonProperty("message") String message) {
+        @JsonProperty("code")
+        String code,
+
+        @JsonProperty("message")
+        String message) {
 }'''
         return self._header('dto', ['com.fasterxml.jackson.annotation.JsonInclude',
                                     'com.fasterxml.jackson.annotation.JsonProperty'],
-                            javadoc, [], body)
+                            comment, [], body)
 
     def _correlation_filter(self):
         imports = ['jakarta.servlet.FilterChain', 'jakarta.servlet.ServletException',
@@ -1624,13 +1808,11 @@ public record ErrorResponse(
                    'org.slf4j.MDC', 'org.springframework.stereotype.Component',
                    'org.springframework.web.filter.OncePerRequestFilter',
                    'java.io.IOException', 'java.util.UUID']
-        javadoc = '''/**
- * Carries a correlation id across the request, as ACE carried its own.
- *
- * <p>Generated under migration plan {@code %s}. Differential testing compares
- * an ACE run with a Spring run case by case, which needs a shared identifier on
- * both sides.
- */''' % self.plan_id
+        comment = javadoc(
+            'Carries a correlation id across the request, as ACE carried its own.',
+            'Generated under migration plan {@code %s}. Differential testing compares an ACE run '
+            'with a Spring run case by case, which needs a shared identifier on both sides.'
+            % self.plan_id)
         body = '''@Component
 public class CorrelationIdFilter extends OncePerRequestFilter {
 
@@ -1653,7 +1835,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         }
     }
 }'''
-        return self._header('support', imports, javadoc, [], body)
+        return self._header('support', imports, comment, [], body)
 
     def _messaging_config(self):
         imports = ['org.springframework.context.annotation.Bean',
@@ -1661,13 +1843,11 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
                    'org.springframework.jms.support.converter.MappingJackson2MessageConverter',
                    'org.springframework.jms.support.converter.MessageConverter',
                    'org.springframework.jms.support.converter.MessageType']
-        javadoc = '''/**
- * JSON message conversion for the JMS destinations this service uses.
- *
- * <p>Generated under migration plan {@code %s}. Without this the default
- * converter accepts only serialisable payloads, and the generated records are
- * not serialisable -- the flow would fail at the first publish.
- */''' % self.plan_id
+        comment = javadoc(
+            'JSON message conversion for the JMS destinations this service uses.',
+            'Generated under migration plan {@code %s}. Without this the default converter accepts '
+            'only serialisable payloads, and the generated records are not serialisable -- the '
+            'flow would fail at the first publish.' % self.plan_id)
         body = '''@Configuration
 public class MessagingConfig {
 
@@ -1679,7 +1859,7 @@ public class MessagingConfig {
         return converter;
     }
 }'''
-        return self._header('config', imports, javadoc, [], body)
+        return self._header('config', imports, comment, [], body)
 
     # -- resources ----------------------------------------------------------
     def _resource_files(self):
@@ -1807,10 +1987,14 @@ logging:
         mock_annotation = '@MockitoBean' if self.spring_minor >= (3, 4) else '@MockBean'
         files = {'%s/%sApplicationTests.java' % (self.test_dir, self.app): self._context_test()}
         for flow in self.flows:
-            controller = next((n for n in flow['nodes'] if n['role'] in ('HTTP_IN', 'SOAP_IN')), None)
-            if controller is not None:
-                files['%s/controller/%sControllerTest.java' % (self.test_dir, flow['name'])] = \
-                    self._controller_test(flow, controller, mock, mock_annotation)
+            # Driven by the same ``_inbound`` naming the controllers use. Picking
+            # the flow's first inbound node here while ``_java_files`` wrote the
+            # last one's class meant the test exercised a controller that no
+            # longer existed under that name -- it posted JSON at a SOAP
+            # endpoint and failed on content type.
+            for name, node in self._inbound(flow, ('HTTP_IN', 'SOAP_IN'), 'Controller'):
+                files['%s/controller/%sTest.java' % (self.test_dir, name)] = \
+                    self._controller_test(flow, node, name, mock, mock_annotation)
             for module in flow['modules']:
                 name = pascal(module.name) + 'Transformer'
                 files['%s/transform/%sTest.java' % (self.test_dir, name)] = \
@@ -1818,12 +2002,10 @@ logging:
         return files
 
     def _context_test(self):
-        javadoc = '''/**
- * The context loads with every generated component wired.
- *
- * <p>Generated under migration plan {@code %s}. This is the test that catches a
- * component the generator wrote but did not wire.
- */''' % self.plan_id
+        comment = javadoc(
+            'The context loads with every generated component wired.',
+            'Generated under migration plan {@code %s}. This is the test that catches a component '
+            'the generator wrote but did not wire.' % self.plan_id)
         body = '''@SpringBootTest
 @ActiveProfiles("test")
 class %sApplicationTests {
@@ -1835,11 +2017,15 @@ class %sApplicationTests {
         return self._header('', ['org.junit.jupiter.api.Test',
                                  'org.springframework.boot.test.context.SpringBootTest',
                                  'org.springframework.test.context.ActiveProfiles'],
-                            javadoc, [], body)
+                            comment, [], body)
 
-    def _controller_test(self, flow, node, mock_import, mock_annotation):
+    def _controller_test(self, flow, node, controller, mock_import, mock_annotation):
         path = self._endpoint(node, flow)
         method = self._http_method(node).lower()
+        # The content type has to be the one the controller declares, or the
+        # request is rejected with 415 before it reaches the method under test.
+        media = 'MediaType.TEXT_XML' if node['role'] == 'SOAP_IN' else 'MediaType.APPLICATION_JSON'
+        payload = '<request/>' if node['role'] == 'SOAP_IN' else '{}'
         imports = ['org.junit.jupiter.api.Test',
                    'org.springframework.beans.factory.annotation.Autowired',
                    'org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest',
@@ -1856,13 +2042,12 @@ class %sApplicationTests {
         else:
             imports.append('java.util.Map')
             stub = 'Map.of()'
-        javadoc = '''/**
- * The endpoint ACE published is served on the path ACE published.
- *
- * <p>Generated under migration plan {@code %s} from node {@code %s}.
- */''' % (self.plan_id, node['reference'])
-        body = '''@WebMvcTest(%(flow)sController.class)
-class %(flow)sControllerTest {
+        comment = javadoc(
+            'The endpoint ACE published is served on the path ACE published.',
+            'Generated under migration plan {@code %s} from node {@code %s}.'
+            % (self.plan_id, node['reference']))
+        body = '''@WebMvcTest(%(controller)s.class)
+class %(controller)sTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -1875,13 +2060,13 @@ class %(flow)sControllerTest {
         given(service.process(any(), any())).willReturn(%(stub)s);
 
         mockMvc.perform(%(method)s("%(path)s")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .contentType(%(media)s)
+                        .content("%(payload)s"))
                 .andExpect(status().isOk());
     }
-}''' % {'flow': flow['name'], 'mock': mock_annotation, 'stub': stub,
-        'method': method, 'path': path}
-        return self._header('controller', imports, javadoc, [], body)
+}''' % {'flow': flow['name'], 'mock': mock_annotation, 'stub': stub, 'controller': controller,
+        'method': method, 'path': path, 'media': media, 'payload': payload}
+        return self._header('controller', imports, comment, [], body)
 
     def _transformer_test(self, flow, module, class_name):
         request, response = flow['request'], flow['response']
@@ -1898,30 +2083,34 @@ class %(flow)sControllerTest {
                    'static org.junit.jupiter.api.Assertions.assertNotNull']
         if copy and request is not None:
             imports.append('%s.dto.%s' % (self.package, request.name))
-            arguments = ', '.join('"generated-value"' if component == copy[0] else 'null'
-                                  for _, component, _ in request.components)
-            assertion = '''        %s result = new %s().transform(new %s(%s));
+            imports.append('%s.dto.%s' % (self.package, response.name))
+            arguments = ['"generated-value"' if component == copy[0] else 'null'
+                         for _, component, _ in request.components]
+            assertion = '''%s
+        %s result = new %s().transform(source);
 
         assertNotNull(result);
         assertEquals("generated-value", result.%s());''' % (
-                response.name, class_name, request.name, arguments, copy[1])
-            imports.append('%s.dto.%s' % (self.package, response.name))
-            note = '\n *\n * <p>Pins {@code %s}.' % _escape(copy[2])
+                signature('%s source = new %s' % (request.name, request.name), arguments,
+                          tail=';', indent=8),
+                response.name, class_name, copy[1])
+            note = 'Pins {@code %s}.' % _escape(copy[2])
         elif flow['typed']:
             imports.append('%s.dto.%s' % (self.package, request.name))
-            arguments = ', '.join('null' for _ in request.components)
-            assertion = '        assertNotNull(new %s().transform(new %s(%s)));' % (
-                class_name, request.name, arguments)
-            note = ''
+            assertion = '''%s
+        assertNotNull(new %s().transform(source));''' % (
+                signature('%s source = new %s' % (request.name, request.name),
+                          ['null' for _ in request.components], tail=';', indent=8),
+                class_name)
+            note = None
         else:
             imports.append('java.util.Map')
             assertion = '        assertNotNull(new %s().transform(Map.of("field", "value")));' % class_name
-            note = ''
-        javadoc = '''/**
- * The ESQL assignments of module {@code %s} are applied.
- *
- * <p>Generated under migration plan {@code %s}.%s
- */''' % (module.name, self.plan_id, note)
+            note = None
+        comment = javadoc(
+            'The ESQL assignments of module {@code %s} are applied.' % module.name,
+            'Generated under migration plan {@code %s}.' % self.plan_id,
+            note)
         body = '''class %sTest {
 
     @Test
@@ -1929,7 +2118,7 @@ class %(flow)sControllerTest {
 %s
     }
 }''' % (class_name, assertion)
-        return self._header('transform', imports, javadoc, [], body)
+        return self._header('transform', imports, comment, [], body)
 
     # -- README -------------------------------------------------------------
     def _readme(self):
