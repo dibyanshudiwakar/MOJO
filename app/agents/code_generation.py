@@ -14,7 +14,7 @@ does not hold.
 import json
 import re
 from pathlib import Path
-from app.agents.artefact import produce
+from app.agents.artefact import produce, produce_many
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import ReasoningGateway
 from app.agents.skills import SkillIntegrityError
@@ -150,9 +150,96 @@ class CodeGenerationAgent(BaseAgent):
         return {'attempted': True, 'applied': applied, 'refused': refused,
                 'outcome': 'applied' if applied else 'all_edits_refused', 'mode': provenance.get('mode', '')}
 
+    LAYOUT_PROMPT = 'agent/code-generation/project-layout'
+    FILE_PROMPT = 'agent/code-generation/file-synthesis'
+
+    def _skill_for_backend(self, context, model):
+        """The skill, narrowed to the structure plus this backend's connector."""
+        connector = _CONNECTOR_REFERENCE.get((model.get('backend_type') or {}).get('type', ''))
+        try:
+            own = context.skill()
+            if own is None:
+                return None
+            wanted = ['structural-conventions.md', 'mandatory-migration-rules.md']
+            if connector:
+                wanted.append(connector)
+            return own.focus_many(wanted)
+        except (AttributeError, KeyError, SkillIntegrityError):
+            return None
+
+    def _author_project(self, context, service, plan_id):
+        """The project, authored by the model from the skill. ``None`` to fall back.
+
+        The skill is the authority on structure, so the layout is asked for
+        first: which files this repository contains, and what its root
+        directory is called. ``springgen`` cannot answer that -- its layout is
+        hardcoded plain Spring Boot, so a skill requiring parent and web Maven
+        modules under an ``EIPMS_`` root could never be honoured, and it
+        generates an ``exception`` package that Rule 10 forbids outright.
+
+        All-or-nothing on purpose. A project missing its parent POM does not
+        build, and a half-authored tree is worse than a consistently generated
+        one -- so any failure returns ``None`` and the deterministic generator
+        produces the whole project instead, with the reason recorded.
+        """
+        plan, analysis, framework, specification = service.generation_inputs(
+            context.job_id, plan_id)
+        model = json.loads(analysis['semantic_model'])
+        skill = self._skill_for_backend(context, model)
+        standards = json.loads(framework['standards'] or '{}') if framework else {}
+        layout, provenance = produce(
+            context, self.LAYOUT_PROMPT,
+            {'service_name': context.param('service_name'),
+             'package_name': context.param('package_name'),
+             'backend_type': (model.get('backend_type') or {}).get('type', ''),
+             'tasks': json.loads(plan['tasks'] or '[]'),
+             'semantic_model': model, 'framework_standards': standards},
+            lambda: {'files': []}, skill=skill)
+        wanted = layout.get('files') or []
+        if not wanted:
+            provenance.setdefault('reason', 'no_layout_from_model')
+            return None, provenance
+
+        def unauthored(path):
+            return {'path': path, 'content': ''}
+
+        authored, file_provenance = produce_many(
+            context, self.FILE_PROMPT,
+            [(item['path'], {'path': item['path'], 'purpose': item.get('purpose', ''),
+                             'source_reference': item.get('source_reference', ''),
+                             'skill_reference': item.get('skill_reference', ''),
+                             'service_name': context.param('service_name'),
+                             'package_name': context.param('package_name'),
+                             'tasks': json.loads(plan['tasks'] or '[]'),
+                             'semantic_model': model, 'framework_standards': standards})
+             for item in wanted],
+            unauthored, skill=skill)
+        files = [(path, answer.get('content') or '') for path, answer in authored.items()
+                 if (answer.get('content') or '').strip()]
+        if len(files) != len(wanted):
+            # Any unauthored file means the tree is incomplete; the fallback
+            # produces a coherent project rather than a partial one.
+            file_provenance['mode'] = 'DETERMINISTIC_FALLBACK'
+            file_provenance['artefact_source'] = 'DETERMINISTIC'
+            file_provenance['reason'] = 'incomplete_authorship:%d_of_%d_files' % (
+                len(files), len(wanted))
+            return None, file_provenance
+        actions = ['omitted by the model: ' + str(x) for x in (layout.get('omitted') or [])]
+        recorded = service.record_generated_project(
+            context.job_id, plan_id, context.param('output_root'),
+            layout.get('root') or '', files, action_items=actions)
+        file_provenance['layout_root'] = layout.get('root') or ''
+        file_provenance['file_count'] = len(files)
+        return recorded, file_provenance
+
     def execute(self, context):
         service = MappingAndPlanningService(self.repo)
         plan_id = context.param('plan_id')
+        generated, authoring = self._author_project(context, service, plan_id)
+        if generated is not None:
+            synthesis = {'attempted': False, 'applied': [], 'refused': [],
+                         'outcome': 'model_authored_whole_project', 'mode': authoring.get('mode', '')}
+            return self._result(context, service, plan_id, generated, synthesis, authoring)
         generated = service.generate_spring(
             context.job_id, plan_id,
             context.param('output_root'),
@@ -167,6 +254,15 @@ class CodeGenerationAgent(BaseAgent):
         synthesis = self._synthesize_business_logic(
             context, generated['project_root'], generated.get('stub_sources', {}),
             generated.get('semantic_model', {}))
+        return self._result(context, service, plan_id, generated, synthesis, authoring)
+
+    def _result(self, context, service, plan_id, generated, synthesis, authoring):
+        """The quality gate and the result, identical whichever path authored it.
+
+        Shared so a model-authored project is gated, hashed and reported exactly
+        as a generated one -- the gate is the independent verdict on the code,
+        and it must not be softer for the path that wrote the code.
+        """
         manifest_path = Path(generated['manifest'])
         manifest = json.loads(manifest_path.read_text())
         if synthesis['applied']:
@@ -213,6 +309,10 @@ class CodeGenerationAgent(BaseAgent):
                                    'quality_run_id': quality['quality_run_id'],
                                    'quality_status': quality['status']}),),
             metrics={'file_count': generated['file_count'], 'test_count': len(tests),
+                     # Which path authored this project, and why if it fell back.
+                     'authored_by': authoring.get('artefact_source', 'DETERMINISTIC'),
+                     'authoring_reason': authoring.get('reason', ''),
+                     'layout_root': authoring.get('layout_root', ''),
                      'quality_status': quality['status'], 'failed_checks': failed,
                      # What the generator could not derive from the plan and the
                      # semantic model. Surfaced on the run so the output panel

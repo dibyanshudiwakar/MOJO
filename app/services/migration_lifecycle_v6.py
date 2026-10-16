@@ -1,4 +1,4 @@
-import json, re, shutil, subprocess
+import json, os, re, shutil, subprocess
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services.enterprise_v5 import SpringProjectGenerator, BuildRunner, DifferentialEvidenceEngine
@@ -89,6 +89,24 @@ def is_presentation_only(node_type):
  node, already resolved by the generic match above) is never caught by this.
  """
  return str(node_type).startswith('utility:') or str(node_type).startswith('ComIbmLabel.')
+
+def _long(path):
+ """``path``, written through Windows' extended-length form when needed.
+
+ The skill's prescribed layout is deep on purpose -- an ``EIPMS_<service>``
+ root, then a ``*-web`` module, then ``src/main/java`` and a five-segment
+ package -- roughly 150 characters before the workspace root is even counted.
+ On Windows that crosses MAX_PATH (260) for any realistic workspace and the
+ write fails with FileNotFoundError on a directory that was just created, which
+ reads as a logic bug and is not one. The extended-length prefix lifts the
+ limit; everywhere else this is the path unchanged.
+ """
+ if os.name != 'nt':return path
+ prefix='\\\\?\\'
+ text=str(path)
+ if text.startswith(prefix) or len(text)<250:return path
+ return Path(prefix+text) if Path(text).is_absolute() else path
+
 
 class MappingAndPlanningService:
  def __init__(self,repo):
@@ -193,6 +211,52 @@ class MappingAndPlanningService:
   risks=self.repo.rows('select * from migration_risks where catalogue_id=?',(catalogue_id,));items=[{'kind':'MIGRATION_PLAN','id':p['id'],'version':p['version'],'hash':p['content_hash']},{'kind':'MAPPING_CATALOGUE','id':c['id'],'version':c['version'],'hash':c['content_hash']}];package={'gate':'G3','approver_role':'SOLUTION_ARCHITECT','decision_options':['APPROVE','REJECT','CLARIFY'],'plan':p,'mapping_catalogue':c,'risks':risks,'artefacts':items,'decision':'PENDING_APPROVAL','created_at':now()};raw=json.dumps(package,sort_keys=True,default=str);package_id=uid()
   with self.repo.connect() as db:db.execute('insert into approval_packages values(?,?,?,?,?,?,?,?,?)',(package_id,job_id,'G3','PENDING_APPROVAL',raw,digest(raw),json.dumps(items),'[]',now()))
   return {'package_id':package_id,'status':'PENDING_APPROVAL','content_hash':digest(raw),'artefacts':items}
+ def generation_inputs(self,job_id,plan_id):
+  """Gate-check and return the generation inputs, for a caller that authors the files itself.
+
+  Separated from ``generate_spring`` so the G3 check runs identically whether
+  the project is model-authored or generated: an unapproved plan must not be
+  buildable by choosing a different authoring strategy.
+  """
+  p=self.repo.one('select * from migration_plans where id=? and job_id=?',(plan_id,job_id))
+  if not p:raise ValueError('plan_not_found')
+  if not self._approved(job_id,'G3',p['content_hash']):raise PermissionError('g3_plan_approval_required')
+  a=self.repo.one('select * from ace_analyses where id=?',(p['analysis_id'],))
+  f=self.repo.one('select * from framework_baselines where id=?',(p['framework_id'],)) if p['framework_id'] else None
+  s=self.repo.one('select * from migration_specs where id=?',(p['specification_id'],))
+  if not a or not s:raise ValueError('generation_inputs_missing')
+  return p,a,f,s
+ def record_generated_project(self,job_id,plan_id,output_root,root_name,files,action_items=(),stub_sources=None):
+  """Persist a model-authored project exactly as a generated one.
+
+  ``files`` is ``[(relative_path, content)]``. Every write is re-resolved
+  under the workspace root before it happens: the paths came from a model, so
+  containment is enforced here rather than assumed from the schema's pattern,
+  which is only a cheap filter and does not stop ``..``.
+
+  The manifest, the provenance manifest, the content hash and the
+  ``generated_artifacts`` rows are built the same way ``generate_spring``
+  builds them, so a gate, the output panel and variance analysis cannot tell
+  the two paths apart.
+  """
+  from app.services import workspace as _ws
+  p,a,f,s=self.generation_inputs(job_id,plan_id)
+  base=_ws.resolve(Path(output_root)/(root_name or ''),must_exist=False,create=True)
+  manifest=[];refused=[]
+  for rel,content in files:
+   try:target=_ws.resolve(base/rel,must_exist=False)
+   except Exception as exc:refused.append('%s:%s' % (rel,type(exc).__name__));continue
+   if base not in target.parents and target!=base:refused.append(rel+':path_outside_project');continue
+   _long(target.parent).mkdir(parents=True,exist_ok=True);_long(target).write_text(content,encoding='utf-8')
+   manifest.append({'path':target.relative_to(base).as_posix(),'hash':digest(content),'plan_id':plan_id})
+  result={'root':str(base),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+  (base/'generated-manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+  self._register_artifacts(job_id,plan_id,result)
+  model=json.loads(a['semantic_model'])
+  items=list(action_items)+[('path refused: '+x) for x in refused]
+  provenance={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':manifest,'action_items':items,'authored_by':'MODEL','ace_endpoints':[x for x in model.get('interfaces',[]) if x.get('endpoint') not in ('','UNKNOWN',None)],'generated_at':now()}
+  mf=base/'provenance-manifest.json';mf.write_text(json.dumps(provenance,indent=2),encoding='utf-8')
+  return {'project_root':str(base),'file_count':len(manifest)+1,'manifest':str(mf),'content_hash':digest(json.dumps(provenance,sort_keys=True)),'action_items':items,'refused':refused,'stub_sources':stub_sources or {},'semantic_model':model}
  def generate_spring(self,job_id,plan_id,output_root,service_name,package_name,source_root=None):
   """Write the target project from the approved plan.
 
