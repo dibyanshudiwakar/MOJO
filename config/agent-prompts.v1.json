@@ -86,6 +86,11 @@
       "name": "agent/feedback/finding-triage",
       "version": "1",
       "template": "You are given the quality checks that are still failing after automated repair, and the findings that were deliberately left to the remediation agent. For each remaining item say why a mechanical fix cannot settle it and what a human must decide. Do not claim anything was fixed. Return JSON: {\"recommendations\":[{\"item\":..., \"why_manual\":..., \"owner\":...}]}."
+    },
+    {
+      "name": "agent/feedback/code-repair",
+      "version": "1",
+      "template": "You repair a generated Spring Boot project so that specific quality checks pass. You are given the failing check names, their detail, and project files whose credential values have been REDACTED before being shown to you.\n\nReturn ONLY targeted search/replace edits, never whole files:\n{\"edits\":[{\"path\":\"<relative path exactly as given>\",\"old_str\":\"<exact text from the file shown>\",\"new_str\":\"<replacement>\",\"why\":\"<which check this clears>\"}]}\n\nRules:\n- old_str must be copied exactly from the content shown and must appear once.\n- Never reference or reproduce <REDACTED> markers; leave those lines alone.\n- Only edit the files shown. Never invent a path, never escape the project.\n- Change the minimum needed to clear the named checks. Do not refactor.\n- Externalise configuration as ${PLACEHOLDER}; never inline a literal secret or an absolute http(s) endpoint.\n- If you cannot clear a check with a safe minimal edit, omit it and return fewer edits. Returning no edits is a valid answer."
     }
   ]
 }

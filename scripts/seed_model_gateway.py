@@ -19,8 +19,10 @@ Records inserted
                           embeddings, semantic-review), all APPROVED
                           Required because AT-13 in agents.py activates for ALL
                           agents once any model_registry row exists.
-3. prompt_registry     -- one row: the dormancy classification-rationale prompt,
-                          APPROVED, name matching DormancyIntelligenceAgent.PROMPT
+3. prompt_registry     -- every prompt in config/agent-prompts.v1.json,
+                          APPROVED. reason() looks prompts up by name in this
+                          table, so an unregistered prompt means that agent can
+                          never reach the model.
 """
 import argparse
 import json
@@ -122,24 +124,41 @@ def seed(conn, api_base, api_key, model, dry_run=False):
         print('[model_registry]      inserted %s v1 APPROVED' % alias)
 
     # ------------------------------------------------------------------
-    # 3. prompt_registry  (dormancy classification-rationale, APPROVED)
+    # 3. prompt_registry  (every prompt in the governed catalogue, APPROVED)
     # ------------------------------------------------------------------
+    # ReasoningGateway.reason() queries prompt_registry by name, so a prompt
+    # that exists only in config/agent-prompts.v1.json is invisible to it and
+    # the agent silently takes the deterministic path. Seeding one prompt left
+    # 17 of 18 agents unable to reach the model at all, so the whole catalogue
+    # is registered here.
     import hashlib
-    prompt_hash = hashlib.sha256(PROMPT_TEMPLATE.encode()).hexdigest()
-    existing_prompt = conn.execute(
-        "SELECT id FROM prompt_registry WHERE name=? AND version='v1'",
-        (DORMANCY_PROMPT_NAME,)
-    ).fetchone()
-    if existing_prompt:
-        print('[prompt_registry]     %s v1 already exists, skipping' % DORMANCY_PROMPT_NAME)
-    else:
+
+    catalogue = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             'config', 'agent-prompts.v1.json')
+    with open(catalogue, encoding='utf-8') as fh:
+        prompts = json.load(fh)['prompts']
+    # The dormancy template above is kept verbatim: it carries explicit
+    # classification rules the catalogue entry does not.
+    templates = {p['name']: p['template'] for p in prompts}
+    templates[DORMANCY_PROMPT_NAME] = PROMPT_TEMPLATE
+
+    inserted = skipped = 0
+    for name in sorted(templates):
+        template = templates[name]
+        if conn.execute("SELECT id FROM prompt_registry WHERE name=? AND version='v1'",
+                        (name,)).fetchone():
+            skipped += 1
+            continue
         run(
             "INSERT INTO prompt_registry(id,name,version,template,content_hash,status,"
             "approved_by,effective_from,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (uid(), DORMANCY_PROMPT_NAME, 'v1', PROMPT_TEMPLATE, prompt_hash,
+            (uid(), name, 'v1', template,
+             hashlib.sha256(template.encode()).hexdigest(),
              'APPROVED', 'seed', now(), now()),
         )
-        print('[prompt_registry]     inserted %s v1 APPROVED' % DORMANCY_PROMPT_NAME)
+        inserted += 1
+    print('[prompt_registry]     %d inserted APPROVED, %d already present (%d total)'
+          % (inserted, skipped, len(templates)))
 
     if not dry_run:
         conn.commit()

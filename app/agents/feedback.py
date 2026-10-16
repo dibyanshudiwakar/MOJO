@@ -42,7 +42,10 @@ class FeedbackAgent(BaseAgent):
         result = service.apply(
             context.job_id, plan_id, project_root,
             max_passes=int(context.param('max_passes', 3)),
-            execute_build=bool(context.param('execute_build', False)))
+            execute_build=bool(context.param('execute_build', False)),
+            # Carries the provider and correlation id, which is what enables the
+            # model-assisted stage. Without it the agent is deterministic-only.
+            context=context)
 
         # Consulted about what is left, never about what was changed: the fixes
         # are deterministic and the gate has already ruled on them. The payload
@@ -56,12 +59,18 @@ class FeedbackAgent(BaseAgent):
             'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
             'reason': 'quality gate clean and nothing outstanding to triage'})
 
+        rounds = result.get('model_rounds') or []
         metrics = {
             'fix_count': len(result['applied_fixes']),
             'pass_count': len(result['passes']),
             'quality_status': result['quality_status'],
             'unfixed_checks': result['unfixed_checks'],
             'unresolved_count': len(result['unresolved']),
+            # Whether the model stage ran, and what the gate did with its edits.
+            'model_rounds': len(rounds),
+            'model_outcomes': [x.get('outcome') for x in rounds],
+            'model_edits_kept': sum(len(x.get('applied') or []) for x in rounds),
+            'model_edits_refused': sum(len(x.get('refused') or []) for x in rounds),
         }
         if isinstance(answer, dict) and answer.get('recommendations'):
             metrics['model_recommendations'] = answer['recommendations']
@@ -74,6 +83,7 @@ class FeedbackAgent(BaseAgent):
             'passes': result['passes'],
             'unfixed_checks': result['unfixed_checks'],
             'unresolved': result['unresolved'],
+            'model_rounds': rounds,
         }, sort_keys=True)
 
         # A gate still failing after the budget is spent is a real failure: the
