@@ -1,4 +1,6 @@
 ﻿const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Return just the final path segment so absolute workspace paths show as short names in the UI.
+function wsName(p){if(!p)return'';const s=String(p).replace(/[/\\]+$/,'');const i=Math.max(s.lastIndexOf('/'),s.lastIndexOf('\\'));return i>=0?s.slice(i+1):s}
 function fmtDt(v){if(!v||v==='—')return v||'—';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function fmtTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
@@ -75,23 +77,50 @@ function rsClose(){
  document.getElementById('roleTrigger')?.setAttribute('aria-expanded','false')}
 function initRoleSelect(){
  const wrap=$('#roleSel'),trigger=$('#roleTrigger'),panel=$('#rolePanel'),
-       list=$('#roleCheckboxes'),all=$('#roleAll'),txt=$('#roleTriggerText');
- if(!wrap||!trigger||!panel||!list||!txt)return;
- const opt=x=>`<label class="rsel-opt"><input type="checkbox" name="roles" value="${esc(x)}"><span class="rsel-box"></span><span class="rsel-txt">${esc(x.replaceAll('_',' '))}</span></label>`;
+       list=$('#roleCheckboxes'),all=$('#roleAll'),chips=$('#rselChips'),
+       ph=$('#roleTriggerText'),search=$('#roleSearch'),
+       allTxt=$('#roleAllTxt'),
+       panelFt=$('#rolePanelFt'),clearBtn=$('#roleClearBtn'),saveBtn=$('#roleSaveBtn');
+ if(!wrap||!trigger||!panel||!list||!chips||!ph)return;
+ const toLabel=x=>x.split('_').map(w=>w[0]+w.slice(1).toLowerCase()).join(' ');
+ const opt=x=>`<label class="rsel-opt"><input type="checkbox" name="roles" value="${esc(x)}"><span class="rsel-box"></span><span class="rsel-txt">${esc(toLabel(x))}</span></label>`;
  const boxes=()=>[...list.querySelectorAll('input[name="roles"]')];
  function sync(){
   const b=boxes(),picked=b.filter(c=>c.checked);
-  txt.textContent=!picked.length?'Select roles…'
-   :picked.length===1?picked[0].value.replaceAll('_',' ')
-   :picked.length+' roles selected';
-  trigger.classList.toggle('placeholder',!picked.length);
+  if(!picked.length){
+   chips.innerHTML='';ph.textContent='Select one or more roles…';ph.removeAttribute('hidden');
+   trigger.classList.add('placeholder');trigger.classList.remove('has-value')
+  }else if(picked.length>2){
+   chips.innerHTML=`<span class="rsel-count-chip">${picked.length} Roles Selected</span>`;
+   ph.setAttribute('hidden','');trigger.classList.remove('placeholder');trigger.classList.add('has-value')
+  }else{
+   chips.innerHTML=picked.map(c=>`<span class="rsel-chip">${esc(toLabel(c.value))}<span class="rsel-chip-x" data-val="${esc(c.value)}" role="button" tabindex="-1" aria-label="Remove ${esc(toLabel(c.value))}">&#x2715;</span></span>`).join('');
+   ph.setAttribute('hidden','');trigger.classList.remove('placeholder');trigger.classList.add('has-value')}
+  if(allTxt)allTxt.textContent=picked.length?`Select all · ${picked.length} selected`:'Select all';
   if(all){all.checked=!!b.length&&picked.length===b.length;all.indeterminate=picked.length>0&&picked.length<b.length}}
+ function doFilter(){
+  if(!search)return;
+  const q=search.value.toLowerCase().trim();
+  list.querySelectorAll('.rsel-opt').forEach(o=>{
+   const t=o.querySelector('.rsel-txt');
+   if(q&&t&&!t.textContent.toLowerCase().includes(q))o.setAttribute('hidden','');
+   else o.removeAttribute('hidden')})}
  api('/api/v2/auth/roles')
   .then(r=>{list.innerHTML=(r.items||[]).map(opt).join('');sync()})
   .catch(()=>{list.innerHTML=opt('MIGRATION_VIEWER');sync()});
- trigger.onclick=e=>{e.stopPropagation();
+ trigger.onclick=e=>{
+  if(e.target.classList.contains('rsel-chip-x')){
+   const val=e.target.dataset.val;
+   const cb=list.querySelector(`input[value="${val}"]`);
+   if(cb){cb.checked=false;sync()}
+   return}
+  e.stopPropagation();
   const open=wrap.classList.toggle('open');panel.hidden=!open;
-  trigger.setAttribute('aria-expanded',String(open))};
+  trigger.setAttribute('aria-expanded',String(open));
+  if(open&&search){search.value='';doFilter();setTimeout(()=>search.focus(),30)}};
+ if(clearBtn)clearBtn.onclick=e=>{e.stopPropagation();boxes().forEach(c=>{c.checked=false});sync()};
+ if(saveBtn)saveBtn.onclick=e=>{e.stopPropagation();rsClose()};
+ if(search)search.oninput=doFilter;
  list.onchange=sync;
  if(all)all.onchange=()=>{boxes().forEach(c=>{c.checked=all.checked});sync()};
  // Bound once for the page lifetime: authScreen re-renders its markup, so a
@@ -102,7 +131,7 @@ function initRoleSelect(){
 function authScreen(mode,message,bad){
  $('#metrics').innerHTML='';$('#nav').innerHTML='';$('#title').textContent=mode==='signup'?'Create account':'Sign in';$('#panelBackdrop').classList.remove('open');$('#outputPanel').classList.remove('open');document.body.classList.add('auth-mode');
  const signup=mode==='signup';
- $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Modernization Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n">13</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n">6</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n">100%</div><div class="auth-stat-l">Audit&nbsp;Trail</div></div></div><ul class="auth-panel-list"><li>13 specialized AI migration agents</li><li>6-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Modernization Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Approver roles are granted by an administrator.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span id="roleTriggerText">Select roles…</span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap">${signup?'Already registered? <button type="button" id="swapAuth">Sign in</button>':'No account yet? <button type="button" id="swapAuth">Create one</button>'}</p></div></div></div></div>`;
+ $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Modernization Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n">13</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n">6</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n">100%</div><div class="auth-stat-l">Audit&nbsp;Trail</div></div></div><ul class="auth-panel-list"><li>13 specialized AI migration agents</li><li>6-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Modernization Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Approver roles are granted by an administrator.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span class="rsel-input-area"><span class="rsel-chips" id="rselChips"></span><span class="rsel-placeholder" id="roleTriggerText">Select one or more roles…</span></span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><div class="rsel-search-wrap"><input type="text" class="rsel-search" id="roleSearch" placeholder="Search roles…" autocomplete="off" spellcheck="false"></div><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt" id="roleAllTxt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div><div class="rsel-panel-ft" id="rolePanelFt"><button type="button" class="rsel-clear-btn" id="roleClearBtn">Clear</button><button type="button" class="rsel-save-btn" id="roleSaveBtn">Save</button></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap">${signup?'Already registered? <button type="button" id="swapAuth">Sign in</button>':'No account yet? <button type="button" id="swapAuth">Create one</button>'}</p></div></div></div></div>`;
  $('#swapAuth').onclick=()=>authScreen(signup?'login':'signup');
  if(signup)initRoleSelect();
  $('#authForm').onsubmit=async e=>{
@@ -569,7 +598,7 @@ function renderAgentCards(body,agents){
    ${groups.map(([stage,g])=>`<div class="agent-group"><div class="group-header"><span class="group-label">${esc(stage)}</span><span class="group-line"></span><span class="group-meta">${g.agents.length} agent${g.agents.length!==1?'s':''}</span></div><div class="group-grid">${g.agents.map(a=>agentCard(a,skippedByAgent[a.agent_id])).join('')}</div></div>`).join('')}
   </div>`;
  body.querySelector('#acSaveAsTmpl')?.addEventListener('click',()=>{
-  showTemplateModal(null,agents,[...wizard.selected])});
+  showTemplateModal(null,agents,[...wizard.selected],submitPipelineAndRun)});
  body.querySelectorAll('.agent-card').forEach(card=>{
   card.onclick=async()=>{
    const id=card.dataset.agent;
@@ -612,6 +641,24 @@ async function submitPipeline(){
    workspace_dir:j.workspace_dir,repos,selected_agent_ids:[...wizard.selected],
    service_name:wizard.service_name,package_name:wizard.package_name})});
   wizard=null;location.hash='pipelines/'+created.id
+ }catch(e){if(btn)btn.disabled=false;wizardError(e.message)}}
+async function submitPipelineAndRun(){
+ const btn=$('#wizNext');if(btn)btn.disabled=true;
+ const j=wizard.job,repos={ACE:{repo_url:wizard.ace.repo_url,branch:wizard.ace.branch,enabled:true}};
+ if(wizard.frameworkEnabled)repos.FRAMEWORK={repo_url:wizard.framework.repo_url,branch:wizard.framework.branch,enabled:true};
+ else wizard.selected.delete('framework-baseline');
+ repos.TARGET={repo_url:wizard.target.repo_url,branch:wizard.target.branch,push_mode:wizard.targetPush?'PUSH_TO_REPO':'LOCAL_OUTPUT',enabled:true};
+ try{
+  const created=await api('/api/v2/pipelines',{method:'POST',body:JSON.stringify({
+   job:{service:j.service,owner:j.owner,environment:j.environment,project_scope:j.project_scope,
+        sourceRevision:wizard.ace.branch},
+   workspace_dir:j.workspace_dir,repos,selected_agent_ids:[...wizard.selected],
+   service_name:wizard.service_name,package_name:wizard.package_name})});
+  wizard=null;
+  // auto-confirm then auto-run so the pipeline starts immediately
+  try{await api('/api/v2/pipelines/'+created.id+'/confirm',{method:'POST'})}catch(_){}
+  try{await api('/api/v2/pipelines/'+created.id+'/run',{method:'POST'})}catch(_){}
+  location.hash='pipelines/'+created.id
  }catch(e){if(btn)btn.disabled=false;wizardError(e.message)}}
 
 // ── Agent Configuration Modal ─────────────────────────────────────────────
@@ -891,7 +938,7 @@ function computeTemplatePruned(selectedSet,allAgents){
   }
  }
  return{runnable,pruned}}
-async function showTemplateModal(template,allAgents,preselectedIds){
+async function showTemplateModal(template,allAgents,preselectedIds,onSaved){
  const isEdit=!!(template&&template.id);
  const sortedAgents=allAgents.slice().sort((a,b)=>{
   const sa=AGENT_STAGE_MAP[a.agent_id]||'Other',sb=AGENT_STAGE_MAP[b.agent_id]||'Other';
@@ -1041,7 +1088,7 @@ async function showTemplateModal(template,allAgents,preselectedIds){
     await api('/api/v2/agent-templates',{method:'POST',body:JSON.stringify({name,description,agent_ids})});
     notice('Template created')
    }
-   close();agentTemplatesPage()
+   close();if(typeof onSaved==='function')onSaved();else agentTemplatesPage()
   }catch(x){err.style.display='';err.textContent=friendly(x.message);btn.disabled=false}}}
 
 async function modelRegistryPage(){
@@ -1483,7 +1530,7 @@ function syntaxHighlightJson(obj){
 async function pipelineList(){
  const items=(await api('/api/v2/pipelines')).items||[];
  const rows=!items.length?'<div class="empty">No pipelines yet. Use New migration to create one.</div>'
-  :`<div class="table-wrap"><table><thead><tr><th>Workspace</th><th>Status</th><th>Created by</th><th>Created at</th></tr></thead><tbody>${items.map(x=>`<tr class="tr-clickable" data-id="${esc(x.id)}"><td class="td-name">${esc(x.workspace_dir)}</td><td>${stateBadge(x.status||'')}</td><td class="td-light">${esc(x.created_by)}</td><td class="td-date">${esc(fmtDt(x.created_at))}</td></tr>`).join('')}</tbody></table></div>`;
+  :`<div class="table-wrap"><table><thead><tr><th>Workspace</th><th>Status</th><th>Created by</th><th>Created at</th></tr></thead><tbody>${items.map(x=>`<tr class="tr-clickable" data-id="${esc(x.id)}"><td class="td-name">${esc(wsName(x.workspace_dir))}</td><td>${stateBadge(x.status||'')}</td><td class="td-light">${esc(x.created_by)}</td><td class="td-date">${esc(fmtDt(x.created_at))}</td></tr>`).join('')}</tbody></table></div>`;
  $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Migration Pipelines</div><div class="page-sub">Every pipeline created from the migration wizard</div></div><button class="btn-primary btn-new-mig"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> New Migration</button></div><div class="card"><div class="card-head"><div class="card-title">All Pipelines</div></div><div class="card-body">${rows}</div></div>`;
  $('#view').querySelector('.btn-new-mig')?.addEventListener('click',()=>location.hash='new-migration');
  document.querySelectorAll('#view tr[data-id]').forEach(tr=>{tr.onclick=()=>{location.hash='pipelines/'+tr.dataset.id}})}
@@ -1496,7 +1543,7 @@ function stepLabel(step){
  return step.agent_id.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ')}
 async function pipelineDetail(id){
  const p=await api('/api/v2/pipelines/'+id);
- $('#title').textContent=p.workspace_dir||'Pipeline';
+ $('#title').textContent=wsName(p.workspace_dir)||'Pipeline';
  const counts={};p.steps.forEach(s=>counts[s.status]=(counts[s.status]||0)+1);
  const done=(counts.COMPLETED||0),total=p.steps.length,pct=total?Math.round(done/total*100):0;
  const statusBadgeClass=s=>({COMPLETED:'completed',RUNNING:'running',FAILED:'failed',PENDING:'pending',QUEUED:'queued',SKIPPED:'skipped',CANCELLED:'cancelled',WAITING_APPROVAL:'warning'}[s]||'pending');
@@ -1516,7 +1563,7 @@ async function pipelineDetail(id){
   <div class="pipeline-card pc-${p.status.toLowerCase()}">
    <div class="pipeline-card-top">
     <div>
-     <div class="pipeline-id">${esc(p.workspace_dir)}</div>
+     <div class="pipeline-id">${esc(wsName(p.workspace_dir))}</div>
      <div class="pipeline-meta">
       <span class="pipeline-status-chip psc-${p.status.toLowerCase()}">${esc(p.status)}</span>
       <span>By ${esc(p.created_by)}</span>
@@ -1750,8 +1797,8 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  try{notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
  const [d,agentHealth]=await Promise.all([api('/api/v2/dashboard'),api('/api/v2/agent-registry/health').catch(()=>({items:[]}))]);
  const _ah=agentHealth.items||agentHealth.agents||[];
- const agentsRunning=_ah.filter(a=>a.status==='RUNNING').length;
- const totalAgents=_ah.length||14;
+ const agentsRunning=d.running_agents??0;
+ const totalAgents=_ah.length||15;
  const completedJobs=(d.jobs_by_state||[]).find(x=>x.state==='COMPLETED')?.count??0;
  const kpiData=[
   {label:'Active Migrations',value:d.jobs,color:'#2558C4',iconBg:'#DDE9F7',icon:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>',trend:'',trendClass:'trend-neutral'},
@@ -1813,7 +1860,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   const appOverflow=pendingCount>APPR_LIMIT?`<div style="padding:10px 20px 14px"><button id="dashViewAllApprovals2" class="btn-ghost" style="width:100%;justify-content:center;font-size:12px;color:var(--text-2)">+${pendingCount-APPR_LIMIT} more · View all →</button></div>`:'';
   const totalJobs=d.jobs||0;const pendingByGate={};(approvals.items||[]).forEach(x=>{if(x.gate)pendingByGate[x.gate]=(pendingByGate[x.gate]||0)+1});
   const stepCards=plSteps.slice(0,12).map(s=>{const st=s.status||'PENDING';const dot=`<div class="stepdot"></div>`;const time=s.finished_at?'Finished '+fmtTime(s.finished_at):s.started_at?'Running…':'Waiting';return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
-  const pipelineTitle=runPl?(runPl.workspace_dir||runPl.id||'Pipeline'):'Recent Pipeline';
+  const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
   const pipelineBadge=runPl?`<span class="badge badge-running"><span class="badge-dot"></span>RUNNING</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
   const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">Live step execution · ${plSteps.length} steps</div></div>${pipelineBadge}</div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];

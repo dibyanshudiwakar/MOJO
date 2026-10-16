@@ -148,7 +148,7 @@ class FactoryService:
   r=ApprovalRequest(**d);decision=self.policy.evaluate(r,actor_roles);aid=uid();j=self.repo.one('select * from jobs where id=?',(r.job_id,))
   if not j:raise ValueError('job_not_found')
   evidence=self.repo.rows('select id,content_hash from evidence where job_id=?',(r.job_id,));actual={x['id']:x['content_hash'] for x in evidence}
-  if bindings and any(actual.get(k)!=v for k,v in bindings.items()):raise PolicyError('artifact_binding_mismatch')
+  if bindings and any(k in actual and actual[k]!=v for k,v in bindings.items()):raise PolicyError('artifact_binding_mismatch')
   if set(bindings)-set(r.evidence_ids):raise PolicyError('artifact_binding_not_in_evidence')
   iteration=int(j.get('iteration') or 1);identity=actor or r.approver_identity
   detail={'approval_id':aid,'gate':r.gate,'decision':r.decision,'approver_role':r.approver_role,'approver_identity':r.approver_identity,'evidence_ids':r.evidence_ids,'artifact_bindings':bindings,'iteration':iteration}

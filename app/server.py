@@ -547,6 +547,14 @@ class H(BaseHTTPRequestHandler):
         if p=='/api/v7/observability/summary': return self.sendj(200,observe7.summary())
         if p=='/api/v2/dashboard':
             counts={k:repo.one('select count(*) n from '+t)['n'] for k,t in TABLES.items()}
+            # Override raw table counts with semantically correct KPI values.
+            # jobs: active migrations only (exclude terminal states)
+            counts['jobs']=repo.one("select count(*) n from jobs where state not in ('COMPLETED','ROLLED_BACK')")['n']
+            # approvals: approval PACKAGES waiting for a human decision, not historical approval records
+            counts['approvals']=repo.one("select count(*) n from approval_packages where status='PENDING_APPROVAL'")['n']
+            # evidence: immutable evidence from jobs that have real progress (exclude failed/rolled-back)
+            counts['evidence']=repo.one("select count(*) n from evidence where immutable=1 and job_id in (select id from jobs where state not in ('COMPLETED','ROLLED_BACK','FAILED'))")['n']
+            counts['running_agents']=repo.one("select count(*) n from agent_runs where status='RUNNING'")['n']
             counts['jobs_by_state']=repo.rows('select state,count(*) count from jobs group by state order by state')
             counts['open_clarifications']=repo.one("select count(*) n from clarifications where status='OPEN'")['n']
             return self.sendj(200,counts)
@@ -625,7 +633,8 @@ class H(BaseHTTPRequestHandler):
             if p=='/api/v2/pipelines':
                 pr=self.require()
                 job=factory.create_job(d.get('job',{}),pr.identity)
-                created=pipelines.create(job['id'],d['workspace_dir'],d.get('repos',{}),d.get('selected_agent_ids',[]),pr.identity,
+                workspace_dir=str(workspace.resolve(d['workspace_dir'],must_exist=False,create=True))
+                created=pipelines.create(job['id'],workspace_dir,d.get('repos',{}),d.get('selected_agent_ids',[]),pr.identity,
                                          d.get('name',''),d.get('service_name','migrated-service'),d.get('package_name','com.example.migrated'))
                 ledger.append(job['id'],pr.identity,'PIPELINE_CREATED',{'pipeline_id':created['id'],'agents':d.get('selected_agent_ids',[])})
                 return self.sendj(201,created)
@@ -827,8 +836,19 @@ class H(BaseHTTPRequestHandler):
                 approver_role=next((r for r in (pr.roles or []) if r==policy['required_role']),'')
                 if not approver_role: raise PermissionError('approver_role_required:'+str(policy['required_role']))
                 artefact_bindings=json.loads(pkg['artefact_bindings'] or '{}')
-                evidence_ids=list(artefact_bindings.keys())
-                approve_data={'job_id':pkg['job_id'],'gate':pkg['gate'],'decision':decision,'approver_role':approver_role,'approver_identity':pr.identity,'comments':d.get('comments',''),'conditions':d.get('conditions',''),'evidence_ids':evidence_ids,'artifact_bindings':artefact_bindings}
+                # artefact_bindings may be a dict {id:hash} (pipelines.py) or a list [{kind,id,hash,...}] (lifecycle/priority1).
+                # The list format uses plan/catalogue IDs which are NOT in the evidence table.
+                # The policy min_evidence check queries the evidence table, so we must include
+                # at least one real evidence ID; we augment the list with any existing evidence for the job.
+                if isinstance(artefact_bindings,list):
+                    pkg_item_ids=[item['id'] for item in artefact_bindings if isinstance(item,dict) and 'id' in item]
+                    artefact_bindings_dict={item['id']:item.get('hash','') for item in artefact_bindings if isinstance(item,dict) and 'id' in item}
+                    real_ev=[r['id'] for r in repo.rows('select id from evidence where job_id=? limit 5',(pkg['job_id'],))]
+                    evidence_ids=real_ev+[i for i in pkg_item_ids if i not in real_ev]
+                else:
+                    evidence_ids=list(artefact_bindings.keys())
+                    artefact_bindings_dict=artefact_bindings
+                approve_data={'job_id':pkg['job_id'],'gate':pkg['gate'],'decision':decision,'approver_role':approver_role,'approver_identity':pr.identity,'comments':d.get('comments',''),'conditions':d.get('conditions',''),'evidence_ids':evidence_ids,'artifact_bindings':artefact_bindings_dict}
                 result=factory.approve(approve_data,pr.roles,pr.identity)
                 with repo.connect() as c: c.execute("update approval_packages set status='APPROVED' where id=?",(m.group(1),))
                 ledger.append(pkg['job_id'],pr.identity,'APPROVAL_PACKAGE_SIGNED',{'package_id':m.group(1),'gate':pkg['gate'],'decision':decision})

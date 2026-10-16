@@ -23,11 +23,29 @@ class WorkspaceError(PermissionError):
 def root():
     """The approved workspace root.
 
-    Defaults to ``<repo>/workspace`` so the factory is confined out of the box
-    rather than depending on an operator remembering to set a variable.
+    Resolution order:
+      1. FACTORY_WORKSPACE_ROOT env var — operator/container override.
+      2. OS user-data directory — keeps workspaces out of the install tree and
+         avoids Windows MAX_PATH issues when the app is installed under a long path.
+         Windows : %LOCALAPPDATA%\\ACEMigrationFactory\\workspaces
+         macOS   : ~/Library/Application Support/ACEMigrationFactory/workspaces
+         Linux   : $XDG_DATA_HOME/ace-migration-factory/workspaces
+                   (falls back to ~/.local/share/…)
     """
     configured = os.getenv(ENV_ROOT)
-    base = Path(configured) if configured else Path(__file__).resolve().parents[2] / 'workspace'
+    if configured:
+        base = Path(configured)
+    else:
+        import platform
+        system = platform.system()
+        if system == 'Windows':
+            local_app = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+            base = Path(local_app) / 'ACEMigrationFactory' / 'workspaces'
+        elif system == 'Darwin':
+            base = Path(os.path.expanduser('~')) / 'Library' / 'Application Support' / 'ACEMigrationFactory' / 'workspaces'
+        else:
+            xdg = os.environ.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
+            base = Path(xdg) / 'ace-migration-factory' / 'workspaces'
     return base.resolve()
 
 

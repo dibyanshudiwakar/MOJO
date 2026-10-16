@@ -1155,14 +1155,27 @@ class PipelineService:
             return existing['id']
         content = json.dumps({'job_id': job_id, 'gate': gate, 'source': 'pipeline-system'}, sort_keys=True)
         content_hash = digest(content)
+        # Build artefact_bindings from the actual artifact evidence for this job/gate
+        # so that _approved() in migration_lifecycle_v6.py can find the artifact hashes.
+        # Gate-specific artifact kinds that must be present in bindings for approval to count.
+        _GATE_ARTIFACT_KINDS = {
+            'G2': ('ACE_ANALYSIS', 'MIGRATION_SPECIFICATION'),
+        }
+        artifact_rows = self.repo.rows(
+            "select id, content_hash from evidence where job_id=? and kind in ('ACE_ANALYSIS','MIGRATION_SPECIFICATION')",
+            (job_id,),
+        )
+        bindings = {row['id']: row['content_hash'] for row in artifact_rows}
+        # Always include the gate_block sentinel so the evidence table stays consistent.
         eid = self._ensure_evidence(job_id, gate, content_hash)
+        bindings[eid] = content_hash
         pkg_id = uid()
         with self.repo.connect() as c:
             self.repo.insert(c, 'approval_packages', {
                 'id': pkg_id, 'job_id': job_id, 'gate': gate,
                 'status': 'PENDING_APPROVAL', 'payload': content,
                 'content_hash': content_hash,
-                'artefact_bindings': json.dumps({eid: content_hash}),
+                'artefact_bindings': json.dumps(bindings),
                 'conditions': '', 'created_at': now(),
             })
         return pkg_id

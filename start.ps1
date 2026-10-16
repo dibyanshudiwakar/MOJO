@@ -26,6 +26,15 @@
     Interface to bind. Defaults to 127.0.0.1 so the governance API is not
     exposed on the LAN.
 
+.PARAMETER WorkspaceRoot
+    Root directory under which all pipeline workspaces are created.
+    Overrides the FACTORY_WORKSPACE_ROOT environment variable.
+    When neither is set the server picks an OS-appropriate user-data directory
+    (e.g. %LOCALAPPDATA%\ACEMigrationFactory\workspaces on Windows) so no
+    configuration is needed out of the box.
+    For server deployments set FACTORY_WORKSPACE_ROOT in the service environment
+    instead of passing this flag.
+
 .PARAMETER SkipInstall
     Skip the dependency install step.
 
@@ -43,6 +52,7 @@ param(
     [int]$Port = 8080,
     [string]$Database,
     [string]$BindAddress = '127.0.0.1',
+    [string]$WorkspaceRoot,
     [switch]$SkipInstall,
     [switch]$Test
 )
@@ -86,7 +96,9 @@ if (-not $env:FACTORY_JWT_AUDIENCE) { $env:FACTORY_JWT_AUDIENCE = 'ace-factory' 
 if (-not $env:AI_PROVIDER) { $env:AI_PROVIDER = 'gateway' }
 
 # --- Launch ------------------------------------------------------------------
-if (-not $env:FACTORY_WORKSPACE_ROOT) { $env:FACTORY_WORKSPACE_ROOT = Join-Path $root 'app' }
+if ($WorkspaceRoot) { $env:FACTORY_WORKSPACE_ROOT = $WorkspaceRoot }
+# If FACTORY_WORKSPACE_ROOT is not set here and not already in the environment,
+# workspace.py will resolve an OS-appropriate default automatically.
 Write-Step "Database $Database"
 Write-Step "Open http://${BindAddress}:${Port} and sign in (or register the first account)"
 Set-Location $root
