@@ -25,6 +25,11 @@ Only the file types ``quality_validate`` itself scans are edited
 (``.java``/``.yml``/``.yaml``/``.properties``), so the fixer and the gate can
 never disagree about which files are in scope. ``pom.xml`` is outside that set,
 which is what keeps the Maven POM namespace URLs from being rewritten.
+``HARDCODED_ENDPOINT_SCAN`` further exempts externalized deployment config
+(``is_externalized_config``) in both the fixer and the gate, for the same
+reason -- a real backend host in ``config/config-map/*.properties`` or
+``application-local.properties`` is the intended externalization, not a
+violation of it.
 """
 import json
 import re
@@ -92,6 +97,22 @@ def redact(text):
     for pattern, replacement in _REDACTIONS:
         text = pattern.sub(replacement, text)
     return text
+
+
+#: Externalized deployment config -- ``config-map/`` is Kubernetes-ConfigMap
+#: -injected at deploy time, never baked into the jar, and
+#: ``application-local.*`` is the local-only dev profile, never deployed as
+#: prod config -- so a literal backend host there is the externalization
+#: HARDCODED_ENDPOINT_SCAN exists to require, not a violation of it (confirmed
+#: against the real reference service's own config-map/*.properties and
+#: application-local.properties, which both carry a literal, real backend
+#: host by design). The base application.properties/.yml bundled inside the
+#: jar is deliberately NOT exempt: a literal there really is shipped in the
+#: artifact. ``quality_validate`` imports this so the gate and this fixer can
+#: never disagree about which files the endpoint rule covers.
+def is_externalized_config(path):
+    path = Path(path)
+    return 'config-map' in path.parts or path.name.startswith('application-local.')
 
 
 def _files(root):
@@ -167,6 +188,8 @@ class CodeFeedbackService:
     def _fix_endpoints(self, root):
         changed = []
         for f in _files(root):
+            if is_externalized_config(f):
+                continue
             text = f.read_text(errors='ignore')
             new = _URL.sub('${EXTERNAL_ENDPOINT}', text)
             if new != text:

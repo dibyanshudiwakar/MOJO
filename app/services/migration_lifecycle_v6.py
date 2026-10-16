@@ -2,6 +2,7 @@ import json, re, shutil, subprocess
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services.enterprise_v5 import SpringProjectGenerator, BuildRunner, DifferentialEvidenceEngine
+from app.services.feedback import is_externalized_config
 from app.services.policy import gate_enabled
 
 DEFAULT_MAPPINGS={
@@ -174,10 +175,14 @@ class MappingAndPlanningService:
   return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True)),'stub_sources':result.get('stub_sources',{}),'semantic_model':model}
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
-  checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists()))
-  text='\n'.join(f.read_text(errors='ignore') for f in root.rglob('*') if f.is_file() and f.suffix.lower() in ('.java','.yml','.yaml','.properties') and f.stat().st_size<2_000_000)
+  checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists() or any(root.glob('*-parent/pom.xml'))))
+  config_files=[f for f in root.rglob('*') if f.is_file() and f.suffix.lower() in ('.java','.yml','.yaml','.properties') and f.stat().st_size<2_000_000]
+  text='\n'.join(f.read_text(errors='ignore') for f in config_files)
   checks.append(self._check('SECRET_SCAN',not bool(re.search(r'(?i)(password|secret|token)\s*[:=]\s*["\'][^$][^"\']+',text))))
-  checks.append(self._check('HARDCODED_ENDPOINT_SCAN',not bool(re.search(r'https?://(?!localhost|example)',text))))
+  # Externalized deployment config (config-map/, application-local.*) is
+  # exempt from this one check -- see is_externalized_config.
+  endpoint_text='\n'.join(f.read_text(errors='ignore') for f in config_files if not is_externalized_config(f))
+  checks.append(self._check('HARDCODED_ENDPOINT_SCAN',not bool(re.search(r'https?://(?!localhost|example)',endpoint_text))))
   checks.append(self._check('PROVENANCE',(root/'provenance-manifest.json').exists()))
   for name in ('STATIC_ANALYSIS','DEPENDENCY_CHECK','LICENCE_CHECK','SAST'):
    checks.append({'name':name,'status':'NOT_CONFIGURED','evidence':'enterprise tool adapter required'})

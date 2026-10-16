@@ -13,7 +13,7 @@ def test_generation_writes_a_project_with_provenance_and_a_quality_run(repo, job
     result = CodeGenerationAgent(repo).run(job['id'], params=_params(planned, tmp_path))
     assert result.status == 'COMPLETED'
     root = Path(result.outputs['source_code'])
-    assert (root / 'pom.xml').exists()
+    assert (root / 'cvs-v1-orders-oci-parent' / 'pom.xml').exists()
     manifest = json.loads(Path(result.outputs['manifest']).read_text())
     assert manifest['plan_id'] == planned['plan_id']
     # Every generated file is traceable to the plan that authorised it.

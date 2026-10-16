@@ -7,7 +7,7 @@ class ACEParser:
  EXT={'.msgflow':'flows','.subflow':'subflows','.esql':'esql','.map':'maps','.xslt':'maps','.xsd':'schemas','.wsdl':'schemas','.policyxml':'policies'}
  PROTOCOLS={'HTTPInput':'HTTP','HTTPReply':'HTTP','SOAPInput':'SOAP','MQInput':'MQ','MQOutput':'MQ','KafkaConsumer':'KAFKA','KafkaProducer':'KAFKA','FileInput':'FILE','TimeoutNotification':'SCHEDULED','Database':'DATABASE'}
  def parse(self,root):
-  root=Path(root);model={'flows':[],'subflows':[],'esql':[],'maps':[],'schemas':[],'policies':[],'interfaces':[],'dependencies':[],'behaviour':{'routing':[],'transformations':[],'transactions':[],'retries':[],'timeouts':[],'errorHandling':[],'sideEffects':[]},'ambiguities':[]}
+  root=Path(root);model={'flows':[],'subflows':[],'esql':[],'maps':[],'schemas':[],'policies':[],'interfaces':[],'dependencies':[],'behaviour':{'routing':[],'transformations':[],'transactions':[],'retries':[],'timeouts':[],'errorHandling':[],'sideEffects':[]},'ambiguities':[],'backend_properties':{}}
   if not root.is_dir():raise ValueError('repository_not_accessible')
   for f in sorted(root.rglob('*')):
    if not f.is_file() or '.git' in f.parts:continue
@@ -18,10 +18,29 @@ class ACEParser:
     elif ext in ('.map','.xslt'):self._map(model,rel,text,ext)
     elif ext in ('.xsd','.wsdl'):self._schema(model,rel,text,ext)
     elif ext=='.policyxml':self._policy(model,rel,text)
+    elif ext=='.properties':self._env_properties(model,rel,text)
    except Exception as e:model['ambiguities'].append(self._ambiguity(rel,'parse_failure:'+type(e).__name__,'ACE_SME','analysis incomplete'))
   if not model['flows'] and not model['subflows']:model['ambiguities'].append(self._ambiguity('$','no_ace_flow_detected','ACE_SME','analysis blocked'))
   model['backend_type']=self._detect_backend_type(model)
   model['content_hash']=digest(json.dumps(model,sort_keys=True,separators=(',',':')));return model
+ #: <METHOD>#<Vendor>ServiceURL / <METHOD>#testHarness<Vendor>Url -- the real
+ #: naming convention these env-properties files use (confirmed against the
+ #: real DMRClaimStatus repo: "GET#MedForceServiceURL"/"GET#testHarnessMedForceUrl").
+ #: Nothing read these files before this -- the generator had no real backend
+ #: host to put in application-local.properties/config-map and left a TODO.
+ _SERVICE_URL=re.compile(r'^\w+#(\w+)ServiceURL$')
+ _TEST_HARNESS_URL=re.compile(r'^\w+#testHarness(\w+)Url$',re.I)
+ def _env_properties(self,m,rel,text):
+  env=Path(rel).stem.rsplit('.',1)[-1] if '.' in Path(rel).stem else ''
+  if not env:return
+  for line in text.splitlines():
+   line=line.strip()
+   if not line or line.startswith('#') or '=' not in line:continue
+   k,_,v=line.partition('=');k=k.strip();v=v.strip()
+   su=self._SERVICE_URL.match(k)
+   if su:m['backend_properties'].setdefault(su.group(1),{}).setdefault(env,{})['service_url']=v
+   th=self._TEST_HARNESS_URL.match(k)
+   if th:m['backend_properties'].setdefault(th.group(1),{}).setdefault(env,{})['test_harness_url']=v
  #: Master skill's own INTAKE detection table
  #: (external-skills/iib-to-ms-migration/SKILL.md Step 1 "Backend Type
  #: Detection"), applied in the same priority order: a signal earlier in this
@@ -225,14 +244,20 @@ class SpringProjectGenerator:
 
  # -- repository-level scaffolding (always produced, every backend type) ----
  def _scaffold(self,files,root,service,package,model,framework):
-  spring=framework.get('standards',{}).get('build',{}).get('springBootVersion') or '3.3.0'
   java=framework.get('standards',{}).get('build',{}).get('javaVersion') or '21'
-  artifact='cvs-v1-'+service.lower()+'-oci';web=artifact+'-web'
-  files[root/'pom.xml']=self._pom_parent(package,artifact,web,spring,java)
-  files[root/web/'pom.xml']=self._pom_web(package,artifact,web,java)
+  fw_version=framework.get('version') or '3.2.2'
+  artifact='cvs-v1-'+service.lower()+'-oci';parent=artifact+'-parent';web=artifact+'-web'
+  backend_props=model.get('backend_properties') or {}
+  files[root/parent/'pom.xml']=self._pom_parent(package,artifact,parent,web,java,fw_version)
+  files[root/web/'pom.xml']=self._pom_web(package,parent,web,java)
   res=root/web/'src/main/resources'
-  files[res/'application.properties']='spring:\n  application:\n    name: '+service+'\n  profiles:\n    active: local\n'
-  files[res/'application-local.properties']=self._application_local_properties(service)
+  # Minimal: just the application name + active profile (structural-conventions.md
+  # §1: "minimal: just spring.application.name + spring.profiles.active"). This was
+  # previously YAML syntax written into a .properties file -- Spring's properties
+  # loader reads key=value lines, so "spring:\n  application:\n    name: X" never
+  # actually set the name at all.
+  files[res/'application.properties']=f'spring.application.name={service}\nspring.profiles.active=local\n'
+  files[res/'application-local.properties']=self._application_local_properties(backend_props)
   files[root/'Dockerfile']=self._dockerfile(artifact)
   files[root/'.dockerignore']='target/\n*.iml\n.idea/\n.git/\n'
   files[root/'README.md']=f'# {service}\n\nMigrated from IBM ACE. Generated by the ACE Migration Factory -- see provenance-manifest.json for the plan this came from.\n'
@@ -240,7 +265,7 @@ class SpringProjectGenerator:
   files[root/'.github/workflows/build.yaml']=self._github_build(service)
   files[root/'.github/workflows/deploy.yaml']=self._github_deploy(artifact)
   for env in ENV_CLUSTERS:
-   files[root/'config/config-map'/('application.%s.properties'%env)]=self._config_map_properties(env)
+   files[root/'config/config-map'/('application.%s.properties'%env)]=self._config_map_properties(env,artifact,backend_props)
    files[root/'config/deploy-config'/('values.%s.yaml'%env)]=self._helm_values(artifact,env)
   files[root/'config/deploy-config/Chart.yaml']=f'apiVersion: v1\nname: {artifact}\nversion: 1.0.0\n'
   files[root/'config/deploy-config/templates/Deployment.yaml']=self._helm_deployment()
@@ -248,57 +273,118 @@ class SpringProjectGenerator:
   files[root/'config/deploy-config/templates/Route.yaml']=self._helm_route()
   files[root/'config/deploy-config/templates/Secret.yaml']=self._helm_secret()
 
- def _pom_parent(self,g,artifact,web,spring,java):
+ def _pom_parent(self,g,artifact,parent,web,java,fw_version):
+  # The CVS framework-starter parent IS the real parent (confirmed against the
+  # real DMRClaimStatus repo) -- it manages the Spring Boot version itself, so
+  # a raw org.springframework.boot:spring-boot-starter-parent here was wrong,
+  # not just incomplete. parent and web are *siblings*; the module path is
+  # relative, matching how the real reference's own pom declares it.
   return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
- <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>{spring}</version></parent>
- <groupId>{g}</groupId><artifactId>{artifact}-parent</artifactId><version>0.0.1-SNAPSHOT</version><packaging>pom</packaging>
- <properties><java.version>{java}</java.version></properties>
- <modules><module>{web}</module></modules>
+ <parent><groupId>com.cvshealth.eip.microservices.frameworks</groupId><artifactId>framework-starter</artifactId><version>{fw_version}</version></parent>
+ <groupId>{g}</groupId><artifactId>{parent}</artifactId><version>1.0.0-SNAPSHOT</version><packaging>pom</packaging>
+ <modules><module>../{web}</module></modules>
+ <properties><framework.version>{fw_version}</framework.version><swagger.version>2.2.23</swagger.version><springdoc.version>2.8.4</springdoc.version><java.version>{java}</java.version></properties>
 </project>
 '''
 
- def _pom_web(self,g,artifact,web,java):
+ def _pom_web(self,g,parent,web,java):
   # framework-restclient is mandatory for every backend type, not only REST
-  # (structural-conventions.md §4): it is the source of EieHeader/ErrorUtil/
-  # ErrorStatus and the @EIPMicroservice* annotations.
+  # (structural-conventions.md §4) -- and, confirmed against the real pom,
+  # is also where EieHeader/ErrorUtil/AESEncryption/EIPMicroserviceLogger and
+  # the @EIPMicroservice* annotations actually live; nothing else needs to be
+  # declared for them.
   return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
- <parent><groupId>{g}</groupId><artifactId>{artifact}-parent</artifactId><version>0.0.1-SNAPSHOT</version><relativePath>../pom.xml</relativePath></parent>
+ <parent><groupId>{g}</groupId><artifactId>{parent}</artifactId><version>1.0.0-SNAPSHOT</version><relativePath>../{parent}</relativePath></parent>
  <artifactId>{web}</artifactId><packaging>jar</packaging>
  <dependencies>
-  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
-  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
-  <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId></dependency>
   <dependency><groupId>com.cvshealth.eip.microservices.frameworks</groupId><artifactId>framework-restclient</artifactId></dependency>
-  <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
-  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
+  <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>${{springdoc.version}}</version></dependency>
+  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
+  <dependency><groupId>org.mockito</groupId><artifactId>mockito-core</artifactId><scope>test</scope></dependency>
+  <dependency><groupId>org.mockito</groupId><artifactId>mockito-junit-jupiter</artifactId><scope>test</scope></dependency>
+  <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
  </dependencies>
  <build><plugins>
-  <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+  <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.12</version><configuration><rules><rule><element>BUNDLE</element><limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.65</minimum></limit></limits></rule></rules></configuration></plugin>
   <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><release>{java}</release></configuration></plugin>
-  <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.12</version></plugin>
+  <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
  </plugins></build>
 </project>
 '''
 
- def _application_local_properties(self,service):
-  return ('server.port=${PORT:8081}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
-          'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
-          'application.jackson.enableLegacyErrorStructure=true\nmanagement.endpoints.web.exposure.include=health,info\n'
-          'application.circuitbreaker.failureRateThreshold=90.0\napplication.circuitbreaker.slowCallDurationThreshold=8s\n'
-          'application.circuitbreaker.slowCallRateThreshold=80.0\napplication.circuitbreaker.writableStackTraceEnabled=false\n'
-          'logging.level.com.cvshealth.eip.microservices=DEBUG\nlogging.level.org.springframework=WARN\n'
-          'application.http.enabled=true\napplication.http.close-idle-connection-wait-time-secs=30\n'
-          '# TODO: application.http.restclient.<clientName>.uri -- the real backend host, from the IIB *.properties\n')
+ #: Maps a config-map env-cluster suffix (ENV_CLUSTERS, e.g. 'dev2-pbmaz') to
+ #: the ACE repo's own per-environment *.properties suffix (e.g. 'DEV2') that
+ #: ACEParser._env_properties keys backend_properties by. Deliberately an
+ #: exact-match-or-nothing lookup, not a nearest-tier guess: the real
+ #: reference's own uat-pbmaz config-map happens to carry the STRESS backend
+ #: host, which is a one-off business decision (there is no dedicated UAT
+ #: backend), not something a generic rule should silently reproduce for every
+ #: service. Any cluster with no exact ACE counterpart is left as a flagged
+ #: TODO for a human to assign deliberately.
+ def _ace_env_key(self,env_cluster,available):
+  base=env_cluster.split('-')[0].upper()
+  return base if base in available else None
 
- def _config_map_properties(self,env):
-  return ('server.port=${PORT:8080}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
-          'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
-          'application.jackson.enableLegacyErrorStructure=true\nlogging.config=classpath:logback-%s.xml\n'
-          'server.max-http-request-header-size=128KB\nserver.tomcat.max-http-response-header-size=128KB\n'
-          'server.tomcat.max-http-header-count=200\n\nmanagement.endpoints.web.exposure.include=health,info\n\n'
-          '#CIRCUIT BREAKER PROPERTIES\napplication.circuitbreaker.failureRateThreshold=90.0\n'
-          'application.circuitbreaker.slowCallDurationThreshold=8s\napplication.circuitbreaker.slowCallRateThreshold=80.0\n'
-          'application.circuitbreaker.writableStackTraceEnabled=false\n')%_tier(env)
+ def _restclient_block(self,vendor,envs,env_key,cert_path_fmt):
+  client=vendor.lower();info=envs.get(env_key) or {}
+  lines=['','#'+'='*77,f'# {vendor.upper()} CONNECTOR CONFIGURATION','#'+'='*77,
+         'application.http.enabled=true',f'application.http.restclient.{client}.name={client}']
+  uri=info.get('service_url')
+  if uri:
+   lines.append(f'application.http.restclient.{client}.uri={uri}')
+  else:
+   lines.append(f'# TODO: application.http.restclient.{client}.uri -- no {vendor} backend URL for '
+                 f'env "{env_key or "?"}" was found in the ACE repo\'s own *.properties (environments found: '
+                 f'{", ".join(sorted(envs)) or "none"}); assign the right one deliberately, do not guess')
+  lines+=[f'application.http.restclient.{client}.connect-timeout=18000',
+          f'application.http.restclient.{client}.request-timeout=18000',
+          f'application.http.restclient.{client}.socket-timeout=18000',
+          f'application.http.restclient.{client}.max-total-connections=50',
+          f'application.http.restclient.{client}.default-max-per-route=25',
+          f'application.http.restclient.{client}.default-keep-alive-time-millis=20000']
+  harness=info.get('test_harness_url')
+  if harness:
+   lines.append(f'application.http.restclient.{client}.test-harness-host={harness}')
+  lines.append('application.http.close-idle-connection-wait-time-secs=30')
+  lines+=['',f'application.http.restclient.{client}.custom-ssl-trust-store-enabled=true',
+          f'spring.ssl.bundle.pem.{client}.truststore.certificate='+cert_path_fmt.format(client=client),
+          f'# TODO: application.{client}.client-id / application.{client}.client-secret -- paste ONLY the '
+           'encrypted value from the CVS encryption endpoint here; never the plaintext IIB clientID/clientSecret',
+          f'application.{client}.client-id=',f'application.{client}.client-secret=']
+  return '\n'.join(lines)+'\n'
+
+ def _application_local_properties(self,backend_props):
+  base=('server.port=${PORT:8081}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
+        'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
+        'application.jackson.enableLegacyErrorStructure=true\nmanagement.endpoints.web.exposure.include=health,info\n'
+        '#CIRCUIT BREAKER PROPERTIES\napplication.circuitbreaker.failureRateThreshold=90.0\n'
+        'application.circuitbreaker.slowCallDurationThreshold=8s\napplication.circuitbreaker.slowCallRateThreshold=80.0\n'
+        'application.circuitbreaker.writableStackTraceEnabled=false\n\n'
+        '# Logging\nlogging.level.com.cvshealth.eip.microservices=DEBUG\nlogging.level.org.springframework=WARN\n')
+  blocks=''.join(self._restclient_block(v,envs,'DEV','classpath:{client}-truststore.crt.pem')
+                 for v,envs in sorted(backend_props.items()))
+  return base+blocks
+
+ def _config_map_properties(self,env,artifact,backend_props):
+  base=('server.port=${PORT:8080}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
+        'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
+        'application.jackson.enableLegacyErrorStructure=true\nlogging.config=classpath:logback-%s.xml\n'
+        'server.max-http-request-header-size=128KB\nserver.tomcat.max-http-response-header-size=128KB\n'
+        'server.tomcat.max-http-header-count=200\n\nmanagement.endpoints.web.exposure.include=health,info\n\n'
+        '#CIRCUIT BREAKER PROPERTIES\napplication.circuitbreaker.failureRateThreshold=90.0\n'
+        'application.circuitbreaker.slowCallDurationThreshold=8s\napplication.circuitbreaker.slowCallRateThreshold=80.0\n'
+        'application.circuitbreaker.writableStackTraceEnabled=false\n\n'
+        '# Logging\nlogging.level.com.cvshealth.eip.microservices=%s\nlogging.level.org.springframework=WARN\n'
+        )%(_tier(env),'WARN' if _tier(env)=='prod' else 'DEBUG')
+  if not backend_props:
+   return base
+  base+=(f'\nspring.config.import=/os/spring-boot-{artifact}/creds/application-akeyless.properties,'
+         f'optional:/os/spring-boot-{artifact}/creds/application-aes_config.properties\n')
+  cert_fmt='/os/spring-boot-'+artifact+'/certs/{client}-truststore.crt.pem'
+  for vendor,envs in sorted(backend_props.items()):
+   base+=self._restclient_block(vendor,envs,self._ace_env_key(env,envs),cert_fmt)
+  return base
 
  def _dockerfile(self,artifact):
   # Skeleton + the documented default decisions (fixed-file-templates.md §2):
@@ -499,6 +585,17 @@ data: {}
           f'   * This method intentionally returns a placeholder until that step runs. */\n'
           f'  {return_stmt}\n')
 
+ #: A vendor name is taken verbatim from the ACE *.properties key it was
+ #: extracted from (e.g. "MedForce" from `GET#MedForceServiceURL`) -- already
+ #: real PascalCase there, so unlike _cls (built for kebab/snake *service*
+ #: names, which it re-capitalizes word-by-word) this must only strip stray
+ #: non-alnum characters, never change case.
+ def _vendor_cls(self,vendor):
+  return re.sub(r'[^A-Za-z0-9]+','',vendor) or vendor
+
+ def _provider_const(self,vendor):
+  return re.sub(r'[^A-Za-z0-9]+','',vendor).upper()
+
  def _rest_sources(self,files,root,service,package,model,tasks,plan_id,stub_sources):
   cls=self._cls(service);pkg=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/main/java'/Path(package.replace('.','/'))
   test=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/test/java'/Path(package.replace('.','/'))
@@ -506,35 +603,66 @@ data: {}
   service_srcs=[t['source_reference'] for t in by.get('service',[])]
   connector_srcs=[t['source_reference'] for t in by.get('client',[])+by.get('soap',[])]
   context_root=self._context_root(model,service)
+  # Vendor-based naming (connector-reference.md's own convention, confirmed
+  # against the real MedForceConnector/MedForceProperties): only when exactly
+  # one backend vendor was found in the ACE repo's *.properties -- with two+
+  # vendors, or none, there is no single name to prefer over the service's own.
+  backend_props=model.get('backend_properties') or {}
+  vendor=next(iter(backend_props)) if len(backend_props)==1 else None
+  connector_name=(self._vendor_cls(vendor)+'Connector') if vendor else (cls+'ConnectorService')
 
   files[pkg/(cls+'Application.java')]=self._app(package,service)
   files[pkg/'controller'/(cls+'Controller.java')]=self._controller(package,cls)
   files[test/'controller'/(cls+'ControllerTest.java')]=self._empty_test(package+'.controller',cls+'Controller')
   files[pkg/'swagger/api'/(cls+'Api.java')]=self._api_interface(package,cls,context_root)
-  service_path=pkg/'service'/(cls+'Service.java');files[service_path]=self._service(package,cls,service_srcs)
+  if vendor:
+   vcls=self._vendor_cls(vendor)
+   files[pkg/'config'/(vcls+'Properties.java')]=self._vendor_properties(package,vendor)
+   files[test/'config'/(vcls+'PropertiesTest.java')]=self._empty_test(package+'.config',vcls+'Properties')
+  service_path=pkg/'service'/(cls+'Service.java')
+  files[service_path]=self._service(package,cls,vendor,connector_name,service_srcs)
   if service_srcs:stub_sources[str(service_path.relative_to(root)).replace('\\','/')]=service_srcs
   files[test/'service'/(cls+'ServiceTest.java')]=self._empty_test(package+'.service',cls+'Service')
-  connector_path=pkg/'connector'/(cls+'ConnectorService.java');files[connector_path]=self._connector(package,cls,connector_srcs)
+  connector_path=pkg/'connector'/(connector_name+'.java')
+  files[connector_path]=self._connector(package,cls,connector_name,vendor,connector_srcs)
   if connector_srcs:stub_sources[str(connector_path.relative_to(root)).replace('\\','/')]=connector_srcs
-  files[test/'connector'/(cls+'ConnectorServiceTest.java')]=self._empty_test(package+'.connector',cls+'ConnectorService')
-  files[pkg/'util'/(cls+'ConnectorUtil.java')]=self._connector_util(package,cls)
+  files[test/'connector'/(connector_name+'Test.java')]=self._empty_test(package+'.connector',connector_name)
   files[pkg/'util'/(cls+'Util.java')]=self._util(package,cls)
-  files[pkg/'constant/Constants.java']=self._constants(package)
-  files[pkg/'constant'/(cls+'ConnectorConstants.java')]=self._connector_constants(package,cls)
+  files[test/'util'/(cls+'UtilTest.java')]=self._empty_test(package+'.util',cls+'Util')
+  files[pkg/'constants'/(cls+'Constants.java')]=self._constants(package,cls,vendor)
+  # Every REST_EXTERNAL_DIRECT service gets this pair, generic and
+  # business-logic-free (confirmed against the real DmrClaimStatusExceptionHandler/
+  # ErrorResponse: a @RestControllerAdvice catching Spring's own
+  # NoResourceFoundException, and the httpCode/httpMessage/moreInformation
+  # shape every such handler returns) -- unlike the service/vendor response
+  # DTOs below, there is no per-service field to guess here.
+  files[pkg/'swagger/model/response/ErrorResponse.java']=self._error_response(package)
+  files[test/'swagger/model/response/ErrorResponseTest.java']=self._empty_test(package+'.swagger.model.response','ErrorResponse')
+  files[pkg/'exception'/(cls+'ExceptionHandler.java')]=self._exception_handler(package,cls)
+  files[test/'exception'/(cls+'ExceptionHandlerTest.java')]=self._empty_test(package+'.exception',cls+'ExceptionHandler')
   for schema in model.get('schemas',[]):
    name=self._cls(Path(schema['path']).stem)
    files[pkg/'swagger/model/response'/(name+'.java')]=self._schema_model(package,name,schema)
+   files[test/'swagger/model/response'/(name+'Test.java')]=self._empty_test(package+'.swagger.model.response',name)
 
- def _app(self,p,s):c=self._cls(s)+'Application';return f'package {p};\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication public class {c} {{ public static void main(String[] a) {{ SpringApplication.run({c}.class,a); }} }}\n'
+ def _app(self,p,s):
+  c=self._cls(s)+'Application'
+  return (f'package {p};\n\nimport org.springframework.boot.SpringApplication;\n'
+          f'import org.springframework.boot.autoconfigure.SpringBootApplication;\n'
+          f'import org.springframework.context.annotation.ComponentScan;\n\n'
+          f'@ComponentScan(basePackages = {{"com.cvshealth.*"}})\n@SpringBootApplication\n'
+          f'public class {c} {{\n  public static void main(String[] args) {{ SpringApplication.run({c}.class, args); }}\n}}\n')
 
  def _controller(self,p,c):
   # Zero-logic delegate -- no error-response calls, no inline mapping
   # (rest-external-direct.md §5a/§8, Rule 9/10).
-  return (f'package {p}.controller;\n\nimport {p}.service.{c}Service;\nimport {p}.swagger.api.{c}Api;\n'
+  return (f'package {p}.controller;\n\n'
+          f'import com.cvshealth.eip.microservices.frameworks.annotations.EIPMicroserviceOperation;\n'
+          f'import {p}.service.{c}Service;\nimport {p}.swagger.api.{c}Api;\n'
           f'import lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.RestController;\n\n'
           f'@RestController\n@RequiredArgsConstructor\npublic class {c}Controller implements {c}Api {{\n'
           f'  private final {c}Service service;\n\n'
-          f'  @Override\n  public ResponseEntity<Object> get{c}(String id, String cvsConsumerCorrelationId) {{\n'
+          f'  @Override\n  @EIPMicroserviceOperation\n  public ResponseEntity<Object> get{c}(String id, String cvsConsumerCorrelationId) {{\n'
           f'    return ResponseEntity.ok(service.get{c}(id));\n  }}\n}}\n')
 
  def _api_interface(self,p,c,context_root):
@@ -546,48 +674,136 @@ data: {}
           f'      @PathVariable String id,\n'
           f'      @RequestHeader(value = "Cvs-Consumer-Correlation-Id", required = false) String cvsConsumerCorrelationId);\n}}\n')
 
- def _service(self,p,c,sources):
+ def _vendor_properties(self,p,vendor):
+  # @ConfigurationProperties(prefix="application.<vendor>") + @Data over
+  # clientId/clientSecret -- confirmed against the real MedForceProperties.
+  # The values themselves are never written here or anywhere generated: they
+  # come from the encrypted application-local/config-map properties (or the
+  # akeyless/aes_config import in config-map), never from this class.
+  vcls=self._vendor_cls(vendor)
+  return (f'package {p}.config;\n\nimport lombok.Data;\n'
+          f'import org.springframework.boot.context.properties.ConfigurationProperties;\n'
+          f'import org.springframework.context.annotation.Configuration;\n\n'
+          f'@Configuration\n@ConfigurationProperties(prefix = "application.{vendor.lower()}")\n@Data\n'
+          f'public class {vcls}Properties {{\n  private String clientId;\n  private String clientSecret;\n}}\n')
+
+ def _service(self,p,c,vendor,connector_name,sources):
   # Orchestrates validate -> connector -> map; ErrorUtil.errorResponse(...)
-  # calls belong here, inline, per Rule 10 -- no exception package.
-  return (f'package {p}.service;\n\nimport {p}.connector.{c}ConnectorService;\nimport lombok.RequiredArgsConstructor;\n'
-          f'import org.springframework.stereotype.Service;\n\n@Service\n@RequiredArgsConstructor\npublic class {c}Service {{\n'
-          f'  private final {c}ConnectorService connector;\n\n'
+  # calls belong here, inline, per Rule 10 -- no exception package. The
+  # logger/EieHeader/connector/util field wiring is real and generic
+  # (confirmed against DmrClaimStatusService's own constructor); only the
+  # method body is business logic, left as an honest TODO stub.
+  extra_imports=extra_fields=call_args=''
+  if vendor:
+   vcls=self._vendor_cls(vendor);client=vendor.lower()
+   extra_imports=f'import {p}.config.{vcls}Properties;\nimport org.springframework.beans.factory.annotation.Value;\n'
+   extra_fields=(f'  private final {vcls}Properties properties;\n\n'
+                 f'  @Value("${{application.http.restclient.{client}.uri}}")\n  private String backendBaseUrl;\n\n'
+                 f'  @Value("${{application.http.restclient.{client}.test-harness-host}}")\n  private String testHarnessBaseUrl;\n\n')
+   call_args='backendBaseUrl, testHarnessBaseUrl, '
+   call_method='call'+vcls
+  else:
+   call_method='call'+c+'Backend'
+  return (f'package {p}.service;\n\n'
+          f'import com.cvshealth.eip.microservices.frameworks.eieheader.EieHeader;\n'
+          f'import com.cvshealth.eip.microservices.frameworks.logging.EIPMicroserviceLogger;\n'
+          f'import {p}.connector.{connector_name};\n{extra_imports}'
+          f'import {p}.util.{c}Util;\nimport lombok.RequiredArgsConstructor;\n'
+          f'import org.springframework.stereotype.Service;\n\n@Service\n@RequiredArgsConstructor\npublic class {c}Service {{\n\n'
+          f'  private final EIPMicroserviceLogger logger;\n  private final {connector_name} connector;\n'
+          f'  private final EieHeader eieHeader;\n  private final {c}Util util;\n{extra_fields}'
           f'  public Object get{c}(String id) {{\n'
-          f'{self._protected_body("return connector.call" + c + "Backend(id);",sources)}'
+          f'{self._protected_body(f"return connector.{call_method}({call_args}id);",sources)}'
           f'  }}\n}}\n')
 
- def _connector(self,p,c,sources):
-  # RestClientWrapper.executeRestCall + catch blocks (rest-external-direct.md
-  # §3/§8); framework-restclient's RestClientWrapper/RestClientRequest are
-  # not in this repo, so only the call shape is real here, not a body.
-  return (f'package {p}.connector;\n\nimport {p}.constant.{c}ConnectorConstants;\nimport {p}.util.{c}ConnectorUtil;\n'
-          f'import com.cvshealth.eip.microservices.frameworks.restclient.RestClientWrapper;\n'
+ def _connector(self,p,c,connector_name,vendor,sources):
+  if vendor:
+   # @EIPMicroserviceProviderCall + RestClientWrapper.executeRestCall, the
+   # real shape confirmed against MedForceConnector.java -- but
+   # EIPMicroserviceProvider.<CONST> only compiles if that constant already
+   # exists in the framework-restclient jar's own enum, which this generator
+   # cannot see or add to, hence the flagged NOTE rather than a silent guess.
+   vcls=self._vendor_cls(vendor);const=self._provider_const(vendor)
+   body=(f'return restClientWrapper.executeRestCall(RestClientRequest.builder().clientName({c}Constants.REST_CLIENT_NAME)'
+         f'.url(url).testHarnessUrl(testHarnessUrl).methodType(RequestMethod.GET).build(), Object.class);')
+   return (f'package {p}.connector;\n\n'
+           f'import {p}.constants.{c}Constants;\n'
+           f'import com.cvshealth.eip.microservices.frameworks.annotations.EIPMicroserviceProvider;\n'
+           f'import com.cvshealth.eip.microservices.frameworks.annotations.EIPMicroserviceProviderCall;\n'
+           f'import com.cvshealth.eip.microservices.frameworks.logging.EIPMicroserviceLogger;\n'
+           f'import com.cvshealth.eip.microservices.frameworks.restclient.model.RestClientRequest;\n'
+           f'import com.cvshealth.eip.microservices.frameworks.restclient.service.RestClientWrapper;\n'
+           f'import lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\n'
+           f'import org.springframework.stereotype.Component;\nimport org.springframework.web.bind.annotation.RequestMethod;\n\n'
+           f'// NOTE: EIPMicroserviceProvider.{const} must already exist in the framework-restclient enum for\n'
+           f'// this to compile -- if "{vendor}" is a new vendor, get that constant added there first.\n'
+           f'@Component\n@RequiredArgsConstructor\npublic class {connector_name} {{\n\n'
+           f'  private final RestClientWrapper restClientWrapper;\n  private final EIPMicroserviceLogger log;\n\n'
+           f'  @EIPMicroserviceProviderCall(provider = EIPMicroserviceProvider.{const}, function = {c}Constants.{const}_FUNCTION_NAME)\n'
+           f'  public ResponseEntity<Object> call{vcls}(String url, String testHarnessUrl, String id) {{\n'
+           f'{self._protected_body(body,sources)}'
+           f'  }}\n}}\n')
+  return (f'package {p}.connector;\n\n'
+          f'import com.cvshealth.eip.microservices.frameworks.restclient.service.RestClientWrapper;\n'
           f'import lombok.RequiredArgsConstructor;\nimport org.springframework.stereotype.Component;\n\n'
-          f'@Component\n@RequiredArgsConstructor\npublic class {c}ConnectorService {{\n'
-          f'  private final RestClientWrapper restClientWrapper;\n  private final {c}ConnectorUtil util;\n\n'
+          f'@Component\n@RequiredArgsConstructor\npublic class {connector_name} {{\n\n'
+          f'  private final RestClientWrapper restClientWrapper;\n\n'
           f'  public Object call{c}Backend(String id) {{\n'
-          f'{self._protected_body("return util.processResponse(null);",sources)}'
+          f'{self._protected_body("return null;",sources)}'
           f'  }}\n}}\n')
-
- def _connector_util(self,p,c):
-  return (f'package {p}.util;\n\nimport org.springframework.stereotype.Component;\n\n@Component\npublic class {c}ConnectorUtil {{\n'
-          f'  public Object buildRestRequest(String id) {{ return null; }}\n'
-          f'  public Object processResponse(Object raw) {{ return raw; }}\n'
-          f'  public boolean isNotFoundMessage(String body) {{ return false; }}\n}}\n')
 
  def _util(self,p,c):
   return f'package {p}.util;\n\nimport org.springframework.stereotype.Component;\n\n@Component\npublic class {c}Util {{\n}}\n'
 
- def _constants(self,p):
-  return f'package {p}.constant;\n\npublic final class Constants {{\n  private Constants() {{ }}\n}}\n'
-
- def _connector_constants(self,p,c):
-  return f'package {p}.constant;\n\npublic final class {c}ConnectorConstants {{\n  private {c}ConnectorConstants() {{ }}\n}}\n'
+ def _constants(self,p,c,vendor):
+  # One merged class, package "constants" (plural) -- confirmed against the
+  # real DmrClaimStatusConstants.java, which is a single class, not split
+  # into a generic Constants.java plus a per-connector *ConnectorConstants.
+  vendor_consts=''
+  if vendor:
+   const=self._provider_const(vendor)
+   vendor_consts=(f'  public static final String REST_CLIENT_NAME = "{vendor.lower()}";\n'
+                  f'  public static final String {const}_FUNCTION_NAME = "{c}";\n\n')
+  return (f'package {p}.constants;\n\npublic final class {c}Constants {{\n  private {c}Constants() {{ }}\n\n'
+          f'{vendor_consts}'
+          f'  public static final String HEADER_CONTENT_TYPE = "Content-Type";\n'
+          f'  public static final String HEADER_CONTENT_TYPE_VALUE = "application/json";\n}}\n')
 
  def _schema_model(self,p,name,schema):
   fields=', '.join('String '+(d or 'field%d'%i) for i,d in enumerate(schema.get('declarations') or ['value'],1))
   return (f'package {p}.swagger.model.response;\n\nimport com.fasterxml.jackson.annotation.JsonInclude;\n\n'
           f'@JsonInclude(JsonInclude.Include.NON_NULL)\npublic record {name}({fields}) {{\n}}\n')
+
+ def _error_response(self,p):
+  # httpCode/httpMessage/moreInformation, @AllArgsConstructor+@Builder --
+  # confirmed against the real ErrorResponse.java; identical for every
+  # service, nothing here is business-specific.
+  return (f'package {p}.swagger.model.response;\n\nimport com.fasterxml.jackson.annotation.JsonProperty;\n'
+          f'import lombok.AllArgsConstructor;\nimport lombok.Builder;\nimport lombok.Data;\nimport lombok.NoArgsConstructor;\n\n'
+          f'import java.io.Serializable;\n\n@Data\n@Builder\n@NoArgsConstructor\n@AllArgsConstructor\n'
+          f'public class ErrorResponse implements Serializable {{\n\n'
+          f'  private static final long serialVersionUID = 1L;\n\n'
+          f'  @JsonProperty("httpCode")\n  private String httpCode;\n\n'
+          f'  @JsonProperty("httpMessage")\n  private String httpMessage;\n\n'
+          f'  @JsonProperty("moreInformation")\n  private String moreInformation;\n}}\n')
+
+ def _exception_handler(self,p,c):
+  # @RestControllerAdvice catching Spring's own NoResourceFoundException --
+  # confirmed against the real DmrClaimStatusExceptionHandler.java. This is
+  # the one handler every such service has regardless of its own business
+  # exceptions, which are not something this generator can know about or
+  # safely invent.
+  return (f'package {p}.exception;\n\nimport {p}.swagger.model.response.ErrorResponse;\n'
+          f'import org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\n'
+          f'import org.springframework.web.bind.annotation.ExceptionHandler;\n'
+          f'import org.springframework.web.bind.annotation.RestControllerAdvice;\n'
+          f'import org.springframework.web.servlet.resource.NoResourceFoundException;\n\n'
+          f'@RestControllerAdvice\npublic class {c}ExceptionHandler {{\n\n'
+          f'  @ExceptionHandler(NoResourceFoundException.class)\n'
+          f'  public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {{\n'
+          f'    return ResponseEntity.status(HttpStatus.NOT_FOUND)\n'
+          f'        .body(new ErrorResponse(String.valueOf(HttpStatus.NOT_FOUND.value()), '
+          f'HttpStatus.NOT_FOUND.getReasonPhrase(), "No resources match requested URI"));\n  }}\n}}\n')
 
  def _empty_test(self,p,c):
   # Rule 11: every generated JUnit test class is an empty skeleton -- no
@@ -604,7 +820,21 @@ data: {}
    files[test/(cls+'Test.java')]=self._empty_test(package,cls)
 
  def _flow(self,p,c,f,plan):return f'package {p};\nimport org.springframework.stereotype.Service;\n/** provenance plan={plan} source={f["path"]} */\n@Service public final class {c} {{ public Object process(Object input) {{ return input; }} }}\n'
- def _cls(self,x):return ''.join(w.capitalize() for w in re.split(r'[^A-Za-z0-9]+',x) if w)
+ #: Word-boundary tokenizer for _cls -- ACE service names arrive already in
+ #: PascalCase with no separators (e.g. "DMRClaimStatus", "GetGrievancesAppeal"),
+ #: so splitting only on non-alnum (the old behaviour) left each of those as
+ #: one single token, and ''.capitalize() on a whole token *lowercases* every
+ #: letter after the first -- "DMRClaimStatus" became "Dmrclaimstatus"
+ #: (confirmed live: this, not the application.properties YAML bug, is what
+ #: actually produced the wrong class/service name the user reported). This
+ #: pattern finds camelCase/acronym word boundaries within a token too, so
+ #: "DMRClaimStatus" tokenizes as ["DMR","Claim","Status"] and each piece's
+ #: own .capitalize() ("Dmr","Claim","Status") reproduces the real reference's
+ #: own "DmrClaimStatus" convention (acronyms get title-cased like any other
+ #: word, matching normal Java naming style).
+ _WORD=re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|\d+')
+ def _cls(self,x):
+  return ''.join(w.capitalize() for part in re.split(r'[^A-Za-z0-9]+',x) if part for w in self._WORD.findall(part))
 
 class BuildRunner:
  def run(self,project,timeout=600):
