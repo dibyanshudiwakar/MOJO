@@ -19,6 +19,17 @@ import urllib.request
 from pathlib import Path
 import pytest
 
+# Agent counts are derived from the governed catalogue rather than hardcoded, so
+# adding a contract does not silently turn these invariants into stale numbers.
+def _catalogue_agent_ids():
+    import json, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'agent-catalogue.v1.json'
+    return {a['agent_id'] for a in json.loads(path.read_text(encoding='utf-8'))['agents']}
+
+
+CATALOGUE_AGENT_COUNT = len(_catalogue_agent_ids())
+
+
 SECRET = 'agent-api-test-secret'
 ROLES = ['ORCHESTRATOR', 'REPOSITORY_INTAKE', 'ACE_ANALYST', 'GOVERNANCE_ENGINE',
          'KNOWLEDGE_CURATOR', 'GOVERNANCE_ADMIN']
@@ -99,7 +110,7 @@ def test_every_contract_reports_a_conformant_worker(server):
     status, body = call(base, '/api/v2/agent-registry/implementations', bearer=token())
     assert status == 200
     assert body['status'] == 'UP'
-    assert len(body['agents']) == 14
+    assert len(body['agents']) == CATALOGUE_AGENT_COUNT
     assert all(x['status'] == 'CONFORMANT' and x['implementation'] for x in body['agents'])
 
 

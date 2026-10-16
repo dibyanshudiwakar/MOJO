@@ -14,6 +14,17 @@ from app.services.agents import AgentRegistry
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
 
+# Agent counts are derived from the governed catalogue rather than hardcoded, so
+# adding a contract does not silently turn these invariants into stale numbers.
+def _catalogue_agent_ids():
+    import json, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'agent-catalogue.v1.json'
+    return {a['agent_id'] for a in json.loads(path.read_text(encoding='utf-8'))['agents']}
+
+
+CATALOGUE_AGENT_COUNT = len(_catalogue_agent_ids())
+
+
 ROLES = ('REPOSITORY_INTAKE', 'ACE_ANALYST', 'CODE_GENERATOR', 'KNOWLEDGE_CURATOR', 'ORCHESTRATOR')
 
 
@@ -42,9 +53,9 @@ def ace_repo(tmp_path):
     return root
 
 
-def test_all_fourteen_contracts_have_a_conformant_implementation(registry):
+def test_every_catalogue_contract_has_a_conformant_implementation(registry):
     report = registry.conformance()
-    assert len(report) == 14
+    assert len(report) == CATALOGUE_AGENT_COUNT
     assert [x for x in report if x['status'] != 'CONFORMANT'] == []
     assert registry.implementations()['status'] == 'UP'
 
@@ -265,4 +276,4 @@ def test_the_governed_registry_survives_reinitialisation(tmp_path):
     path = str(tmp_path / 'twice.db')
     Repository(path)
     Repository(path)
-    assert Repository(path).one('select count(*) n from agent_registry')['n'] == 14
+    assert Repository(path).one('select count(*) n from agent_registry')['n'] == CATALOGUE_AGENT_COUNT

@@ -27,6 +27,7 @@ IMPLEMENTATIONS = {
     'variance-analysis': 'app.agents.variance_analysis:VarianceAnalysisAgent',
     'rca': 'app.agents.rca:RCAAgent',
     'remediation': 'app.agents.remediation:RemediationAgent',
+    'feedback': 'app.agents.feedback:FeedbackAgent',
     'governance': 'app.agents.governance:GovernanceAgent',
     'knowledge-evidence': 'app.agents.knowledge_evidence:KnowledgeEvidenceAgent',
 }

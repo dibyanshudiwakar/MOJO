@@ -86,6 +86,11 @@ PARAM_SOURCES = {
     'code-generation': {'plan_id': ('planning', 'plan')},
     'test-engineering': {'plan_id': ('planning', 'plan')},
     'variance-analysis': {'package_id': ('test-engineering', 'test_suites')},
+    # The feedback agent repairs what code-generation produced, so it needs the
+    # plan the project was generated from and the root it was written to.
+    # 'source_code' is code-generation's own declared output and holds that path.
+    'feedback': {'plan_id': ('planning', 'plan'),
+                 'project_root': ('code-generation', 'source_code')},
 }
 # Extra depends_on edges this scheduler adds on top of the catalogue's own
 # dependency graph, keyed by role: an agent that reads a repository directly
@@ -121,6 +126,14 @@ AGENT_LIFECYCLE_TRANSITIONS = {
     'planning':              'PLAN_APPROVED',
     'code-generation':       'IMPLEMENTING',
     'build-validation':      'BUILD_VALIDATED',
+    # 'build-validation' above has no entry in config/agent-catalogue.v1.json,
+    # so no step for it can ever exist and _LIFECYCLE_AGENT['BUILD_VALIDATED']
+    # named an agent that could never complete -- the walk stopped dead there.
+    # feedback is listed after it so the reverse map resolves BUILD_VALIDATED to
+    # this agent instead: it re-runs the quality gate over the generated project
+    # and only completes when the gate is clean, which is exactly what reaching
+    # BUILD_VALIDATED is supposed to mean.
+    'feedback':              'BUILD_VALIDATED',
     'test-engineering':      'DIFFERENTIAL_TESTING',
     'variance-analysis':     'VARIANCE_REVIEW',
     'remediation':           'REMEDIATING',
@@ -164,6 +177,9 @@ _PIPELINE_ARTEFACT_REQUIREMENTS = {
     'ACE_ANALYSED':        ('ace_analyses',        'job_id'),
     'PLAN_APPROVED':       ('migration_plans',     'job_id'),
     'IMPLEMENTING':        ('migration_specs',     'job_id'),
+    # The feedback agent's own re-validation writes this row, so the advance to
+    # BUILD_VALIDATED is backed by a gate verdict rather than taken on trust.
+    'BUILD_VALIDATED':     ('quality_runs',        'job_id'),
 }
 
 
@@ -498,6 +514,9 @@ class PipelineService:
             'code-generation': {'output_root': base + '/springboot-output',
                                  'service_name': service_name or 'migrated-service',
                                  'package_name': package_name or 'com.example.migrated'},
+            # project_root is normally resolved from code-generation's output by
+            # PARAM_SOURCES; this is the fallback for the same location.
+            'feedback': {'project_root': base + '/springboot-output', 'max_passes': 3},
         }
         return seeds.get(agent_id, {})
 

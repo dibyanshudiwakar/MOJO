@@ -81,6 +81,11 @@
       "name": "agent/variance-analysis/hardcoding-check",
       "version": "1",
       "template": "You are given the IIB source files (iib_files) and the migrated Spring Boot Java source files (ms_files) for one service. Compare them as the attached hardcoding skill specifies and return exactly the single JSON object that skill defines, with action \"hardcoding_check\". Use only the files supplied: never cite a file that is not in them, and classify behaviour with no corresponding Java class as a GAP rather than omitting it."
+    },
+    {
+      "name": "agent/feedback/finding-triage",
+      "version": "1",
+      "template": "You are given the quality checks that are still failing after automated repair, and the findings that were deliberately left to the remediation agent. For each remaining item say why a mechanical fix cannot settle it and what a human must decide. Do not claim anything was fixed. Return JSON: {\"recommendations\":[{\"item\":..., \"why_manual\":..., \"owner\":...}]}."
     }
   ]
 }

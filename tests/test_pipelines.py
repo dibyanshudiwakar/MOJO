@@ -5,6 +5,17 @@ from app.service import FactoryService
 from app.services.factory_v3 import WorkflowOrchestrator
 from app.services.pipelines import PipelineService, PipelineError
 
+# Agent counts are derived from the governed catalogue rather than hardcoded, so
+# adding a contract does not silently turn these invariants into stale numbers.
+def _catalogue_agent_ids():
+    import json, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'agent-catalogue.v1.json'
+    return {a['agent_id'] for a in json.loads(path.read_text(encoding='utf-8'))['agents']}
+
+
+CATALOGUE_AGENT_COUNT = len(_catalogue_agent_ids())
+
+
 
 @pytest.fixture
 def env(tmp_path):
@@ -36,7 +47,9 @@ def test_selectable_agents_excludes_orchestrator(env):
     ids = {a['agent_id'] for a in pipelines.selectable_agents()}
     assert 'migration-orchestrator' not in ids
     assert 'ace-analysis' in ids and 'code-generation' in ids
-    assert len(ids) == 13
+    # every catalogue agent except the ones the wizard deliberately withholds
+    from app.services.pipelines import SELECTABLE_AGENTS_EXCLUDED
+    assert ids == _catalogue_agent_ids() - SELECTABLE_AGENTS_EXCLUDED
 
 
 def test_impact_prunes_dependents_with_clear_reasons(env):

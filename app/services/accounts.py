@@ -35,7 +35,7 @@ SELF_SERVICE_ROLES = (
     'TEST_ENGINEER', 'RCA_ANALYST', 'REPOSITORY_INTAKE', 'DORMANCY_ANALYST',
     'DELIVERY_ENGINEER', 'MIGRATION_VIEWER',
     'MIGRATION_PLANNER', 'VARIANCE_ANALYST', 'REMEDIATION_ENGINEER',
-    'GOVERNANCE_ENGINE', 'KNOWLEDGE_CURATOR',
+    'GOVERNANCE_ENGINE', 'KNOWLEDGE_CURATOR', 'FEEDBACK_ENGINEER',
 )
 # The six roles approval_policies names as the approver for G0-G5. They must be
 # grantable, or a pending package is invisible to everyone:

@@ -248,6 +248,38 @@
       "default_model_alias": "coding"
     },
     {
+      "agent_id": "feedback",
+      "display_name": "Feedback Agent",
+      "version": "1.0.0",
+      "description": "Applies the generated-code analyses back into the generated code and re-runs the quality gate to prove the fix.",
+      "accepted_inputs": [
+        "generated_project",
+        "quality_report",
+        "approved_plan"
+      ],
+      "produced_outputs": [
+        "applied_fixes",
+        "quality_status",
+        "unresolved"
+      ],
+      "required_role": "FEEDBACK_ENGINEER",
+      "tool_allowlist": [
+        "repository.write",
+        "build.execute",
+        "evidence.write"
+      ],
+      "dependencies": [
+        "code-generation"
+      ],
+      "status": "APPROVED",
+      "effective_from": "2026-09-09",
+      "approved_by": "ARCHITECTURE_BASELINE",
+      "approval_evidence_id": "architecture-v1-agent-catalogue",
+      "supersedes_version": null,
+      "enabled": true,
+      "default_model_alias": "coding"
+    },
+    {
       "agent_id": "test-engineering",
       "display_name": "Test Engineering Agent",
       "version": "1.0.0",

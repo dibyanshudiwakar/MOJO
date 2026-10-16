@@ -665,6 +665,10 @@
     {
       "agent_id": "dormancy-intelligence",
       "reason": "The source skill never decides whether a service is worth migrating. It has no traffic, telemetry, deployment-inventory or dormancy content, so any skill written for this agent would be invented."
+    },
+    {
+      "agent_id": "feedback",
+      "reason": "The source skill covers producing the target service, not repairing it afterwards. It has no content on quality-gate repair, so any skill written for this agent would be invented. Its repairs are deterministic and proven by re-running the gate."
     }
   ],
   "reference_owners": {

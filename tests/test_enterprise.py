@@ -9,6 +9,23 @@ from app.services.specification import SpecificationService
 from app.services.differential import DifferentialService
 from app.services.rca import RCAService
 
+# Agent counts are derived from the governed catalogue rather than hardcoded, so
+# adding a contract does not silently turn these invariants into stale numbers.
+def _catalogue_agent_ids():
+    import json, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'agent-catalogue.v1.json'
+    return {a['agent_id'] for a in json.loads(path.read_text(encoding='utf-8'))['agents']}
+
+
+CATALOGUE_AGENT_COUNT = len(_catalogue_agent_ids())
+
+
+def _catalogue_display_names():
+    import json, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'agent-catalogue.v1.json'
+    return {a['display_name'] for a in json.loads(path.read_text(encoding='utf-8'))['agents']}
+
+
 def setup():
  d=tempfile.TemporaryDirectory();r=Repository(str(Path(d.name)/'x.db'));f=FactoryService(r);j=f.create_job({'service':'Order','owner':'Team','sourceRevision':'abc','rollbackPointer':'tag/v1'},'tester');return d,r,f,j
 
@@ -37,14 +54,13 @@ def test_architecture_agents_are_seeded_idempotently():
  d=tempfile.TemporaryDirectory(); path=str(Path(d.name)/'agents.db')
  r=Repository(path)
  agents=r.rows('select name,version,required_role,enabled from agent_registry order by name')
- assert len(agents)==14
- assert {a['name'] for a in agents}=={
-  'Migration Orchestrator Agent','Repository Intake Agent','Dormancy Intelligence Agent','Framework Baseline Agent',
-  'ACE Analysis Agent','Migration Specification Agent','Planning Agent','Code Generation Agent','Test Engineering Agent',
-  'Variance Analysis Agent','RCA Agent','Remediation Agent','Governance Agent','Knowledge and Evidence Agent'}
+ assert len(agents)==CATALOGUE_AGENT_COUNT
+ # Derived from the catalogue: the invariant is that the seeded registry mirrors
+ # the governed file exactly, not that it holds one particular list of names.
+ assert {a['name'] for a in agents}==_catalogue_display_names()
  assert all(a['version']=='1.0.0' and a['required_role']!='AGENT_OPERATOR' and a['enabled']==1 for a in agents)
  Repository(path)
- assert r.one('select count(*) n from agent_registry')['n']==14
+ assert r.one('select count(*) n from agent_registry')['n']==CATALOGUE_AGENT_COUNT
  d.cleanup()
 
 
@@ -52,13 +68,13 @@ def test_v22_agent_contracts_roles_tools_graph_and_health():
  from app.services.agents import AgentRegistry
  d,r,f,j=setup(); registry=AgentRegistry(r)
  rows=r.rows('select * from agent_registry')
- assert len(rows)==14 and len({x['agent_id'] for x in rows})==14
+ assert len(rows)==CATALOGUE_AGENT_COUNT and len({x['agent_id'] for x in rows})==CATALOGUE_AGENT_COUNT
  assert all(x['contract_hash'] and x['status']=='APPROVED' and x['required_role']!='AGENT_OPERATOR' for x in rows)
  run=registry.start(j['id'],'code-generation','1.0.0',[],('CODE_GENERATOR',),['repository.write'])
  assert run['status']=='RUNNING'
  with pytest.raises(PermissionError): registry.start(j['id'],'code-generation','1.0.0',[],('CODE_GENERATOR',),['policy.evaluate'])
  assert registry.health()['status']=='UP'
- graph=registry.graph(); assert len(graph['nodes'])==14 and any(e['to']=='code-generation' for e in graph['edges'])
+ graph=registry.graph(); assert len(graph['nodes'])==CATALOGUE_AGENT_COUNT and any(e['to']=='code-generation' for e in graph['edges'])
  d.cleanup()
 
 def test_v22_contract_drift_is_rejected():
