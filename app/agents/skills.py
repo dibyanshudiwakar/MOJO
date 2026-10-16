@@ -56,6 +56,23 @@ class Skill:
         return Skill(self.agent_id, '%s#%s' % (self.name, reference), self.root, text, {},
                      hashlib.sha256(text.encode('utf-8')).hexdigest(), reference)
 
+    def focus_many(self, references):
+        """This skill narrowed to several reference files, combined with SKILL.md.
+
+        ``focus`` only narrows to one reference and drops SKILL.md entirely --
+        code-generation's business-logic synthesis needs SKILL.md's own
+        guidance *plus* structural-conventions.md *plus* whichever
+        connector-specific reference the detected backend type names, all in
+        one call. ``KeyError`` if any reference is missing, same as ``focus``.
+        """
+        parts = [self.text.rstrip('\n')]
+        for ref in references:
+            parts.append('---\n' + self.reference(ref).rstrip('\n'))
+        combined = ('\n\n'.join(parts)) + '\n'
+        joined = '+'.join(references)
+        return Skill(self.agent_id, '%s#%s' % (self.name, joined), self.root, combined, {},
+                     hashlib.sha256(combined.encode('utf-8')).hexdigest(), joined)
+
     def reference(self, name):
         """One reference by file name or by its ``references/...`` path."""
         for path, text in self.references.items():

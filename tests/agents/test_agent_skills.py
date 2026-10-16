@@ -421,3 +421,24 @@ def test_a_crlf_checkout_still_verifies_but_a_content_change_does_not(library_co
     target.write_bytes(target.read_bytes() + b'one more line\r\n')
     with pytest.raises(SkillIntegrityError, match='skill_file_modified'):
         SkillLibrary(library_copy).load('rca')
+
+
+# ---- focus_many -----------------------------------------------------------------------------
+
+def test_focus_many_combines_skill_md_with_every_named_reference():
+    skill = skill_for('code-generation')
+    combined = skill.focus_many(['structural-conventions.md', 'rest-external-direct.md'])
+    assert combined.text.startswith(skill.text.rstrip('\n'))
+    assert 'Structural Conventions' in combined.text
+    assert 'REST' in combined.text and 'Standard package layout' in combined.text
+    assert combined.focused_on == 'structural-conventions.md+rest-external-direct.md'
+    assert combined.content_hash != skill.content_hash
+    # Unlike plain focus(), SKILL.md's own guidance is not discarded.
+    prompt = combined.as_system_prompt()
+    assert prompt == combined.text.rstrip('\n') + '\n'
+
+
+def test_focus_many_raises_on_an_unknown_reference():
+    skill = skill_for('code-generation')
+    with pytest.raises(KeyError):
+        skill.focus_many(['no-such-reference.md'])

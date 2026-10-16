@@ -101,6 +101,51 @@ def _files(root):
             yield f
 
 
+def accept_edit(root, edit):
+    """Validate one proposed search/replace edit, returning the resolved file or a refusal.
+
+    Model output is untrusted data, so the path is re-resolved under the
+    project root and the suffix re-checked -- a traversal or a stray
+    ``pom.xml`` edit is refused rather than applied. ``old_str`` must appear
+    exactly once in the *real* file: zero means the model was working from
+    redacted bytes and the edit cannot be placed, more than one means it is
+    ambiguous and could change the wrong site.
+
+    Shared between ``CodeFeedbackService`` (repairing a failing quality check)
+    and code-generation's business-logic synthesis (filling in a
+    HAND_WRITTEN_PROTECTED stub) -- both apply a model's proposed edits to
+    governed generated source, and a path-traversal or ambiguous-match check
+    must not have two slightly different implementations to drift apart.
+    """
+    rel = str(edit.get('path', '')).strip().replace('\\', '/')
+    if not rel or rel.startswith('/') or '..' in rel.split('/'):
+        return None, 'path_not_relative:%s' % rel
+    base = Path(root).resolve()
+    try:
+        target = (base / rel).resolve()
+    except (OSError, ValueError):
+        return None, 'path_unresolvable:%s' % rel
+    if target != base and base not in target.parents:
+        return None, 'path_outside_project:%s' % rel
+    if target.suffix.lower() not in SCANNED_SUFFIXES:
+        return None, 'suffix_not_editable:%s' % rel
+    if not target.is_file():
+        return None, 'file_not_found:%s' % rel
+    old = str(edit.get('old_str', ''))
+    new = str(edit.get('new_str', ''))
+    if not old:
+        return None, 'old_str_empty:%s' % rel
+    if len(new) > MAX_NEW_STR_CHARS:
+        return None, 'new_str_too_large:%s' % rel
+    text = target.read_text(errors='ignore')
+    occurrences = text.count(old)
+    if occurrences == 0:
+        return None, 'old_str_absent:%s' % rel
+    if occurrences > 1:
+        return None, 'old_str_ambiguous:%s' % rel
+    return target, ''
+
+
 class CodeFeedbackService:
     def __init__(self, repo):
         self.repo = repo
@@ -171,42 +216,7 @@ class CodeFeedbackService:
         return detail, files
 
     def _accept_edit(self, root, edit):
-        """Validate one proposed edit, returning the resolved file or a refusal.
-
-        Model output is untrusted data, so the path is re-resolved under the
-        project root and the suffix re-checked -- a traversal or a stray
-        ``pom.xml`` edit is refused rather than applied. ``old_str`` must appear
-        exactly once in the *real* file: zero means the model was working from
-        redacted bytes and the edit cannot be placed, more than one means it is
-        ambiguous and could change the wrong site.
-        """
-        rel = str(edit.get('path', '')).strip().replace('\\', '/')
-        if not rel or rel.startswith('/') or '..' in rel.split('/'):
-            return None, 'path_not_relative:%s' % rel
-        base = Path(root).resolve()
-        try:
-            target = (base / rel).resolve()
-        except (OSError, ValueError):
-            return None, 'path_unresolvable:%s' % rel
-        if target != base and base not in target.parents:
-            return None, 'path_outside_project:%s' % rel
-        if target.suffix.lower() not in SCANNED_SUFFIXES:
-            return None, 'suffix_not_editable:%s' % rel
-        if not target.is_file():
-            return None, 'file_not_found:%s' % rel
-        old = str(edit.get('old_str', ''))
-        new = str(edit.get('new_str', ''))
-        if not old:
-            return None, 'old_str_empty:%s' % rel
-        if len(new) > MAX_NEW_STR_CHARS:
-            return None, 'new_str_too_large:%s' % rel
-        text = target.read_text(errors='ignore')
-        occurrences = text.count(old)
-        if occurrences == 0:
-            return None, 'old_str_absent:%s' % rel
-        if occurrences > 1:
-            return None, 'old_str_ambiguous:%s' % rel
-        return target, ''
+        return accept_edit(root, edit)
 
     def _claude_repair(self, context, root, checks, job_id, plan_id, quality):
         """Ask the model for edits, apply them, and keep them only if the gate improves.
