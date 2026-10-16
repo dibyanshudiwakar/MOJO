@@ -223,11 +223,10 @@
       "agent_id": "planning",
       "skill_name": "iib-to-ms-planning",
       "skill_path": "iib-to-ms-planning/SKILL.md",
-      "skill_sha256": "b0b0a8b96b3d4b20e5058bfd53a813026a02e96a60f03acbccb0a1fd12f69db4",
+      "skill_sha256": "abc608444de895e0017cd3c03e0050b54704b37e6ea30daa9601fd9f10e2ee5b",
       "required_role": "MIGRATION_PLANNER",
       "depends_on": [
-        "migration-specification",
-        "framework-baseline"
+        "migration-specification"
       ],
       "references": [
         {
@@ -668,7 +667,7 @@
     },
     {
       "agent_id": "feedback",
-      "reason": "The source skill covers producing the target service, not repairing it afterwards. It has no content on quality-gate repair, so any skill written for this agent would be invented. Its repairs are deterministic and proven by re-running the gate."
+      "reason": "The source skill covers producing the target service, not repairing it afterwards. It has no content on quality-gate repair, so any skill written for this agent would be invented. Its deterministic repairs are defined by the quality gate itself and proven by re-running it."
     }
   ],
   "reference_owners": {

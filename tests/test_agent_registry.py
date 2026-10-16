@@ -258,7 +258,13 @@ def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo,
     ai = AIRegistryService(repo)
     ai.register_prompt({'name': 'agent/dormancy-intelligence/classification-rationale',
                         'version': '1', 'template': 't', 'status': 'APPROVED'}, Approver())
-    ai.register_model({'name': 'm', 'version': '1', 'provider_profile': 'model-primary',
+    # Registered under the alias the agent actually resolves to. Registering any
+    # other name populates model_registry, which arms the AT-13 fail-closed
+    # guard in dispatch for every agent, and the run is then refused with
+    # default_model_alias_not_in_approved_model_registry before the gateway --
+    # and therefore the DLP rule this test is about -- is ever reached.
+    ai.register_model({'name': 'reasoning-small', 'version': '1',
+                       'provider_profile': 'model-primary',
                        'status': 'APPROVED', 'region': 'approved-region'}, Approver())
     registry.dispatch(job['id'], 'repository-intake', '1.0.0', ROLES, 'svc', {'path': str(ace_repo)})
     # A 16-digit telemetry counter trips the PAN rule.

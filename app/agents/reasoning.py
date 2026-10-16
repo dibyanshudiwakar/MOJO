@@ -164,24 +164,33 @@ class ReasoningGateway:
                 return None, provenance
         provider_model = getattr(provider, 'model', '')
         provenance['provider_model'] = provider_model
-        # Load the agent's skill from agent-skills/ if one exists.  A damaged
-        # or missing skill is recorded and skipped — it is guidance, not
-        # authority, so its absence must not prevent the agent from running.
-        skill = None
+        # Fall back to the agent's own skill only when the caller did not supply
+        # one. A caller-supplied skill is deliberately narrower -- variance
+        # analysis passes ``own.focus('parity-skill.md')`` so a parity call is
+        # guided by that reference alone rather than the whole SKILL.md -- and
+        # overwriting it here discarded that focus entirely.
+        #
+        # A damaged or missing skill is recorded and skipped: it is guidance,
+        # not authority, so its absence must not prevent the agent from running.
         ctx_agent_id = getattr(context, 'agent_id', '') or ''
-        if ctx_agent_id:
+        if skill is None and ctx_agent_id:
             try:
                 skill = skill_for(ctx_agent_id)
-                if skill:
-                    _log_info('Skill loaded: "%s" (hash: %s, %d references)' % (
-                        skill.name, skill.content_hash[:12], len(skill.references)))
-                    provenance['skill_name'] = skill.name
-                    provenance['skill_hash'] = skill.content_hash
-                else:
+                if skill is None:
                     _log_info('No skill defined for agent "%s" — invoking without skill guidance' % ctx_agent_id)
             except SkillIntegrityError as exc:
                 _log_warn('Skill integrity error for "%s": %s — invoking without skill guidance' % (ctx_agent_id, exc))
                 provenance['skill_error'] = str(exc)
+        # Recorded for whichever skill is actually in play, caller-supplied or
+        # not. ``skill_hash`` is what gates passing it to the adapter below, so
+        # setting it only on the fallback path meant a focused skill was loaded
+        # and then never handed over. Skill.provenance() also carries
+        # ``skill_focus`` when the skill is narrowed to one reference.
+        if skill is not None:
+            provenance.update(skill.provenance())
+            _log_info('Skill in use: "%s" (hash: %s, %d references)%s' % (
+                skill.name, skill.content_hash[:12], len(skill.references),
+                ', focused on ' + skill.focused_on if getattr(skill, 'focused_on', '') else ''))
         # Enrich the payload with accumulated pipeline context so the LLM sees
         # what every prior agent produced, which skills guided them, and the
         # full evidence chain.  This is the "zero context loss" mechanism: the
@@ -224,7 +233,11 @@ class ReasoningGateway:
             if guidance is not None:
                 answer = provider.invoke(prompt['template'], enriched_payload, skill=guidance)
             else:
-                answer = provider.invoke(prompt['template'], enriched_payload, skill=skill)
+                # No skill keyword at all. An adapter leaving accepts_skill False
+                # is declaring the two-argument signature, so passing skill= here
+                # raised TypeError and took down every provider double written
+                # against invoke(template, payload).
+                answer = provider.invoke(prompt['template'], enriched_payload)
             provenance['skill_included'] = guidance is not None
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError) as exc:

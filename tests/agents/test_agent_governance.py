@@ -51,7 +51,20 @@ def test_promotion_reports_the_missing_evidence_bundle(repo, job, state, approve
     assert any('differential_package_missing' in r for r in reasons)
 
 
-def test_an_open_clarification_blocks_every_forward_transition(repo, job):
+def test_an_open_clarification_no_longer_blocks_a_forward_transition(repo, job):
+    """Clarification blocking is disabled, and this pins that decision.
+
+    It used to be that an open clarification denied every forward transition --
+    validate_transition enforced it and the services inserted a clarification
+    per ambiguity. That was deliberately removed: AgentRegistry.dispatch,
+    PriorityOneService.analyze_ace and
+    MappingAndPlanningService.create_mapping_catalogue each now say so in
+    comments, and the state machine has no clarification check left. Ambiguities
+    are recorded as unsupported constructs and agent outputs instead.
+
+    This test therefore asserts the current contract rather than the old one, so
+    that re-introducing blocking cannot pass unnoticed.
+    """
     from app.repository import now, uid
     with repo.connect() as c:
         repo.insert(c, 'clarifications', {'id': uid(), 'job_id': job['id'], 'stage': 'T',
@@ -59,7 +72,7 @@ def test_an_open_clarification_blocks_every_forward_transition(repo, job):
                                           'evidence_ref': '', 'status': 'OPEN', 'answer': '',
                                           'created_at': now(), 'answered_at': '', 'answered_by': ''})
     result = GovernanceAgent(repo).run(job['id'])
-    assert result.outputs['allow_deny_decision']['INTAKE_VALIDATED'] == 'DENY'
+    assert result.outputs['allow_deny_decision']['INTAKE_VALIDATED'] == 'ALLOW'
     # STOPPED and FAILED stay reachable, as the state machine allows.
     assert result.outputs['allow_deny_decision']['STOPPED'] == 'ALLOW'
     assert result.outputs['allow_deny_decision']['FAILED'] == 'ALLOW'

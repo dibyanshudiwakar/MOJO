@@ -30,9 +30,18 @@ def setup():
  d=tempfile.TemporaryDirectory();r=Repository(str(Path(d.name)/'x.db'));f=FactoryService(r);j=f.create_job({'service':'Order','owner':'Team','sourceRevision':'abc','rollbackPointer':'tag/v1'},'tester');return d,r,f,j
 
 def test_state_machine_and_blocking():
+ """INTAKE_VALIDATED -> FRAMEWORK_BASELINED is blocked by G0, not by a clarification.
+
+ This asserted that an open clarification blocked the transition. Clarification
+ blocking has since been deliberately removed (see the comments in
+ AgentRegistry.dispatch, PriorityOneService.analyze_ace and
+ MappingAndPlanningService.create_mapping_catalogue), so the clarification is
+ now inert and the edge is held by the G0 gate instead -- which raises
+ PolicyError, a PermissionError rather than the ValueError this expected.
+ """
  d,r,f,j=setup();f.transition(j['id'],'INTAKE_VALIDATED','tester')
  with r.connect() as c:r.insert(c,'clarifications',{'id':'c1','job_id':j['id'],'stage':'INTAKE','question':'Question','owner':'Owner','impact':'Impact','evidence_ref':'ev','status':'OPEN','answer':'','created_at':'now','answered_at':'','answered_by':''})
- with pytest.raises(ValueError):f.transition(j['id'],'FRAMEWORK_BASELINED','tester')
+ with pytest.raises(PolicyError,match='required_gate_approval_missing:G0'):f.transition(j['id'],'FRAMEWORK_BASELINED','tester')
  d.cleanup()
 
 def test_policy_requires_role_and_evidence():

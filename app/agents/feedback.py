@@ -30,6 +30,10 @@ class FeedbackAgent(BaseAgent):
     TOOLS = ('repository.write', 'build.execute', 'evidence.write')
     OUTPUTS = ('applied_fixes', 'quality_status', 'unresolved')
     PROMPT = 'agent/feedback/finding-triage'
+    #: Deliberately none: the source migration skill covers producing the target
+    #: service, not repairing it afterwards, so any skill here would be invented.
+    #: Declared in agent-skills/skills-map.json under agents_without_skill.
+    SKILL = None
 
     def execute(self, context):
         plan_id = context.param('plan_id')

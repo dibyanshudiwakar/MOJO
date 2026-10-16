@@ -227,7 +227,9 @@ def test_every_agent_declares_the_skill_the_manifest_assigns_it(library):
 
 def test_conformance_covers_the_skill_declaration(repo):
     report = AgentRegistry(repo).conformance()
-    assert len(report) == 14
+    # Derived from the catalogue: the invariant is that every contract has a
+    # conformant worker, not that there are exactly N of them.
+    assert len(report) == len(IMPLEMENTATIONS)
     assert [x for x in report if x['status'] != 'CONFORMANT'] == []
 
 

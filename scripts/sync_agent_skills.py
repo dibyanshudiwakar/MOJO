@@ -33,7 +33,11 @@ AGENTS = ['migration-orchestrator', 'repository-intake', 'ace-analysis', 'framew
 SKILL = {a: 'iib-to-ms-' + a for a in AGENTS}
 UNMAPPED = {'dormancy-intelligence':
             'The source skill never decides whether a service is worth migrating. It has no traffic, telemetry, '
-            'deployment-inventory or dormancy content, so any skill written for this agent would be invented.'}
+            'deployment-inventory or dormancy content, so any skill written for this agent would be invented.',
+            'feedback':
+            'The source skill covers producing the target service, not repairing it afterwards. It has no content '
+            'on quality-gate repair, so any skill written for this agent would be invented. Its deterministic '
+            'repairs are defined by the quality gate itself and proven by re-running it.'}
 
 W, S, T, G = ('references/workflow-and-state.md', 'SKILL.md',
               'references/translation-table.md', 'references/gap-checklist.md')
@@ -215,9 +219,15 @@ def readme(m):
         ', '.join('`%s`' % Path(r['path']).name for r in a['references'] if r['kind'] == 'owned') or '—',
         sum(1 for r in a['references'] if r['kind'] == 'copy')) for a in m['agents'])
     owners_rows = '\n'.join('| `%s` | `%s` |' % (n, o) for n, o in m['reference_owners'].items())
+    # Generated per entry rather than hardcoded: more than one agent deliberately
+    # has no skill, and the rationale belongs beside each of them.
+    none_rows = '\n'.join('| `%s` | **none** | — | — |' % a['agent_id']
+                          for a in m['agents_without_skill'])
+    none_sections = '\n\n'.join('### Why `%s` has no skill\n\n%s' % (a['agent_id'], a['reason'])
+                                for a in m['agents_without_skill'])
     return f"""# Agent skills — IIB → Spring Boot migration
 
-`external-skills/iib-to-ms-migration` is one skill: a single linear workflow (`INTAKE → SCAFFOLD → GENERATE → HANDOFF`) with about 4,000 lines of references. The factory runs **14 agents**, each with a narrow tool contract. This folder breaks the single skill into **one self-contained skill per agent**.
+`external-skills/iib-to-ms-migration` is one skill: a single linear workflow (`INTAKE → SCAFFOLD → GENERATE → HANDOFF`) with about 4,000 lines of references. The factory runs **{len(m['agents']) + len(m['agents_without_skill'])} agents**, each with a narrow tool contract. This folder breaks the single skill into **one self-contained skill per agent**.
 
 The source skill is left untouched. `app/agents/skills.py` loads these skills (see `docs/AGENTS_DEVELOPMENT.md`, "Agent skills").
 
@@ -226,11 +236,9 @@ The source skill is left untouched. `app/agents/skills.py` loads these skills (s
 | Agent (`config/agent-catalogue.v1.json`) | Skill | Reference files it owns | Copies of others' files |
 |---|---|---|---|
 {rows}
-| `dormancy-intelligence` | **none** | — | — |
+{none_rows}
 
-### Why `dormancy-intelligence` has no skill
-
-{m['agents_without_skill'][0]['reason']}
+{none_sections}
 
 If you later want one, the content has to come from somewhere other than this skill.
 

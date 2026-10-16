@@ -26,11 +26,16 @@ def test_an_unsupported_node_is_recorded_and_the_clarification_comes_from_the_se
     assert result.status == 'CLARIFICATION_REQUIRED'
     assert result.metrics['unsupported_count'] == 1
     assert repo.one('select count(*) n from unsupported_constructs where job_id=?', (job['id'],))['n'] == 1
-    # analyze_ace inserts the clarification itself, so the agent must not return
-    # it again or every ambiguity would be asked twice.
+    # The agent must not return the clarification itself -- analyze_ace owns the
+    # ambiguity, so returning it here would double it up.
     assert result.clarifications == ()
+    # Clarification blocking is disabled (see the comment in
+    # PriorityOneService.analyze_ace): an ambiguity is recorded on the analysis
+    # record and surfaced as an output, not inserted as an open clarification
+    # row. The unsupported construct above is the durable record of it.
+    assert result.outputs['ambiguities'], 'the ambiguity must still be surfaced'
     assert repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",
-                    (job['id'],))['n'] >= 1
+                    (job['id'],))['n'] == 0
 
 
 def test_coverage_is_reported_for_undetected_areas(repo, job, ace_repo):

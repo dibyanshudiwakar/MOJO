@@ -15,7 +15,7 @@ _Generated from `config/agent-catalogue.v1.json` by `scripts/sync_agent_skills.p
 |---|---|
 | Agent id | `planning` (Planning Agent) |
 | Required role | `MIGRATION_PLANNER` |
-| Depends on | `migration-specification`, `framework-baseline` |
+| Depends on | `migration-specification` |
 | Accepted inputs | `approved_analysis`, `migration_yaml`, `framework_template` |
 | Produced outputs | `plan`, `task_graph`, `mapping`, `risk_register` |
 | Tool allow-list | `evidence.read`, `plan.write`, `clarification.create` |

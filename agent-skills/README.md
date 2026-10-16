@@ -1,6 +1,6 @@
 # Agent skills — IIB → Spring Boot migration
 
-`external-skills/iib-to-ms-migration` is one skill: a single linear workflow (`INTAKE → SCAFFOLD → GENERATE → HANDOFF`) with about 4,000 lines of references. The factory runs **14 agents**, each with a narrow tool contract. This folder breaks the single skill into **one self-contained skill per agent**.
+`external-skills/iib-to-ms-migration` is one skill: a single linear workflow (`INTAKE → SCAFFOLD → GENERATE → HANDOFF`) with about 4,000 lines of references. The factory runs **15 agents**, each with a narrow tool contract. This folder breaks the single skill into **one self-contained skill per agent**.
 
 The source skill is left untouched. `app/agents/skills.py` loads these skills (see `docs/AGENTS_DEVELOPMENT.md`, "Agent skills").
 
@@ -22,10 +22,15 @@ The source skill is left untouched. `app/agents/skills.py` loads these skills (s
 | `governance` | [`iib-to-ms-governance`](iib-to-ms-governance/SKILL.md) | `hard-constraints.md`, `verification-checklists.md` | 4 |
 | `knowledge-evidence` | [`iib-to-ms-knowledge-evidence`](iib-to-ms-knowledge-evidence/SKILL.md) | `evidence-hierarchy.md` | 3 |
 | `dormancy-intelligence` | **none** | — | — |
+| `feedback` | **none** | — | — |
 
 ### Why `dormancy-intelligence` has no skill
 
 The source skill never decides whether a service is worth migrating. It has no traffic, telemetry, deployment-inventory or dormancy content, so any skill written for this agent would be invented.
+
+### Why `feedback` has no skill
+
+The source skill covers producing the target service, not repairing it afterwards. It has no content on quality-gate repair, so any skill written for this agent would be invented. Its deterministic repairs are defined by the quality gate itself and proven by re-running it.
 
 If you later want one, the content has to come from somewhere other than this skill.
 
