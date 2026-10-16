@@ -97,6 +97,36 @@ def runtime_url(value):
     return text
 
 
+SAFE_NAME = None
+
+
+def repo_name(url):
+    """The repository's own name, derived from its clone URL.
+
+    A clone landed its content directly inside the role's fixed destination
+    (``ace``/``framework``), so nothing on disk recorded what the repository
+    was actually called -- every later step that needs the repository's name
+    (not just "the ACE repo", the specific service repo) had no path to read
+    it from. Takes the URL's last path segment and strips a trailing ``.git``,
+    the same name ``git clone <url>`` would use on its own if no destination
+    were given.
+
+    Restricted to a safe single path-component character set: this becomes a
+    directory name under the confined workspace, derived from a caller-supplied
+    URL, so it must never itself be able to smuggle a path separator or ``..``.
+    """
+    import re
+    from urllib.parse import urlparse
+    global SAFE_NAME
+    if SAFE_NAME is None:
+        SAFE_NAME = re.compile(r'^[A-Za-z0-9_.-]+$')
+    segment = urlparse(str(url or '')).path.rstrip('/').rsplit('/', 1)[-1]
+    name = segment[:-4] if segment.lower().endswith('.git') else segment
+    if not name or not SAFE_NAME.match(name) or name in ('.', '..'):
+        raise WorkspaceError('repository_name_not_derivable_from_url:%s' % url)
+    return name
+
+
 SAFE_REF = None
 
 

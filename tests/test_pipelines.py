@@ -90,7 +90,9 @@ def test_create_wires_clone_step_before_repo_consuming_agents(env):
     assert clone is not None
     assert clone['id'] in json.loads(intake['depends_on'])
     assert clone['id'] in json.loads(analysis['depends_on'])
-    assert json.loads(intake['params'])['path'] == 'workspace/orders/ace'
+    # Nested under the repo's own name (from repo_url, here coincidentally
+    # also "ace") -- the role directory is a parent, not the clone target.
+    assert json.loads(intake['params'])['path'] == 'workspace/orders/ace/ace'
 
 
 def test_create_adds_delivery_step_only_when_pushing(env):

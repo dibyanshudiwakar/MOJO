@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from app.repository import Repository
 from app.services import workspace
 from app.services.accounts import AccountService
@@ -112,7 +113,10 @@ def test_clone_clears_unusable_destination_and_reclones(env, monkeypatch, tmp_pa
         return _FakeCompleted(0, stdout='ok')
 
     monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
-    dest = workspace.resolve('ace-repo', must_exist=False, create=True)
+    # The clone lands under 'ace-repo/repo' (role dir / repo name from the
+    # URL), not directly in 'ace-repo' -- that is the fix under test elsewhere,
+    # so the debris belongs at the actual clone target.
+    dest = workspace.resolve('ace-repo/repo', must_exist=False, create=True)
     (dest / 'existing.txt').write_text('already here')
 
     result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
@@ -146,13 +150,15 @@ def test_clone_idempotent_when_same_url_already_cloned(env, monkeypatch):
 
     monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
 
-    dest = workspace.resolve('ace-repo', must_exist=False, create=True)
+    # Nested under the repo's own name, same as a real clone would be.
+    dest = workspace.resolve('ace-repo/repo', must_exist=False, create=True)
     (dest / 'existing.txt').write_text('already here')
 
     result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')
 
     assert result['commit'] == 'abc123def456'
-    assert result['path'].endswith('ace-repo')
+    assert Path(result['path']).name == 'repo'
+    assert Path(result['path']).parent.name == 'ace-repo'
     # Must not have attempted a fresh git clone
     assert not any('clone' in c for c in calls)
 
@@ -179,7 +185,7 @@ def test_clone_replaces_destination_pointing_at_a_different_remote(env, monkeypa
 
     monkeypatch.setattr('app.services.repo_clone.subprocess.run', fake_run)
 
-    dest = workspace.resolve('ace-repo', must_exist=False, create=True)
+    dest = workspace.resolve('ace-repo/repo', must_exist=False, create=True)
     (dest / 'existing.txt').write_text('already here')
 
     result = svc.clone(uid, 'https://github.com/org/repo.git', 'main', 'ace-repo')

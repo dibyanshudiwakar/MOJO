@@ -502,13 +502,36 @@ class PipelineService:
                 self.repo.insert(c, 'pipeline_steps', s)
         return self.detail(pid)
 
+    def _role_content_path(self, by_role, role, base):
+        """Where a role's actual repository content lands.
+
+        ``RepoCloneService.clone`` nests a role's clone under its own
+        repository name (``<role-dir>/<repo_name>``) rather than dumping it
+        directly into the fixed role directory, so every step reading that
+        role's content must join the same way. Falls back to the bare role
+        directory when the role has no ``repo_url`` to derive a name from
+        (an unconfigured role, or one deliberately skipped) -- there is no
+        clone to point at either way, so this is only ever a harmless default.
+        """
+        r = by_role.get(role, {})
+        url = r.get('repo_url', '')
+        role_dir = base + '/' + role.lower()
+        if not url:
+            return role_dir
+        try:
+            return role_dir + '/' + workspace.repo_name(url)
+        except workspace.WorkspaceError:
+            return role_dir
+
     def _seed_params(self, agent_id, by_role, workspace_dir, service_name, package_name):
         ace = by_role.get('ACE', {})
         base = workspace_dir.rstrip('/')
+        ace_path = self._role_content_path(by_role, 'ACE', base)
+        framework_path = self._role_content_path(by_role, 'FRAMEWORK', base)
         seeds = {
-            'repository-intake': {'path': base + '/ace', 'branch': ace.get('branch', 'main')},
-            'ace-analysis': {'path': base + '/ace', 'version': '1.0.0'},
-            'framework-baseline': {'path': base + '/framework', 'golden_path': base + '/framework', 'version': '1.0.0'},
+            'repository-intake': {'path': ace_path, 'branch': ace.get('branch', 'main')},
+            'ace-analysis': {'path': ace_path, 'version': '1.0.0'},
+            'framework-baseline': {'path': framework_path, 'golden_path': framework_path, 'version': '1.0.0'},
             'migration-specification': {'version': '1.0.0'},
             'planning': {'version': '1.0.0'},
             'code-generation': {'output_root': base + '/springboot-output',

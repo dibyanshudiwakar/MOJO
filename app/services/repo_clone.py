@@ -155,10 +155,22 @@ class RepoCloneService:
         return r.stdout
 
     def clone(self, user_id, repo_url, branch, dest):
-        """Clone ``repo_url`` at ``branch`` into a confined destination directory."""
+        """Clone ``repo_url`` at ``branch`` into a confined destination directory.
+
+        ``dest`` (e.g. the pipeline's fixed ``ace``/``framework`` role
+        directory) is the *parent* the clone lands under, not the clone target
+        itself -- the repository's own name (from its URL, same as a bare
+        ``git clone <url>`` would use) becomes a subdirectory of it, so the
+        repository's real name survives on disk rather than being discarded in
+        favour of the generic role label. Every later step that resolves a
+        path under this role must do the same ``dest/<repo_name>`` join
+        (``PipelineService._seed_params`` does).
+        """
         url = workspace.runtime_url(repo_url)
         ref = workspace.git_ref(branch)
-        target = workspace.resolve(dest, must_exist=False, create=False)
+        name = workspace.repo_name(url)
+        role_dir = workspace.resolve(dest, must_exist=False, create=False)
+        target = role_dir / name
         if target.exists() and any(target.iterdir()):
             # Directory already populated -- could be a previous attempt that
             # cloned successfully but failed to record completion (the retry
