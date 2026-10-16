@@ -21,7 +21,7 @@ approval cites is therefore the approver's act, not the planner's -- see
 """
 import json
 from app.agents.base import AgentResult, BaseAgent
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 
@@ -30,7 +30,7 @@ class PlanningAgent(BaseAgent):
     SKILL = 'iib-to-ms-planning'
     TOOLS = ('evidence.read', 'plan.write', 'clarification.create')
     OUTPUTS = ('plan', 'task_graph', 'mapping', 'risk_register')
-    PROMPT = 'agent/planning/risk-assessment'
+    PROMPT = 'agent/planning/mapping-catalogue'
 
     def execute(self, context):
         version = context.param('version', '1.0.0')
@@ -38,25 +38,31 @@ class PlanningAgent(BaseAgent):
         # framework_id is optional: when framework-baseline was skipped, the
         # param resolves to '' and planning proceeds with default conventions.
         framework_id = context.param('framework_id', '') or ''
-        catalogue = service.create_mapping_catalogue(
-            context.job_id,
-            framework_id,
-            context.param('analysis_id'),
-            context.param('specification_id'),
-            version,
-            context.param('overrides', None))
+        analysis_id = context.param('analysis_id')
+        specification_id = context.param('specification_id')
+        # Gate-checked first and separately: G1/G2 approval binding is not
+        # something a mapping strategy gets to skip, so it runs identically
+        # whether the catalogue is model-authored or computed.
+        framework, analysis, specification = service.planning_inputs(
+            context.job_id, framework_id, analysis_id, specification_id)
+        model = json.loads(analysis['semantic_model'])
+        mapped, provenance = produce(
+            context, self.PROMPT,
+            {'semantic_model': model,
+             'framework_standards': json.loads(framework['standards']) if framework else {},
+             'specification': specification['yaml_text']},
+            lambda: service.compute_mapping_catalogue(
+                context.job_id, framework_id, analysis_id, specification_id,
+                context.param('overrides', None)))
+        catalogue = service.record_mapping_catalogue(
+            context.job_id, framework_id, analysis_id, specification_id, mapped, version)
         risks = self.repo.rows(
             'select id,category,severity,statement,response,owner,status from migration_risks'
             ' where catalogue_id=? order by created_at', (catalogue['catalogue_id'],))
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'mapping_count': catalogue['mapping_count'],
-            'unsupported_count': catalogue['unsupported_count'],
-            'risks': [x['statement'] for x in risks]})
         metrics = {'mapping_count': catalogue['mapping_count'],
                    'unsupported_count': catalogue['unsupported_count'],
-                   'risk_count': len(risks)}
-        if isinstance(answer, dict) and answer.get('risks'):
-            metrics['model_risk_count'] = len(answer['risks'])
+                   'risk_count': len(risks),
+                   'catalogue_source': provenance.get('artefact_source', 'DETERMINISTIC')}
         if catalogue['unsupported_count']:
             # The service has already raised a clarification per unsupported
             # construct, so the questions exist; there is simply no plan yet.

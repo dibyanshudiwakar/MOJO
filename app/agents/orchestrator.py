@@ -24,6 +24,7 @@ that principal throughout. An autonomous run therefore needs a service principal
 holding the roles of the agents it invokes; when one is missing the loop stops
 with ``role_missing_for:<agent>`` rather than escalating its own privileges.
 """
+from app.agents.artefact import produce
 from app.agents.base import AgentResult, BaseAgent, Clarification
 from app.domain.state_machine import TRANSITIONS
 from app.service import FactoryService
@@ -162,6 +163,29 @@ class MigrationOrchestratorAgent(BaseAgent):
             "select distinct agent_id from agent_runs where job_id=? and status='COMPLETED'"
             ' and iteration=? and agent_id is not null', (job_id, iteration))}
 
+    def _next_action(self, context, final, commands, stop):
+        """The model's read of what should happen next, recorded as provenance.
+
+        A proposal only, and it changes nothing: this agent has already walked
+        the governed pipeline and dispatched what the lifecycle allowed, and
+        every dispatch goes through AgentRegistry, which re-checks dependencies,
+        roles and the tool allow-list. What the model adds is a reading of where
+        the job is stuck when the walk stopped short -- which is exactly when
+        the deterministic answer ("the pipeline says nothing more is runnable")
+        is least useful to the engineer looking at it.
+        """
+        proposed, provenance = produce(
+            context, self.PROMPT,
+            {'state': final['state'], 'iteration': int(final['iteration'] or 1),
+             'stop_reason': stop, 'dispatched': [x['agent_id'] for x in commands],
+             'legal_targets': sorted(TRANSITIONS.get(final['state'], set()))},
+            lambda: {'next_agent': None, 'next_state': None, 'blocked_by': stop,
+                     'rationale': 'the next action follows the governed pipeline, '
+                                  'not a model proposal'})
+        provenance['proposal'] = {k: proposed.get(k) for k in
+                                  ('next_agent', 'next_state', 'blocked_by', 'rationale')}
+        return provenance
+
     def execute(self, context):
         registry = AgentRegistry(self.repo)
         factory = FactoryService(self.repo)
@@ -286,8 +310,7 @@ class MigrationOrchestratorAgent(BaseAgent):
             metrics={'steps': len(commands), 'stop_reason': stop, 'final_state': final['state'],
                      'iteration': int(final['iteration'] or 1),
                      'legal_targets': sorted(TRANSITIONS.get(final['state'], set()))},
-            reasoning={'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
-                       'reason': 'the next action follows the governed pipeline, not a model proposal'})
+            reasoning=self._next_action(context, final, commands, stop))
 
 
 if __name__ == '__main__':

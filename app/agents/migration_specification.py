@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 import yaml
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services.migration_lifecycle_v6 import DEFAULT_MAPPINGS, mapping_key
 from app.services.specification import SpecificationService
 
@@ -69,10 +69,52 @@ class MigrationSpecificationAgent(BaseAgent):
         dependencies = []
         if framework:
             dependencies = sorted(json.loads(framework['standards'] or '{}').get('dependencies') or [])
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'counts': {k: len(model.get(k, [])) for k in ('flows', 'subflows', 'esql', 'maps', 'schemas', 'policies')},
-            'modules': self._modules(model)})
-        spec = {
+        service = SpecificationService(self.repo, SCHEMA)
+
+        def computed():
+            return {'specification': self._compose(context, job, version, analysis, framework,
+                                                   model, ambiguities, gates, dependencies)}
+
+        authored, provenance = produce(
+            context, self.PROMPT,
+            {'semantic_model': model,
+             'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
+             'schema': service.schema},
+            computed)
+        spec = authored.get('specification') or {}
+        # The document is validated against schemas/migration-specification.
+        # schema.json before it is stored, and an invalid one blocks G2. A model
+        # specification that does not validate is refused here rather than
+        # persisted INVALID, which is the same rule produce() applies to the
+        # response shape -- just against the document's own schema.
+        if not isinstance(spec, dict) or service.validate(yaml.safe_dump(spec))[1]:
+            if provenance.get('artefact_source') == 'MODEL':
+                provenance['mode'] = 'DETERMINISTIC_FALLBACK'
+                provenance['artefact_source'] = 'DETERMINISTIC'
+                provenance['reason'] = 'model_specification_failed_document_schema'
+            spec = computed()['specification']
+        text = yaml.safe_dump(spec, sort_keys=True, default_flow_style=False)
+        saved = service.save(context.job_id, version, text)
+        if saved['status'] != 'VALID':
+            raise ValueError('specification_invalid:' + json.dumps(saved['errors'])[:400])
+        metrics = {'flow_count': len(spec.get('source', {}).get('flows', [])),
+                   'module_count': len(spec.get('target', {}).get('springModules', [])),
+                   'clarification_count': len(ambiguities),
+                   'specification_source': provenance.get('artefact_source', 'DETERMINISTIC')}
+        return AgentResult(
+            outputs={'migration_specification_yaml': saved['id']},
+            # A specification's content_hash is the digest of its YAML text, so a
+            # G2 approval binding this evidence binds the specification itself.
+            evidence=(EvidenceRef('MIGRATION_SPECIFICATION', version,
+                                  'specification://' + saved['id'], text,
+                                  {'analysis_id': analysis['id'],
+                                   'validation_status': saved['status']}),),
+            metrics=metrics, reasoning=provenance)
+
+    def _compose(self, context, job, version, analysis, framework, model, ambiguities,
+                 gates, dependencies):
+        """The deterministic specification: the fallback."""
+        return {
             'metadata': {'service': job['service'], 'sourceCommit': job['source_revision'],
                          'analysisVersion': analysis['version'],
                          'frameworkTemplateVersion': framework['version'] if framework else version},
@@ -97,24 +139,6 @@ class MigrationSpecificationAgent(BaseAgent):
             'governance': {'enabledGates': gates,
                            'iterationLimit': int(context.param('iteration_limit', 5)),
                            'stopConditions': STOP_CONDITIONS}}
-        text = yaml.safe_dump(spec, sort_keys=True, default_flow_style=False)
-        saved = SpecificationService(self.repo, SCHEMA).save(context.job_id, version, text)
-        if saved['status'] != 'VALID':
-            raise ValueError('specification_invalid:' + json.dumps(saved['errors'])[:400])
-        metrics = {'flow_count': len(spec['source']['flows']),
-                   'module_count': len(spec['target']['springModules']),
-                   'clarification_count': len(ambiguities)}
-        if isinstance(answer, dict) and answer.get('springModules'):
-            metrics['model_modules'] = answer['springModules']
-        return AgentResult(
-            outputs={'migration_specification_yaml': saved['id']},
-            # A specification's content_hash is the digest of its YAML text, so a
-            # G2 approval binding this evidence binds the specification itself.
-            evidence=(EvidenceRef('MIGRATION_SPECIFICATION', version,
-                                  'specification://' + saved['id'], text,
-                                  {'analysis_id': analysis['id'],
-                                   'validation_status': saved['status']}),),
-            metrics=metrics, reasoning=provenance)
 
 
 if __name__ == '__main__':

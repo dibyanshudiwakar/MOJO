@@ -6,6 +6,7 @@ actually needs, and a direct ``execute`` call. The registry-level behaviour
 covered separately in ``tests/test_agent_registry.py``.
 """
 import json
+from pathlib import Path
 import pytest
 from app.repository import Repository, digest, now, uid
 from app.service import FactoryService
@@ -40,6 +41,48 @@ class RecordingProvider:
     def invoke(self, template, payload):
         self.calls.append({'template': template, 'payload': payload})
         return self.answers.get('default', {'note': 'deterministic test answer'})
+
+
+class ArtefactProvider(RecordingProvider):
+    """A double that returns the artefact an agent is asking for.
+
+    Agents now ask the model to *produce* the artefact rather than comment on
+    one, so a double has to answer per request: ``produce_many`` sends one
+    request per source file, and each needs its own fragment back. ``answer``
+    is a callable taking the cleared payload, which also lets a test return a
+    schema-violating object for one file and a valid one for the next.
+
+    ``accepts_skill`` stays False so this exercises the two-argument adapter
+    signature; ``SkillAwareArtefactProvider`` covers the other one.
+    """
+
+    def __init__(self, answer):
+        super().__init__()
+        self._answer = answer
+
+    def invoke(self, template, payload):
+        self.calls.append({'template': template, 'payload': payload})
+        return self._answer(payload)
+
+
+class SkillAwareArtefactProvider(ArtefactProvider):
+    """As above, but declaring the ``skill=`` keyword the real adapter takes.
+
+    Pins that the skill actually reaches the provider: ``ReasoningGateway``
+    passes it only to adapters that set ``accepts_skill``, so an agent's
+    guidance silently never arriving is exactly the kind of regression this
+    catches.
+    """
+
+    accepts_skill = True
+
+    def __init__(self, answer):
+        super().__init__(answer)
+        self.skills = []
+
+    def invoke(self, template, payload, skill=None):
+        self.skills.append(skill)
+        return super().invoke(template, payload)
 
 
 @pytest.fixture
@@ -119,12 +162,38 @@ def gateway(repo):
         identity = 'board@example'
         roles = ('AI_GOVERNANCE_ADMIN',)
 
-    def approve(prompt_name, template='Cite only the supplied evidence.'):
+    def approve(prompt_name, template='Cite only the supplied evidence.',
+                model_name='approved-model'):
+        """Approve a prompt and a model so a dispatch can route to the gateway.
+
+        Registering any model at all arms the AT-13 fail-closed guard for
+        *every* agent: once ``model_registry`` is non-empty, a dispatch whose
+        resolved alias is not in it is refused with
+        ``default_model_alias_not_in_approved_model_registry`` before the
+        gateway -- and therefore before the behaviour under test -- is reached.
+
+        So every alias the catalogue assigns is registered, not just the one
+        under test. A test that dispatches an agent's dependencies first (and
+        most do, because the registry enforces the dependency graph) would
+        otherwise fail on whichever alias that dependency happens to use, which
+        is friction about the fixture rather than about the agent.
+
+        ``model_name`` is registered too, for a test that pins a specific alias.
+        """
         prompt = ai.register_prompt({'name': prompt_name, 'version': '1', 'template': template,
                                      'status': 'APPROVED'}, _Approver())
-        model = ai.register_model({'name': 'approved-model', 'version': '1',
-                                   'provider_profile': 'model-primary', 'status': 'APPROVED',
-                                   'region': 'approved-region'}, _Approver())
+        catalogue = json.loads(
+            (Path(__file__).resolve().parents[2] / 'config' / 'agent-catalogue.v1.json')
+            .read_text(encoding='utf-8'))
+        aliases = {a.get('default_model_alias') for a in catalogue['agents']}
+        aliases.discard(None)
+        aliases.discard('')
+        aliases.add(model_name)
+        model = None
+        for alias in sorted(aliases):
+            model = ai.register_model({'name': alias, 'version': '1',
+                                       'provider_profile': 'model-primary', 'status': 'APPROVED',
+                                       'region': 'approved-region'}, _Approver())
         return prompt, model
     return approve
 

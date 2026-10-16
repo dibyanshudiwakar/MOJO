@@ -13,8 +13,8 @@ for quorum, timeout, iteration and artefact-binding validity, and
 second implementation of any of these would be a governance answer that could
 disagree with the gate itself, which is worse than no answer.
 """
+from app.agents.artefact import produce
 from app.agents.base import AgentResult, BaseAgent
-from app.agents.reasoning import ReasoningGateway
 from app.domain.preconditions import PreconditionError, evidence_bundle
 from app.domain.state_machine import TRANSITIONS
 from app.service import GATE_TRANSITIONS, FactoryService
@@ -31,7 +31,7 @@ class GovernanceAgent(BaseAgent):
     #: model that could answer ALLOW/DENY would be exactly that. The prompt is
     #: told so, the answer lands in ``metrics`` only, and ``outputs`` and
     #: ``next_state`` below are untouched by it.
-    PROMPT = 'agent/governance/blocking-explanation'
+    PROMPT = 'agent/governance/gate-assessment'
 
     def _evaluate(self, c, factory, job, target):
         """What ``target`` requires from here, and whether it is satisfied."""
@@ -72,6 +72,50 @@ class GovernanceAgent(BaseAgent):
         out['decision'] = 'ALLOW' if out['satisfied'] else 'DENY'
         return out
 
+    def _assess(self, context, job, evaluations, decision):
+        """The model's reading of each candidate transition.
+
+        A recommendation, never the decision. ``_evaluate`` stays the authority
+        because a gate is enforcement: it turns on the approver's role, the
+        quorum and the artefact hash each approval binds, and ACE source text
+        reaches these payloads -- so a check a model can be argued out of is not
+        a control. What the model adds is a judgement the rules cannot make,
+        about whether the evidence genuinely supports the transition, and that
+        is worth recording precisely where it contradicts the decision.
+
+        One request per candidate target, each falling back to the evaluation's
+        own reasons when the gateway cannot answer.
+        """
+        out, provenance = [], {}
+        for evaluation in evaluations:
+            target = evaluation['target']
+            # ``evidence_bundle`` is omitted: it is a bundle of content hashes,
+            # and a long hex run reads as a PAN to the data-loss scan.
+            payload = {'state': job['state'], 'target_state': target,
+                       'evaluation': {k: v for k, v in evaluation.items()
+                                      if k != 'evidence_bundle'}}
+
+            def fallback(e=evaluation, t=target):
+                return {'recommendation': 'ALLOW' if e['decision'] == 'ALLOW' else 'DENY',
+                        'target_state': t,
+                        'rationale': '; '.join(e.get('reasons') or []) or 'no blocking reason',
+                        'evidence_sufficient': e['decision'] == 'ALLOW',
+                        'missing_evidence': list(e.get('reasons') or [])}
+
+            assessment, provenance = produce(context, self.PROMPT, payload, fallback)
+            recommendation = assessment.get('recommendation', '')
+            out.append({'target': target, 'decision': decision.get(target, ''),
+                        'recommendation': recommendation,
+                        'rationale': assessment.get('rationale', ''),
+                        'evidence_sufficient': assessment.get('evidence_sufficient'),
+                        'missing_evidence': assessment.get('missing_evidence', []),
+                        # Only a straight contradiction counts.
+                        # INSUFFICIENT_EVIDENCE is the model declining to judge,
+                        # which is not the same as disagreeing.
+                        'disagrees': recommendation in ('ALLOW', 'DENY')
+                        and recommendation != decision.get(target, '')})
+        return out, provenance
+
     def execute(self, context):
         job = context.job()
         factory = FactoryService(self.repo)
@@ -93,17 +137,17 @@ class GovernanceAgent(BaseAgent):
                   'decision': decision, 'approval_requirement': approval,
                   'evidence_requirement': requirement}
         AuditLedger(self.repo).append(context.job_id, context.identity, 'GOVERNANCE_EVALUATED', detail)
-        # ``evidence_bundle`` is omitted: it is a bundle of content hashes, and a
-        # long hex run reads as a PAN to the data-loss scan.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'state': job['state'],
-            'evaluations': [{k: v for k, v in x.items() if k != 'evidence_bundle'}
-                            for x in evaluations]})
+        assessments, provenance = self._assess(context, job, evaluations, decision)
         metrics = {'state': job['state'], 'allowed_targets': allowed,
                    'blocked_targets': sorted(t for t, d in decision.items() if d == 'DENY'),
-                   'evaluations': evaluations}
-        if isinstance(answer, dict) and answer.get('explanations'):
-            metrics['model_explanations'] = answer['explanations']
+                   'evaluations': evaluations,
+                   'assessments': assessments,
+                   # Targets where the model read the evidence differently from
+                   # the enforced decision. Not an error on either side: a model
+                   # saying DENY where the gate says ALLOW is the kind of thing
+                   # a reviewer should see before promotion.
+                   'disagreements': sorted(a['target'] for a in assessments
+                                           if a.get('disagrees'))}
         return AgentResult(
             outputs={'allow_deny_decision': decision, 'approval_requirement': approval,
                      'evidence_requirement': requirement},

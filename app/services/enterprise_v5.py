@@ -12,23 +12,75 @@ from app.services.springgen import SpringProjectGenerator
 class ACEParser:
  EXT={'.msgflow':'flows','.subflow':'subflows','.esql':'esql','.map':'maps','.xslt':'maps','.xsd':'schemas','.wsdl':'schemas','.policyxml':'policies'}
  PROTOCOLS={'HTTPInput':'HTTP','HTTPReply':'HTTP','SOAPInput':'SOAP','MQInput':'MQ','MQOutput':'MQ','KafkaConsumer':'KAFKA','KafkaProducer':'KAFKA','FileInput':'FILE','TimeoutNotification':'SCHEDULED','Database':'DATABASE'}
- def parse(self,root):
-  root=Path(root);model={'flows':[],'subflows':[],'esql':[],'maps':[],'schemas':[],'policies':[],'interfaces':[],'dependencies':[],'behaviour':{'routing':[],'transformations':[],'transactions':[],'retries':[],'timeouts':[],'errorHandling':[],'sideEffects':[]},'ambiguities':[],'backend_properties':{}}
+ AREAS=('flows','subflows','esql','maps','schemas','policies','interfaces','dependencies','ambiguities')
+ BEHAVIOURS=('routing','transformations','transactions','retries','timeouts','errorHandling','sideEffects')
+ def empty(self):
+  """An empty semantic model.
+
+  Shared by the deterministic parse and by the merge of model-authored
+  fragments, so neither path can drift into a different shape.
+  """
+  return {'flows':[],'subflows':[],'esql':[],'maps':[],'schemas':[],'policies':[],'interfaces':[],'dependencies':[],'behaviour':{k:[] for k in self.BEHAVIOURS},'ambiguities':[],'backend_properties':{}}
+ def sources(self,root):
+  """``(rel, text, ext)`` per source file this parser understands.
+
+  The unit of work for both paths: the deterministic parse folds each file in
+  turn, and the model-authored path sends one request per file so a repository
+  never has to fit in a single response.
+  """
+  root=Path(root)
   if not root.is_dir():raise ValueError('repository_not_accessible')
+  out=[]
   for f in sorted(root.rglob('*')):
    if not f.is_file() or '.git' in f.parts:continue
-   ext=f.suffix.lower();rel=str(f.relative_to(root));text=f.read_text(errors='ignore') if f.stat().st_size<5_000_000 else ''
-   try:
-    if ext in ('.msgflow','.subflow'):self._flow(model,rel,text,ext)
-    elif ext=='.esql':self._esql(model,rel,text)
-    elif ext in ('.map','.xslt'):self._map(model,rel,text,ext)
-    elif ext in ('.xsd','.wsdl'):self._schema(model,rel,text,ext)
-    elif ext=='.policyxml':self._policy(model,rel,text)
-    elif ext=='.properties':self._env_properties(model,rel,text)
-   except Exception as e:model['ambiguities'].append(self._ambiguity(rel,'parse_failure:'+type(e).__name__,'ACE_SME','analysis incomplete'))
+   ext=f.suffix.lower()
+   if ext not in self.EXT and ext!='.properties':continue
+   out.append((str(f.relative_to(root)),f.read_text(errors='ignore') if f.stat().st_size<5_000_000 else '',ext))
+  return out
+ def fold(self,model,rel,text,ext):
+  """Parse one file into ``model``. A parse failure is recorded, never raised."""
+  try:
+   if ext in ('.msgflow','.subflow'):self._flow(model,rel,text,ext)
+   elif ext=='.esql':self._esql(model,rel,text)
+   elif ext in ('.map','.xslt'):self._map(model,rel,text,ext)
+   elif ext in ('.xsd','.wsdl'):self._schema(model,rel,text,ext)
+   elif ext=='.policyxml':self._policy(model,rel,text)
+   elif ext=='.properties':self._env_properties(model,rel,text)
+  except Exception as e:model['ambiguities'].append(self._ambiguity(rel,'parse_failure:'+type(e).__name__,'ACE_SME','analysis incomplete'))
+  return model
+ def finalise(self,model):
+  """Derive what depends on the whole model, then hash it.
+
+  Both paths end here, so a model-authored semantic model and a parsed one
+  hash the same way -- which is what lets one G2 approval bind either.
+  """
   if not model['flows'] and not model['subflows']:model['ambiguities'].append(self._ambiguity('$','no_ace_flow_detected','ACE_SME','analysis blocked'))
   model['backend_type']=self._detect_backend_type(model)
   model['content_hash']=digest(json.dumps(model,sort_keys=True,separators=(',',':')));return model
+ def merge(self,fragments):
+  """Fold per-file fragments into one semantic model.
+
+  Deterministic on purpose: the model authors each file's fragment, and the
+  assembly -- which is just list concatenation -- stays in code so the merge
+  cannot invent, drop or reorder a construct.
+  """
+  model=self.empty()
+  for fragment in fragments:
+   if not isinstance(fragment,dict):continue
+   for area in self.AREAS:
+    items=fragment.get(area)
+    if isinstance(items,list):model[area].extend(items)
+   behaviour=fragment.get('behaviour')
+   if isinstance(behaviour,dict):
+    for key,items in behaviour.items():
+     if isinstance(items,list):model['behaviour'].setdefault(key,[]).extend(items)
+   properties=fragment.get('backend_properties')
+   if isinstance(properties,dict):model['backend_properties'].update(properties)
+  return self.finalise(model)
+ def parse(self,root):
+  model=self.empty()
+  for rel,text,ext in self.sources(root):self.fold(model,rel,text,ext)
+  return self.finalise(model)
  #: <METHOD>#<Vendor>ServiceURL / <METHOD>#testHarness<Vendor>Url -- the real
  #: naming convention these env-properties files use (confirmed against the
  #: real DMRClaimStatus repo: "GET#MedForceServiceURL"/"GET#testHarnessMedForceUrl").
@@ -163,7 +215,32 @@ class FrameworkConventionExtractor:
    self._scan_java(rules,rel,text);self._scan_config(rules,rel,text)
   if not rules['security']:conflicts.append('security_standard_not_detected')
   if not rules['observability']:conflicts.append('observability_standard_not_detected')
-  template=self._template(version,effective_from or now(),rules,conflicts);return {'version':version,'effective_from':effective_from or now(),'standards':rules,'conflicts':sorted(set(conflicts)),'template_md':template,'content_hash':digest(template)}
+  return self.assemble(rules,conflicts,version,effective_from)
+ def assemble(self,rules,conflicts,version='1.0.0',effective_from=None):
+  """Template and content hash from a set of standards, however they were read.
+
+  Both paths end here so a model-authored baseline hashes exactly as an
+  extracted one -- which is what lets one G1 approval bind either.
+  """
+  effective=effective_from or now()
+  template=self._template(version,effective,rules,conflicts);return {'version':version,'effective_from':effective,'standards':rules,'conflicts':sorted(set(conflicts)),'template_md':template,'content_hash':digest(template)}
+ def sources(self,root,limit=40,chars=6000):
+  """The build files and a sample of sources: what the model is shown.
+
+  Build files whole -- they carry the versions and dependencies the whole
+  baseline turns on -- then a bounded sample of Java and configuration.
+  """
+  root=Path(root)
+  if not root.is_dir():raise ValueError('framework_repository_not_accessible')
+  picked=[]
+  for name in ('pom.xml','build.gradle','build.gradle.kts'):
+   f=root/name
+   if f.exists():picked.append((name,f.read_text(errors='ignore')[:chars*4]))
+  for f in sorted(root.rglob('*')):
+   if len(picked)>=limit:break
+   if f.is_file() and f.suffix.lower() in ('.java','.yml','.yaml','.properties') and f.stat().st_size<2_000_000:
+    picked.append((str(f.relative_to(root)),f.read_text(errors='ignore')[:chars]))
+  return picked
  def verify_golden(self,root,baseline):
   actual=self.extract(root,baseline['version'],baseline['effective_from']);required=set(baseline['standards'].get('dependencies',[]));found=set(actual['standards'].get('dependencies',[]));return {'status':'PASS' if required<=found and not actual['conflicts'] else 'FAIL','missingDependencies':sorted(required-found),'conflicts':actual['conflicts']}
  def _scan_java(self,rules,rel,t):

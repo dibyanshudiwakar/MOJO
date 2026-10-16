@@ -22,7 +22,7 @@ somewhere the next agent can actually read them.
 """
 import json
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.repository import digest, now, uid
 from app.services.enterprise_v5 import ACERuntimeAdapter, SpringBootRuntimeAdapter
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
@@ -45,7 +45,7 @@ class TestEngineeringAgent(BaseAgent):
     SKILL = 'iib-to-ms-test-engineering'
     TOOLS = ('test.execute', 'runtime.invoke', 'evidence.write')
     OUTPUTS = ('test_suites', 'execution_evidence')
-    PROMPT = 'agent/test-engineering/case-coverage-review'
+    PROMPT = 'agent/test-engineering/case-design'
 
     def _interfaces(self, job_id):
         """Interface shapes from the latest analysis, for the coverage review."""
@@ -90,10 +90,38 @@ class TestEngineeringAgent(BaseAgent):
             spring = SpringBootRuntimeAdapter('spring-boot', context.param('spring_base_url'))
         return ace, spring
 
+    def _design(self, context):
+        """The test cases, designed by the model.
+
+        A caller-supplied set still wins -- an operator naming the cases is
+        not asking for them to be invented -- and the one-case-per-interface
+        derivation in ``_cases`` is the fallback. The model is worth asking
+        because that derivation produces exactly one nominal case per
+        interface: no boundary values, no error paths, and therefore nothing
+        that would distinguish the two systems behaving differently.
+        """
+        supplied = context.param('cases', None)
+        if supplied:
+            return supplied, {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+                              'reason': 'cases_supplied_by_caller',
+                              'artefact_source': 'DETERMINISTIC'}
+        interfaces = self._interfaces(context.job_id)
+        designed, provenance = produce(
+            context, self.PROMPT,
+            {'interfaces': interfaces, 'plan_id': context.param('plan_id')},
+            lambda: {'cases': self._cases(context)})
+        cases = designed.get('cases') or []
+        if not cases:
+            provenance['mode'] = 'DETERMINISTIC_FALLBACK'
+            provenance['artefact_source'] = 'DETERMINISTIC'
+            provenance['reason'] = 'model_designed_no_cases'
+            cases = self._cases(context)
+        return cases, provenance
+
     def execute(self, context):
         service = MappingAndPlanningService(self.repo)
         plan_id = context.param('plan_id')
-        cases = self._cases(context)
+        cases, provenance = self._design(context)
         policy = dict(context.param('policy', {}) or {})
         policy['ignore'] = sorted(set(policy.get('ignore') or []) | set(TRANSPORT_FIELDS))
         package = service.prepare_differential(context.job_id, plan_id, cases, policy)
@@ -118,13 +146,6 @@ class TestEngineeringAgent(BaseAgent):
         else:
             payload = json.dumps({'package_id': package['package_id'], 'plan_id': plan_id,
                                   'policy': policy, 'executions': []}, sort_keys=True)
-        # Case shapes only -- never ``case['input']`` or a replayed body, which
-        # carry the caller's own request data straight into the payload.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'interfaces': self._interfaces(context.job_id),
-            'cases': [{'id': x.get('id', ''), 'method': x.get('method', ''),
-                       'path': x.get('path', '')} for x in cases],
-            'replayed': bool(executions)})
         return AgentResult(
             outputs={'test_suites': package['package_id'],
                      'execution_evidence': [x['case_id'] for x in executions]},
@@ -136,8 +157,7 @@ class TestEngineeringAgent(BaseAgent):
                                    'runtimes': ['ACE', 'SPRING_BOOT'] if executions else []}),),
             metrics={'case_count': package['case_count'], 'executed_count': len(executions),
                      'replay': 'EXECUTED' if executions else 'NOT_EXECUTED',
-                     'model_weak_coverage': (answer or {}).get('weak_coverage', [])
-                     if isinstance(answer, dict) else []},
+                     'cases_source': provenance.get('artefact_source', 'DETERMINISTIC')},
             reasoning=provenance)
 
 

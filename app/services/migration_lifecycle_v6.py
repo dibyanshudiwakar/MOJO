@@ -116,7 +116,45 @@ class MappingAndPlanningService:
   if f and not self._approved(job_id,'G1',f['content_hash']):raise PermissionError('g1_framework_approval_required')
   if not self._approved(job_id,'G2',a['content_hash']) or not self._approved(job_id,'G2',s['content_hash']):raise PermissionError('g2_analysis_and_yaml_approval_required')
   return f,a,s
- def create_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,version='1.0.0',overrides=None):
+ def planning_inputs(self,job_id,framework_id,analysis_id,specification_id):
+  """Gate-check and return the planning inputs, for a caller that maps them itself.
+
+  Kept separate from mapping so the gate enforcement runs identically whether
+  the catalogue is model-authored or computed: G1/G2 approval binding is not
+  something a mapping strategy gets to skip.
+  """
+  return self._inputs(job_id,framework_id,analysis_id,specification_id)
+ def record_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,catalogue,version='1.0.0'):
+  """Persist a mapping catalogue, however it was produced.
+
+  The hashes that tie each mapping to the artefacts it was derived from are
+  stamped here rather than taken from the catalogue: they are what a G3
+  approval binds, and a model-supplied hash would be a guess.
+  """
+  f,a,s=self._inputs(job_id,framework_id,analysis_id,specification_id)
+  fw_hash=f['content_hash'] if f else ''
+  # Optional schema fields are defaulted here, not read optionally downstream:
+  # generate_plan and the G3 package index tests/boundary directly, so a model
+  # omitting one would raise KeyError mid-plan instead of degrading.
+  mappings=[{'mapping_key':'','tests':[],'boundary':'GENERATED','target_module':'service',**m,'id':m.get('id') or uid(),'framework_hash':fw_hash,'analysis_hash':a['content_hash'],'specification_hash':s['content_hash']} for m in catalogue.get('mappings') or []]
+  unsupported=[{**x,'id':x.get('id') or uid(),'status':x.get('status') or 'OPEN','owner':x.get('owner') or 'ACE_SME_AND_JAVA_ARCHITECT','reason':x.get('reason') or 'NO_APPROVED_SPRING_PATTERN'} for x in catalogue.get('unsupported') or []]
+  risks=[{**r,'id':r.get('id') or uid(),'status':r.get('status') or 'OPEN','owner':r.get('owner') or 'ACE_SME_AND_JAVA_ARCHITECT','source_reference':r.get('source_reference') or '','response':r.get('response') or ''} for r in catalogue.get('risks') or []]
+  cid=uid();raw=json.dumps(mappings,sort_keys=True);ts=now()
+  with self.repo.connect() as c:
+   c.execute('insert into mapping_catalogues values(?,?,?,?,?,?,?,?,?,?,?)',(cid,job_id,version,framework_id,analysis_id,specification_id,raw,digest(raw),'DRAFT',ts,ts))
+   for x in unsupported:c.execute('insert into unsupported_mappings values(?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x.get('source_reference',''),x.get('ace_construct','UNKNOWN'),x['reason'],x['status'],x['owner'],ts))
+   for x in risks:c.execute('insert into migration_risks values(?,?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x.get('category','UNSUPPORTED_MAPPING'),x.get('severity','HIGH'),x.get('statement',''),x['response'],x['owner'],x['status'],ts))
+   # Clarification blocking is disabled — unsupported mappings are recorded
+   # in unsupported_mappings but not inserted as open clarifications.
+  return {'catalogue_id':cid,'mapping_count':len(mappings),'unsupported_count':len(unsupported),'risk_count':len(risks),'status':'DRAFT','content_hash':digest(raw)}
+ def compute_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,overrides=None):
+  """The deterministic mapping: DEFAULT_MAPPINGS over the model's constructs.
+
+  The fallback. It can only map a construct that already has an entry in that
+  dict, which is exactly why mapping is worth moving to the model -- a
+  construct the dict does not know becomes an unsupported entry that blocks
+  the plan, however ordinary it is.
+  """
   f,a,s=self._inputs(job_id,framework_id,analysis_id,specification_id);model=json.loads(a['semantic_model']);approved=dict(DEFAULT_MAPPINGS);approved.update(overrides or {})
   fw_hash=f['content_hash'] if f else ''
   mappings=[];unsupported=[];risks=[]
@@ -135,14 +173,10 @@ class MappingAndPlanningService:
   for x in model.get('maps',[]):add(x.get('path',''),'MAP',x.get('type','Mapping'))
   for x in model.get('schemas',[]):add(x.get('path',''),'SCHEMA','SCHEMA')
   for x in model.get('policies',[]):add(x.get('path',''),'POLICY','POLICY')
-  cid=uid();raw=json.dumps(mappings,sort_keys=True);ts=now()
-  with self.repo.connect() as c:
-   c.execute('insert into mapping_catalogues values(?,?,?,?,?,?,?,?,?,?,?)',(cid,job_id,version,framework_id,analysis_id,specification_id,raw,digest(raw),'DRAFT',ts,ts))
-   for x in unsupported:c.execute('insert into unsupported_mappings values(?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x['source_reference'],x['ace_construct'],x['reason'],x['status'],x['owner'],ts))
-   for x in risks:c.execute('insert into migration_risks values(?,?,?,?,?,?,?,?,?,?)',(x['id'],job_id,cid,x['category'],x['severity'],x['statement'],x['response'],x['owner'],x['status'],ts))
-   # Clarification blocking is disabled — unsupported mappings are recorded
-   # in unsupported_mappings but not inserted as open clarifications.
-  return {'catalogue_id':cid,'mapping_count':len(mappings),'unsupported_count':len(unsupported),'risk_count':len(risks),'status':'DRAFT','content_hash':digest(raw)}
+  return {'mappings':mappings,'unsupported':unsupported,'risks':risks}
+ def create_mapping_catalogue(self,job_id,framework_id,analysis_id,specification_id,version='1.0.0',overrides=None):
+  """Deterministic end to end, for callers with no agent context to reason with."""
+  return self.record_mapping_catalogue(job_id,framework_id,analysis_id,specification_id,self.compute_mapping_catalogue(job_id,framework_id,analysis_id,specification_id,overrides),version)
  def generate_plan(self,job_id,catalogue_id,version='1.0.0'):
   cat=self.repo.one('select * from mapping_catalogues where id=? and job_id=?',(catalogue_id,job_id))
   if not cat:raise ValueError('mapping_catalogue_not_found')

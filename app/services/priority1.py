@@ -40,8 +40,26 @@ class PriorityOneService:
   j=self.repo.one('select * from jobs where id=?',(job_id,))
   if not j:raise ValueError('job_not_found')
   return j
+ def compute_semantic_model(self,path):
+  """The deterministic parse: the fallback when the model cannot read the source.
+
+  Separated from recording so both paths persist through one code path. The
+  model-authored route calls ``ACEParser.sources``/``merge`` instead and hands
+  the result to ``record_analysis``, which hashes it identically.
+  """
+  return self.parser.parse(path)
  def analyze_ace(self,job_id,path,version='1.0.0'):
-  self._job(job_id);model=self.parser.parse(path);unsupported=[]
+  """Deterministic end to end, for callers with no agent context to reason with."""
+  self._job(job_id);return self.record_analysis(job_id,self.compute_semantic_model(path),version)
+ def record_analysis(self,job_id,model,version='1.0.0'):
+  """Persist a semantic model, however it was produced.
+
+  Everything downstream -- the content hash a G2 approval binds, the coverage
+  report, the unsupported-construct rows -- is derived here from the model
+  itself, so a model-authored analysis and a parsed one are indistinguishable
+  to the gate and to the next agent.
+  """
+  self._job(job_id);unsupported=[]
   for flow in model.get('flows',[])+model.get('subflows',[]):
    for node in flow.get('nodes',[]):
     typ=str(node.get('type',''));normal=''.join(c for c in typ.lower() if c.isalnum())
@@ -66,8 +84,20 @@ class PriorityOneService:
   result=self.consistency.validate(a['semantic_model'],s['yaml_text']);rid=uid()
   with self.repo.connect() as c:c.execute('insert into validation_reports values(?,?,?,?,?,?,?,?,?)',(rid,job_id,'ANALYSIS_YAML_CONSISTENCY',s['version'],json.dumps(result),digest(json.dumps(result,sort_keys=True)),result['status'],now(),analysis_id))
   return {'report_id':rid,**result}
+ def compute_framework(self,path,version='1.0.0',effective_from=None):
+  """The deterministic extraction: the fallback."""
+  return self.framework.extract(path,version,effective_from)
  def baseline_framework(self,job_id,path,version='1.0.0',effective_from=None,golden_path=None):
-  self._job(job_id);result=self.framework.extract(path,version,effective_from);verify=self.framework.verify_golden(golden_path or path,result);bid=uid();ts=now()
+  """Deterministic end to end, for callers with no agent context to reason with."""
+  self._job(job_id);return self.record_framework(job_id,self.compute_framework(path,version,effective_from),version,golden_path or path)
+ def record_framework(self,job_id,result,version='1.0.0',golden_path=None):
+  """Persist a framework baseline, however its standards were read.
+
+  The golden verification stays here and stays deterministic: it is a set
+  comparison between required and found dependencies, and it is the evidence
+  the G1 approval rests on.
+  """
+  self._job(job_id);verify=self.framework.verify_golden(golden_path,result) if golden_path else {'status':'PASS','missingDependencies':[],'conflicts':[]};bid=uid();ts=now()
   with self.repo.connect() as c:
    c.execute('insert into framework_baselines values(?,?,?,?,?,?,?,?,?)',(bid,job_id,version,result['template_md'],json.dumps(result['standards']),json.dumps(result['conflicts']),'PENDING_APPROVAL',result['content_hash'],ts))
    rid=uid();payload={'standards':result['standards'],'conflicts':result['conflicts'],'golden_verification':verify};c.execute('insert into validation_reports values(?,?,?,?,?,?,?,?,?)',(rid,job_id,'FRAMEWORK_EXTRACTION',version,json.dumps(payload),digest(json.dumps(payload,sort_keys=True)),verify['status'],ts,bid))

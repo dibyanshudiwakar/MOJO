@@ -20,7 +20,7 @@ than raised here as questions this agent cannot answer.
 import json
 
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services import workspace
 from app.services.feedback import CodeFeedbackService
 
@@ -54,14 +54,25 @@ class FeedbackAgent(BaseAgent):
         # Consulted about what is left, never about what was changed: the fixes
         # are deterministic and the gate has already ruled on them. The payload
         # carries check names and counts, not generated source.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'unfixed_checks': result['unfixed_checks'],
-            'fix_count': len(result['applied_fixes']),
-            'passes': len(result['passes']),
-            'unresolved_kinds': sorted({x['kind'] for x in result['unresolved']}),
-        }) if (result['unfixed_checks'] or result['unresolved']) else (None, {
+        # The repair itself is already model-driven, inside CodeFeedbackService:
+        # it proposes targeted edits, the gate re-runs, and an edit that does not
+        # reduce the failing set is reverted. This call is about what is *left*
+        # after that -- which is triage over a verdict the gate has already
+        # reached, not an artefact, so the deterministic answer is simply the
+        # outstanding items restated.
+        triage, provenance = produce(
+            context, self.PROMPT,
+            {'unfixed_checks': result['unfixed_checks'],
+             'fix_count': len(result['applied_fixes']),
+             'passes': len(result['passes']),
+             'unresolved_kinds': sorted({x['kind'] for x in result['unresolved']})},
+            lambda: {'recommendations': [
+                {'item': check, 'why_manual': 'no mechanical fix clears this check',
+                 'owner': 'JAVA_ARCHITECT'} for check in result['unfixed_checks']]}
+        ) if (result['unfixed_checks'] or result['unresolved']) else ({'recommendations': []}, {
             'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
-            'reason': 'quality gate clean and nothing outstanding to triage'})
+            'reason': 'quality gate clean and nothing outstanding to triage',
+            'artefact_source': 'DETERMINISTIC'})
 
         rounds = result.get('model_rounds') or []
         metrics = {
@@ -76,8 +87,8 @@ class FeedbackAgent(BaseAgent):
             'model_edits_kept': sum(len(x.get('applied') or []) for x in rounds),
             'model_edits_refused': sum(len(x.get('refused') or []) for x in rounds),
         }
-        if isinstance(answer, dict) and answer.get('recommendations'):
-            metrics['model_recommendations'] = answer['recommendations']
+        metrics['recommendations'] = triage.get('recommendations') or []
+        metrics['triage_source'] = provenance.get('artefact_source', 'DETERMINISTIC')
 
         payload = json.dumps({
             'project_root': result['project_root'],
