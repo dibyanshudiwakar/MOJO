@@ -166,20 +166,438 @@ class FrameworkConventionExtractor:
    m=re.search(p,t)
    if m:return m.group(1)
 
+#: Environment/cluster suffixes a real repo's config-map and Helm values carry
+#: one file per (structural-conventions.md §5's "full environment list" for
+#: config-map/deploy-config specifically -- narrower than DeployMetadata.json's
+#: 17-entry deployable-target superset, which includes targets with no
+#: properties file of their own).
+ENV_CLUSTERS=('dev-pbmaz','dev2-pbmaz','dev3-pbmaz','qa-pbmaz','qa2-pbmaz','qa3-pbmaz','stress-pbmaz','uat-pbmaz','prod-pbmaz','prod-pbmri')
+#: Tier a config-map env belongs to, for the one shared logback-<tier>.xml
+#: file every framework-core jar already bundles (rest-external-direct.md
+#: §6 "<env> is the tier, not the full env-cluster suffix").
+def _tier(env_cluster):
+ e=env_cluster.split('-')[0]
+ return 'prod' if e.startswith('prod') else ('qa' if e.startswith('qa') else ('dev' if e.startswith('dev') else e))
+
+
 class SpringProjectGenerator:
- def generate(self,out_dir,service,package,model,plan_id,framework):
-  out=Path(out_dir);root=out/service;pkg=root/'src/main/java'/Path(package.replace('.','/'));test=root/'src/test/java'/Path(package.replace('.','/'));res=root/'src/main/resources';pkg.mkdir(parents=True,exist_ok=True);test.mkdir(parents=True,exist_ok=True);res.mkdir(parents=True,exist_ok=True)
-  spring=framework.get('standards',{}).get('build',{}).get('springBootVersion') or '3.3.0';java=framework.get('standards',{}).get('build',{}).get('javaVersion') or '21'
-  files={root/'pom.xml':self._pom(package,service,spring,java),res/'application.yml':'spring:\n  application:\n    name: '+service+'\nace:\n  endpoint: ${ACE_ENDPOINT:}\n',pkg/(self._cls(service)+'Application.java'):self._app(package,service)}
-  for i,flow in enumerate(model.get('flows',[])+model.get('subflows',[]),1):
-   cls=self._cls(Path(flow['path']).stem)+'Flow';files[pkg/(cls+'.java')]=self._flow(package,cls,flow,plan_id);files[test/(cls+'Test.java')]=self._test(package,cls)
+ """Scaffold + per-construct Java emitter, driven by the plan's own mapping.
+
+ Two tiers, matching DEFAULT_MAPPINGS' own GENERATED/HAND_WRITTEN_PROTECTED
+ split (migration_lifecycle_v6.py): the repository/deployment scaffolding and
+ the infrastructure classes (controller, API interface, DTOs) are produced
+ deterministically from fixed templates (external-skills/iib-to-ms-migration/
+ references/fixed-file-templates.md, structural-conventions.md) -- the skill's
+ own instruction is to copy these, never hand-generate them. The business-logic
+ classes (service, connector) get a real signature and package per
+ rest-external-direct.md §8, but an honest TODO body citing the ESQL/node
+ source that belongs there -- code-generation's business-logic-synthesis step
+ fills those in from the real source captured on each task; this generator
+ never invents transformation logic itself.
+
+ Only REST_EXTERNAL_DIRECT has its own full layout so far (confirmed against
+ the real DMRClaimStatus reference this was diagnosed from). SOAP/QL_CICS/
+ RXCLAIM_SBO/MQ_COBOL fall back to a flat per-flow stub -- clearly weaker,
+ but no worse than every backend type got before this change, and each
+ connector reference's own §2/§8 package layout is the documented next step
+ once a service of that type needs it.
+ """
+ def generate(self,out_dir,service,package,model,plan_id,framework,tasks=None):
+  tasks=tasks or []
+  backend=(model.get('backend_type') or {}).get('type','UNDETERMINED')
+  out=Path(out_dir);root=out/service
+  files={}
+  self._scaffold(files,root,service,package,model,framework)
+  if backend=='REST_EXTERNAL_DIRECT':
+   self._rest_sources(files,root,service,package,model,tasks,plan_id)
+  else:
+   self._fallback_sources(files,root,service,package,model,plan_id)
   manifest=[]
-  for path,content in files.items():path.write_text(content);manifest.append({'path':str(path.relative_to(root)),'hash':digest(content),'plan_id':plan_id})
-  (root/'generated-manifest.json').write_text(json.dumps(manifest,indent=2));return {'root':str(root),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
- def _pom(self,g,a,s,j):return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>{s}</version></parent><groupId>{g}</groupId><artifactId>{a}</artifactId><version>1.0.0</version><properties><java.version>{j}</java.version></properties><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency></dependencies><build><plugins><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build></project>'''
+  for path,content in files.items():
+   path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content)
+   manifest.append({'path':str(path.relative_to(root)).replace('\\','/'),'hash':digest(content),'plan_id':plan_id})
+  (root/'generated-manifest.json').write_text(json.dumps(manifest,indent=2))
+  return {'root':str(root),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+
+ # -- repository-level scaffolding (always produced, every backend type) ----
+ def _scaffold(self,files,root,service,package,model,framework):
+  spring=framework.get('standards',{}).get('build',{}).get('springBootVersion') or '3.3.0'
+  java=framework.get('standards',{}).get('build',{}).get('javaVersion') or '21'
+  artifact='cvs-v1-'+service.lower()+'-oci';web=artifact+'-web'
+  files[root/'pom.xml']=self._pom_parent(package,artifact,web,spring,java)
+  files[root/web/'pom.xml']=self._pom_web(package,artifact,web,java)
+  res=root/web/'src/main/resources'
+  files[res/'application.properties']='spring:\n  application:\n    name: '+service+'\n  profiles:\n    active: local\n'
+  files[res/'application-local.properties']=self._application_local_properties(service)
+  files[root/'Dockerfile']=self._dockerfile(artifact)
+  files[root/'.dockerignore']='target/\n*.iml\n.idea/\n.git/\n'
+  files[root/'README.md']=f'# {service}\n\nMigrated from IBM ACE. Generated by the ACE Migration Factory -- see provenance-manifest.json for the plan this came from.\n'
+  files[root/'.github/config/DeployMetadata.json']=self._deploy_metadata()
+  files[root/'.github/workflows/build.yaml']=self._github_build(service)
+  files[root/'.github/workflows/deploy.yaml']=self._github_deploy(artifact)
+  for env in ENV_CLUSTERS:
+   files[root/'config/config-map'/('application.%s.properties'%env)]=self._config_map_properties(env)
+   files[root/'config/deploy-config'/('values.%s.yaml'%env)]=self._helm_values(artifact,env)
+  files[root/'config/deploy-config/Chart.yaml']=f'apiVersion: v1\nname: {artifact}\nversion: 1.0.0\n'
+  files[root/'config/deploy-config/templates/Deployment.yaml']=self._helm_deployment()
+  files[root/'config/deploy-config/templates/Service.yaml']=self._helm_service()
+  files[root/'config/deploy-config/templates/Route.yaml']=self._helm_route()
+  files[root/'config/deploy-config/templates/Secret.yaml']=self._helm_secret()
+
+ def _pom_parent(self,g,artifact,web,spring,java):
+  return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+ <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>{spring}</version></parent>
+ <groupId>{g}</groupId><artifactId>{artifact}-parent</artifactId><version>0.0.1-SNAPSHOT</version><packaging>pom</packaging>
+ <properties><java.version>{java}</java.version></properties>
+ <modules><module>{web}</module></modules>
+</project>
+'''
+
+ def _pom_web(self,g,artifact,web,java):
+  # framework-restclient is mandatory for every backend type, not only REST
+  # (structural-conventions.md §4): it is the source of EieHeader/ErrorUtil/
+  # ErrorStatus and the @EIPMicroservice* annotations.
+  return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+ <parent><groupId>{g}</groupId><artifactId>{artifact}-parent</artifactId><version>0.0.1-SNAPSHOT</version><relativePath>../pom.xml</relativePath></parent>
+ <artifactId>{web}</artifactId><packaging>jar</packaging>
+ <dependencies>
+  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
+  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId><exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions></dependency>
+  <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId></dependency>
+  <dependency><groupId>com.cvshealth.eip.microservices.frameworks</groupId><artifactId>framework-restclient</artifactId></dependency>
+  <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId></dependency>
+  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+ </dependencies>
+ <build><plugins>
+  <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+  <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><release>{java}</release></configuration></plugin>
+  <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.12</version></plugin>
+ </plugins></build>
+</project>
+'''
+
+ def _application_local_properties(self,service):
+  return ('server.port=${PORT:8081}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
+          'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
+          'application.jackson.enableLegacyErrorStructure=true\nmanagement.endpoints.web.exposure.include=health,info\n'
+          'application.circuitbreaker.failureRateThreshold=90.0\napplication.circuitbreaker.slowCallDurationThreshold=8s\n'
+          'application.circuitbreaker.slowCallRateThreshold=80.0\napplication.circuitbreaker.writableStackTraceEnabled=false\n'
+          'logging.level.com.cvshealth.eip.microservices=DEBUG\nlogging.level.org.springframework=WARN\n'
+          'application.http.enabled=true\napplication.http.close-idle-connection-wait-time-secs=30\n'
+          '# TODO: application.http.restclient.<clientName>.uri -- the real backend host, from the IIB *.properties\n')
+
+ def _config_map_properties(self,env):
+  return ('server.port=${PORT:8080}\nspring.main.banner-mode=off\nserver.servlet.context-path=/\n'
+          'server.tomcat.relaxed-path-chars=^\napplication.jackson.serializationInclusion=ALWAYS\n'
+          'application.jackson.enableLegacyErrorStructure=true\nlogging.config=classpath:logback-%s.xml\n'
+          'server.max-http-request-header-size=128KB\nserver.tomcat.max-http-response-header-size=128KB\n'
+          'server.tomcat.max-http-header-count=200\n\nmanagement.endpoints.web.exposure.include=health,info\n\n'
+          '#CIRCUIT BREAKER PROPERTIES\napplication.circuitbreaker.failureRateThreshold=90.0\n'
+          'application.circuitbreaker.slowCallDurationThreshold=8s\napplication.circuitbreaker.slowCallRateThreshold=80.0\n'
+          'application.circuitbreaker.writableStackTraceEnabled=false\n')%_tier(env)
+
+ def _dockerfile(self,artifact):
+  # Skeleton + the documented default decisions (fixed-file-templates.md §2):
+  # IntegrationEngineeringTeam@CVSHealth.com maintainer, combined mkdir form,
+  # the most frequent JVM-flag combination.
+  return (f"FROM quay-registry.aetna.com/cvs-base-images/os-eng/redhat/ubi9/openjdk-micro:21\n"
+          f"LABEL LINE_OF_BUSINESS='cvs-pss'\nLABEL maintainer='IntegrationEngineeringTeam@CVSHealth.com'\n"
+          f"LABEL Name='{artifact}'\nLABEL Version='0.0.1-SNAPSHOT'\nUSER root\n\n"
+          f"RUN mkdir -p /os/spring-boot-{artifact}/logs \\\n"
+          f"    && chmod -R a+rw /os/spring-boot-{artifact} \\\n"
+          f"    && chown -R 1001:0 /os/spring-boot-{artifact}\n\n"
+          f"RUN mkdir -p /var/log && chmod 777 /var/log && chown 1001:0 /var/log\n\n"
+          f"COPY ./{artifact}-web/target/{artifact}-web-*.jar /os/spring-boot-{artifact}/app.jar\n\n"
+          f"WORKDIR /os/spring-boot-{artifact}\n\nUSER 1001\n\n"
+          f'ENTRYPOINT ["java", "-XX:InitialRAMPercentage=25.0", "-XX:MaxRAMPercentage=50.0", "-XX:+UseG1GC", "-jar", "app.jar"]\n')
+
+ def _deploy_metadata(self):
+  envs=["Dev","Dev2","Dev3","QA","QA2","QA3","Stress","Prod","Prod2","Prod3","Prod4","Prod5","TRG","UAT","UAT2","DR","DR2"]
+  return json.dumps({'environment_list':envs,'multiEnvDeploy':[],'artifact-repo-folder':'EIPMS',
+                     'LibraryVariableSets':['OpenShift Deployment Global Variable Set','Global - Variable Set (Universal for All Projects)']},indent=4)
+
+ def _github_build(self,service):
+  return (f"---\nname: {service} CI Build\non:\n  push:\n    branches:\n      - 'main'\n      - 'master'\n"
+          f"      - '*_Path1'\n      - '*_Path2'\n      - '*_Path3'\n    paths-ignore:\n      - '.github/**'\n      - '*.md'\n"
+          f"jobs:\n  j2ee-oci-build:\n    uses: cvs-health-enterprise-code/legacy-ci-gha-workflow-actions/.github/workflows/j2ee-oci.yml@main\n"
+          f"    with:\n      java-version: '21'\n      container-build-tool: 'docker'\n      environment: 'development'\n"
+          f"      minimum-code-coverage: '70'\n      jacoco-version: '0.8.12'\n      maven-version: '3.9.12'\n"
+          f"      SNYK_ORG: 'enterprise-services-layer-esl'\n      all-projects: 'true'\n    secrets: inherit\n")
+
+ def _github_deploy(self,artifact):
+  return (f"---\nname: {artifact} - Deploy\non:\n  workflow_dispatch:\n    inputs:\n      environment:\n"
+          f"        required: true\n        type: choice\n        description: Environment\n"
+          f"        options: [ Dev, Dev2, Dev3, QA, QA2, QA3, Stress, Prod, Prod2, Prod3,\n"
+          f"                   Prod4, Prod5, TRG, UAT, UAT2, DR, DR2 ]\n      artifact:\n        required: true\n"
+          f"        type: string\n        description: artifact to deploy (image tag)\n      app_name:\n"
+          f"        required: true\n        type: string\n        default: {artifact}\n        description: Application Name\n"
+          f"      change_request:\n        required: false\n        type: string\n"
+          f"        description: Change Request ID. **Only for Prod Deployments**\n        default: ''\n"
+          f"  repository_dispatch:\n    types: [ autodeploy-from-ci ]\n"
+          f"permissions:\n  actions: read\n  contents: write\n  id-token: write\n"
+          f"jobs:\n  Confirm-Workflow-Branch:\n    if: github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main'\n"
+          f"    runs-on:\n      group: cvs-linux-self-hosted\n    steps:\n      - name: Print Skip Message\n        run: |\n"
+          f'          echo "This workflow is not intended to be run on branches other than master or main. Skipping the workflow."\n'
+          f"          exit 1\n  Deploy:\n    needs: Confirm-Workflow-Branch\n    if: |\n      always() &&\n"
+          f"      needs.Confirm-Workflow-Branch.result == 'skipped'\n    uses:\n"
+          f"      cvs-health-enterprise-code/openshift-deploy/.github/workflows/deploy-to-openshift-reusable-workflow.yaml@main\n"
+          f"    with:\n      environment: \"${{{{ github.event.inputs.environment || github.event.client_payload.environment }}}}\"\n"
+          f"      artifact: \"${{{{ github.event.inputs.artifact || github.event.client_payload.artifact }}}}\"\n"
+          f"      app_name: \"${{{{ github.event.inputs.app_name || github.event.client_payload.app_name }}}}\"\n"
+          f"      change_request: \"${{{{ github.event.inputs.change_request }}}}\"\n    secrets: inherit\n")
+
+ def _helm_values(self,artifact,env):
+  return (f"APP_NAME: {artifact}\nREPO_NAME: {artifact}\nENV: {env.split('-')[0]}\nCLUSTER: {env.split('-',1)[1]}\n"
+          f"CONTEXT_ROOT: /api/v1\nCONTAINER_PORT: 8080\nPODS: 1\nCPU_LIMIT: 500m\nMEM_LIMIT: 1Gi\nCPU_REQUEST: 250m\nMEM_REQUEST: 512Mi\n"
+          f"HEALTH_CHECK_PATH: /actuator/health\nHEALTH_CHECK_PORT: 8080\n"
+          f"READINESS_INITIAL_DELAY_SECONDS: 30\nREADINESS_TIMEOUT_SECONDS: 5\nREADINESS_SUCESS_THRESHOLD: 1\nREADINESS_FAILURE_THRESHOLD: 3\n"
+          f"LIVENESS_INITIAL_DELAY_SECONDS: 60\nLIVENESS_PERIOD_SECONDS: 10\nLIVENESS_SUCESS_THRESHOLD: 1\nLIVENESS_FAILURE_THRESHOLD: 3\n"
+          f"SITE_URL: {artifact}.{env}.cvshealth.com\n")
+
+ def _helm_deployment(self):
+  return '''apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.APP_NAME }}
+  labels:
+    app: {{ .Values.APP_NAME }}
+    k8s-app: {{ .Values.APP_NAME }}
+spec:
+  replicas: {{ int .Values.PODS }}
+  selector:
+    matchLabels:
+      k8s-app: {{ .Values.APP_NAME }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 0%
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.APP_NAME }}
+        deployment: {{ .Values.APP_NAME }}
+        k8s-app: {{ .Values.APP_NAME }}
+    spec:
+      volumes:
+        - name: configmap-vol
+          configMap:
+            name: {{ .Values.APP_NAME }}
+            items:
+              - key: application.{{ .Values.ENV }}-{{ .Values.CLUSTER }}.properties
+                path: application.properties
+            defaultMode: 420
+      containers:
+        - resources:
+            limits:
+              cpu: {{ .Values.CPU_LIMIT }}
+              memory: {{ .Values.MEM_LIMIT }}
+            requests:
+              cpu: {{ .Values.CPU_REQUEST }}
+              memory: {{ .Values.MEM_REQUEST }}
+          readinessProbe:
+            httpGet:
+              path: "{{ .Values.CONTEXT_ROOT }}{{ .Values.HEALTH_CHECK_PATH }}"
+              port: {{ int .Values.HEALTH_CHECK_PORT }}
+              scheme: HTTP
+            initialDelaySeconds: {{ int .Values.READINESS_INITIAL_DELAY_SECONDS }}
+            timeoutSeconds: {{ int .Values.READINESS_TIMEOUT_SECONDS }}
+            successThreshold: {{ int .Values.READINESS_SUCESS_THRESHOLD }}
+            failureThreshold: {{ int .Values.READINESS_FAILURE_THRESHOLD }}
+          name: {{ .Values.APP_NAME }}
+          livenessProbe:
+            httpGet:
+              path: "{{ .Values.CONTEXT_ROOT }}{{ .Values.HEALTH_CHECK_PATH }}"
+              port: {{ int .Values.HEALTH_CHECK_PORT }}
+              scheme: HTTP
+            initialDelaySeconds: {{ int .Values.LIVENESS_INITIAL_DELAY_SECONDS }}
+            periodSeconds: {{ int .Values.LIVENESS_PERIOD_SECONDS }}
+            successThreshold: {{ int .Values.LIVENESS_SUCESS_THRESHOLD }}
+            failureThreshold: {{ int .Values.LIVENESS_FAILURE_THRESHOLD }}
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: configmap-vol
+              mountPath: "/etc/config/{{ .Values.APP_NAME }}/data/"
+          image: quay-registry.aetna.com/cvs-pss/{{ .Values.REPO_NAME }}:{{ .Values.ENV }}
+          ports:
+            - containerPort: {{ int .Values.CONTAINER_PORT }}
+              protocol: TCP
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      schedulerName: default-scheduler
+'''
+
+ def _helm_service(self):
+  return '''apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.APP_NAME }}
+  labels:
+    app: {{ .Values.APP_NAME }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ int .Values.CONTAINER_PORT }}
+      targetPort: {{ int .Values.CONTAINER_PORT }}
+      protocol: TCP
+  selector:
+    k8s-app: {{ .Values.APP_NAME }}
+'''
+
+ def _helm_route(self):
+  return '''apiVersion: v1
+kind: Route
+metadata:
+  name: {{ .Values.APP_NAME }}
+spec:
+  host: {{ .Values.SITE_URL }}
+  path: {{ .Values.CONTEXT_ROOT }}
+  to:
+    kind: Service
+    name: {{ .Values.APP_NAME }}
+  wildcardPolicy: None
+'''
+
+ def _helm_secret(self):
+  return '''apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.APP_NAME }}
+type: Opaque
+data: {}
+'''
+
+ # -- REST_EXTERNAL_DIRECT Java source (rest-external-direct.md §8 layout) --
+ def _context_root(self,model,service):
+  # The service's own inbound endpoint, not an outbound call's URL -- an
+  # interface entry's endpoint is a local path (starts with '/') only for
+  # the node that receives a request; ComIbmWSRequest's endpoint is the
+  # absolute URL of whatever backend it calls, which must never be mistaken
+  # for this service's own route.
+  for i in model.get('interfaces',[]):
+   ep=i.get('endpoint','UNKNOWN')
+   if i['protocol']=='HTTP' and ep.startswith('/'):
+    # §5a: replace the IIB '/edb/' segment with '/cs/'.
+    return ep.split('*')[0].rstrip('/').replace('/edb/','/cs/')
+  return '/api/v1/cs/'+service.lower()
+
+ def _by_module(self,tasks):
+  by={}
+  for t in tasks:
+   by.setdefault(t.get('target_module',''),[]).append(t)
+  return by
+
+ def _protected_body(self,return_stmt,sources):
+  refs='\n   * '.join(sources) or 'no source construct recorded'
+  return (f'  /* TODO (business-logic-synthesis): translate the real logic from --\n'
+          f'   * {refs}\n'
+          f'   * This method intentionally returns a placeholder until that step runs. */\n'
+          f'  {return_stmt}\n')
+
+ def _rest_sources(self,files,root,service,package,model,tasks,plan_id):
+  cls=self._cls(service);pkg=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/main/java'/Path(package.replace('.','/'))
+  test=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/test/java'/Path(package.replace('.','/'))
+  by=self._by_module(tasks)
+  service_srcs=[t['source_reference'] for t in by.get('service',[])]
+  connector_srcs=[t['source_reference'] for t in by.get('client',[])+by.get('soap',[])]
+  context_root=self._context_root(model,service)
+
+  files[pkg/(cls+'Application.java')]=self._app(package,service)
+  files[pkg/'controller'/(cls+'Controller.java')]=self._controller(package,cls)
+  files[test/'controller'/(cls+'ControllerTest.java')]=self._empty_test(package+'.controller',cls+'Controller')
+  files[pkg/'swagger/api'/(cls+'Api.java')]=self._api_interface(package,cls,context_root)
+  files[pkg/'service'/(cls+'Service.java')]=self._service(package,cls,service_srcs)
+  files[test/'service'/(cls+'ServiceTest.java')]=self._empty_test(package+'.service',cls+'Service')
+  files[pkg/'connector'/(cls+'ConnectorService.java')]=self._connector(package,cls,connector_srcs)
+  files[test/'connector'/(cls+'ConnectorServiceTest.java')]=self._empty_test(package+'.connector',cls+'ConnectorService')
+  files[pkg/'util'/(cls+'ConnectorUtil.java')]=self._connector_util(package,cls)
+  files[pkg/'util'/(cls+'Util.java')]=self._util(package,cls)
+  files[pkg/'constant/Constants.java']=self._constants(package)
+  files[pkg/'constant'/(cls+'ConnectorConstants.java')]=self._connector_constants(package,cls)
+  for schema in model.get('schemas',[]):
+   name=self._cls(Path(schema['path']).stem)
+   files[pkg/'swagger/model/response'/(name+'.java')]=self._schema_model(package,name,schema)
+
  def _app(self,p,s):c=self._cls(s)+'Application';return f'package {p};\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication public class {c} {{ public static void main(String[] a) {{ SpringApplication.run({c}.class,a); }} }}\n'
+
+ def _controller(self,p,c):
+  # Zero-logic delegate -- no error-response calls, no inline mapping
+  # (rest-external-direct.md §5a/§8, Rule 9/10).
+  return (f'package {p}.controller;\n\nimport {p}.service.{c}Service;\nimport {p}.swagger.api.{c}Api;\n'
+          f'import lombok.RequiredArgsConstructor;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.RestController;\n\n'
+          f'@RestController\n@RequiredArgsConstructor\npublic class {c}Controller implements {c}Api {{\n'
+          f'  private final {c}Service service;\n\n'
+          f'  @Override\n  public ResponseEntity<Object> get{c}(String id, String cvsConsumerCorrelationId) {{\n'
+          f'    return ResponseEntity.ok(service.get{c}(id));\n  }}\n}}\n')
+
+ def _api_interface(self,p,c,context_root):
+  return (f'package {p}.swagger.api;\n\nimport org.springframework.http.MediaType;\nimport org.springframework.http.ResponseEntity;\n'
+          f'import org.springframework.web.bind.annotation.*;\n\n'
+          f'@RequestMapping(value = "${{CONTEXT_ROOT:{context_root}}}")\npublic interface {c}Api {{\n\n'
+          f'  @GetMapping(value = "/{{id}}", produces = MediaType.APPLICATION_JSON_VALUE)\n'
+          f'  ResponseEntity<Object> get{c}(\n'
+          f'      @PathVariable String id,\n'
+          f'      @RequestHeader(value = "Cvs-Consumer-Correlation-Id", required = false) String cvsConsumerCorrelationId);\n}}\n')
+
+ def _service(self,p,c,sources):
+  # Orchestrates validate -> connector -> map; ErrorUtil.errorResponse(...)
+  # calls belong here, inline, per Rule 10 -- no exception package.
+  return (f'package {p}.service;\n\nimport {p}.connector.{c}ConnectorService;\nimport lombok.RequiredArgsConstructor;\n'
+          f'import org.springframework.stereotype.Service;\n\n@Service\n@RequiredArgsConstructor\npublic class {c}Service {{\n'
+          f'  private final {c}ConnectorService connector;\n\n'
+          f'  public Object get{c}(String id) {{\n'
+          f'{self._protected_body("return connector.call" + c + "Backend(id);",sources)}'
+          f'  }}\n}}\n')
+
+ def _connector(self,p,c,sources):
+  # RestClientWrapper.executeRestCall + catch blocks (rest-external-direct.md
+  # §3/§8); framework-restclient's RestClientWrapper/RestClientRequest are
+  # not in this repo, so only the call shape is real here, not a body.
+  return (f'package {p}.connector;\n\nimport {p}.constant.{c}ConnectorConstants;\nimport {p}.util.{c}ConnectorUtil;\n'
+          f'import com.cvshealth.eip.microservices.frameworks.restclient.RestClientWrapper;\n'
+          f'import lombok.RequiredArgsConstructor;\nimport org.springframework.stereotype.Component;\n\n'
+          f'@Component\n@RequiredArgsConstructor\npublic class {c}ConnectorService {{\n'
+          f'  private final RestClientWrapper restClientWrapper;\n  private final {c}ConnectorUtil util;\n\n'
+          f'  public Object call{c}Backend(String id) {{\n'
+          f'{self._protected_body("return util.processResponse(null);",sources)}'
+          f'  }}\n}}\n')
+
+ def _connector_util(self,p,c):
+  return (f'package {p}.util;\n\nimport org.springframework.stereotype.Component;\n\n@Component\npublic class {c}ConnectorUtil {{\n'
+          f'  public Object buildRestRequest(String id) {{ return null; }}\n'
+          f'  public Object processResponse(Object raw) {{ return raw; }}\n'
+          f'  public boolean isNotFoundMessage(String body) {{ return false; }}\n}}\n')
+
+ def _util(self,p,c):
+  return f'package {p}.util;\n\nimport org.springframework.stereotype.Component;\n\n@Component\npublic class {c}Util {{\n}}\n'
+
+ def _constants(self,p):
+  return f'package {p}.constant;\n\npublic final class Constants {{\n  private Constants() {{ }}\n}}\n'
+
+ def _connector_constants(self,p,c):
+  return f'package {p}.constant;\n\npublic final class {c}ConnectorConstants {{\n  private {c}ConnectorConstants() {{ }}\n}}\n'
+
+ def _schema_model(self,p,name,schema):
+  fields=', '.join('String '+(d or 'field%d'%i) for i,d in enumerate(schema.get('declarations') or ['value'],1))
+  return (f'package {p}.swagger.model.response;\n\nimport com.fasterxml.jackson.annotation.JsonInclude;\n\n'
+          f'@JsonInclude(JsonInclude.Include.NON_NULL)\npublic record {name}({fields}) {{\n}}\n')
+
+ def _empty_test(self,p,c):
+  # Rule 11: every generated JUnit test class is an empty skeleton -- no
+  # @Test methods, assertions or mocks, until iib-ms-testing populates them.
+  return f'package {p};\n\nclass {c}Test {{\n}}\n'
+
+ # -- fallback for backend types without their own layout yet --------------
+ def _fallback_sources(self,files,root,service,package,model,plan_id):
+  pkg=root/'src/main/java'/Path(package.replace('.','/'));test=root/'src/test/java'/Path(package.replace('.','/'))
+  files[pkg/(self._cls(service)+'Application.java')]=self._app(package,service)
+  for flow in model.get('flows',[])+model.get('subflows',[]):
+   cls=self._cls(Path(flow['path']).stem)+'Flow'
+   files[pkg/(cls+'.java')]=self._flow(package,cls,flow,plan_id)
+   files[test/(cls+'Test.java')]=self._empty_test(package,cls)
+
  def _flow(self,p,c,f,plan):return f'package {p};\nimport org.springframework.stereotype.Service;\n/** provenance plan={plan} source={f["path"]} */\n@Service public final class {c} {{ public Object process(Object input) {{ return input; }} }}\n'
- def _test(self,p,c):return f'package {p};\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.*;\nclass {c}Test {{ @Test void preservesInput() {{ Object x=new Object(); assertSame(x,new {c}().process(x)); }} }}\n'
  def _cls(self,x):return ''.join(w.capitalize() for w in re.split(r'[^A-Za-z0-9]+',x) if w)
 
 class BuildRunner:
