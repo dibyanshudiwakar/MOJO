@@ -58,7 +58,8 @@ The runtime comparison above asks *what did the two services return?* **Parity a
 - **Model-only.** There is no deterministic equivalent. It runs only when the model gateway has an approved `agent/variance-analysis/parity-check` prompt and an approved model; otherwise the agent reports `NOT_ANALYSED` with the reason and the runtime comparison is unaffected.
 - **Inputs come from the job's own records,** never from the caller: the IIB source files (`.msgflow`, `.subflow`, `.esql`, `.xsd`, `.wsdl`, `.map`, `.xslt`, `.policyxml`) from the repository recorded at intake, and the migrated sources from the generated artefacts. Where a side is missing, the step is `SKIPPED` with a reason; it does not guess.
 - **During this step the parity skill is the active guidance, not this file.** Its output contract (a single `parity_check` JSON block) differs from the `severity-rationale` step's `assessments` contract, so the two are never combined in one model call.
-- **Where the result goes:** a `PARITY_ANALYSIS` validation report, with counts in the run's metrics. It is **not** written to the variance store and **not** returned as an agent output: a model-produced row must not open or close a variance, and the output contract is unchanged. A human or the governance path decides what a parity GAP means for promotion.
+- **The HTML report is the server's, not the model's.** The skill returns JSON only and says so ("the server owns presentation"). The server renders that JSON to a self-contained HTML page (`app/services/static_check_reports.py`: no script, nothing external, every value escaped, figures recomputed from the rows) and writes it to `<pipeline workspace>/reports/parity-report.html` (`hardcoding-report.html` for the other check; `reports/<job id>/` when the job has no pipeline). The same page is served for any stored report at `GET /api/v2/reports/<report id>/html`. Never ask the model for HTML, and never put markup in its output.
+- **Where the result goes:** a `PARITY_ANALYSIS` validation report, with counts and the page's location in the run's metrics. It is **not** written to the variance store and **not** returned as an agent output: a model-produced row must not open or close a variance, and the output contract is unchanged. A human or the governance path decides what a parity GAP means for promotion.
 
 ### Reading a parity report next to runtime variances
 
@@ -91,7 +92,7 @@ Everything said for parity applies unchanged: model-only (otherwise `NOT_ANALYSE
 
 - `variance_records` — one per difference: location, class, expected, actual, severity.
 - `severity` — overall, and whether the backend call itself worked.
-- With `parity=true` or `hardcoding=true`, `metrics.parity` / `metrics.hardcoding` — `status` (`ANALYSED`, `NOT_ANALYSED`, `SKIPPED`, `INVALID_RESPONSE`), the report id and counts. Not part of the contract outputs.
+- With `parity=true` or `hardcoding=true`, `metrics.parity` / `metrics.hardcoding` — `status` (`ANALYSED`, `NOT_ANALYSED`, `SKIPPED`, `INVALID_RESPONSE`), the report id, counts, and `html_path` / `html_url` (or `html_error` if the page could not be written; the analysis is kept either way). Not part of the contract outputs.
 
 ## Boundaries
 
