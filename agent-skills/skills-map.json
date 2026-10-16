@@ -451,7 +451,7 @@
       "agent_id": "variance-analysis",
       "skill_name": "iib-to-ms-variance-analysis",
       "skill_path": "iib-to-ms-variance-analysis/SKILL.md",
-      "skill_sha256": "9ceddcd42110e5bb40de6f3a117b333258e33352ddcda4998f52ad8759e08118",
+      "skill_sha256": "7868e8d29142b42232251d83b0279906dae0387192f4c12563bfd3fdf243aae9",
       "required_role": "VARIANCE_ANALYST",
       "depends_on": [
         "test-engineering"
