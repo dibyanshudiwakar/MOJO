@@ -71,6 +71,15 @@ SAMPLES = {
     'agent/code-generation/business-logic-synthesis': {
         'edits': [{'path': 'src/main/java/A.java', 'old_str': 'TODO', 'new_str': 'return x;',
                    'why': 'Orders.esql'}]},
+    'agent/code-generation/project-layout': {
+        'root': 'EIPMS_cvs-v1-validatebridgesupply-oci',
+        'files': [
+            {'path': 'cvs-v1-validatebridgesupply-oci-parent/pom.xml',
+             'purpose': 'parent module POM pinning framework and java versions',
+             'skill_reference': 'references/structural-conventions.md'},
+            {'path': 'Dockerfile', 'purpose': 'container image at the repo root',
+             'skill_reference': 'references/structural-conventions.md'}],
+        'omitted': ['config/deploy-config/Secret.yaml: service needs no secret']},
     'agent/code-generation/file-synthesis': {
         'path': 'src/main/java/com/example/A.java', 'content': 'package com.example;\n',
         'language': 'java', 'provenance': {'source_reference': 'Orders.msgflow#in'},
