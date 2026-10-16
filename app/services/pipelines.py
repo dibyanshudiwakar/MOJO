@@ -534,7 +534,13 @@ class PipelineService:
             'framework-baseline': {'path': framework_path, 'golden_path': framework_path, 'version': '1.0.0'},
             'migration-specification': {'version': '1.0.0'},
             'planning': {'version': '1.0.0'},
+            # ace_path is the cloned ACE repository, read so the generated
+            # transformers carry the real ESQL assignments rather than a
+            # passthrough. This step runs after ace-analysis, which REPO_CONSUMERS
+            # makes wait for CLONE:ACE, and the workspace is only cleared once
+            # the pipeline ends -- so the tree is still there at this point.
             'code-generation': {'output_root': base + '/springboot-output',
+                                 'ace_path': base + '/ace',
                                  'service_name': service_name or 'migrated-service',
                                  'package_name': package_name or 'com.example.migrated'},
             # project_root is normally resolved from code-generation's output by

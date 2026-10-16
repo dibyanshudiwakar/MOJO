@@ -437,6 +437,15 @@ context.skill_provenance()  # {'skill_name', 'skill_hash'} | {'skill_error'} | {
   `agent/variance-analysis/hardcoding-check` and a stored `HARDCODING_ANALYSIS` report. It shares
   the parity step's machinery (`CHECKS` in `app/agents/variance_analysis.py`), so the same rules
   hold: model-only, advisory, never in the variance store or the agent's outputs.
+- **HTML reports for both checks.** The skills return JSON only; the server owns presentation.
+  `app/services/static_check_reports.py` renders a stored report into one self-contained page (no
+  script, no external resource, every model value escaped, counts recomputed from the rows with any
+  disagreement stated on the page). Each run writes it to
+  `<pipeline workspace>/reports/parity-report.html` or `hardcoding-report.html` (`reports/<job id>/`
+  when the job has no pipeline) and records `html_path` / `html_url` in `metrics`; a write failure is
+  `html_error` and never loses the analysis. `GET /api/v2/reports/<report id>/html` renders any stored
+  `PARITY_ANALYSIS` / `HARDCODING_ANALYSIS` report on request, authorised by the report's job, with a
+  Content-Security-Policy of its own (inline style only, nothing may run or load).
 - **Editing.** Change an owning file or a `SKILL.md`, then run
   `python scripts/sync_agent_skills.py`. `--check` fails on drift and is run by
   `tests/agents/test_agent_skills.py`.

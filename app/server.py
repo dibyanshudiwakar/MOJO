@@ -18,7 +18,7 @@ from app.services.pipelines import PipelineService, PipelineError
 from app.services.agent_admin import AgentAdminService, AgentAdminError
 from app.services.agent_llm_bindings import AgentLLMBindingService, AgentLLMBindingError
 from app.services.agent_templates import AgentTemplateService
-from app.services import workspace
+from app.services import static_check_reports, workspace
 from app.services.priority1 import PriorityOneService
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 from app.services.platform_v7 import RegistryService,AIRegistryService,KnowledgeService,ApprovalWorkspaceService,DeliveryAutomationService,NotificationService,ObservabilityService,SkillRegistryService
@@ -57,6 +57,22 @@ CONFIDENCE_THRESHOLD=float(os.getenv('FACTORY_REMEDIATION_CONFIDENCE_THRESHOLD',
 try: connectors.load(ROOT/'config'/'integrations.json')
 except FileNotFoundError: pass
 TABLES={'jobs':'jobs','approvals':'approvals','evidence':'evidence','agents':'agent_runs','agent-registry':'agent_registry','specifications':'migration_specs','comparisons':'comparisons','variances':'variances','rca':'root_causes','remediations':'remediations','events':'workflow_events','versions':'versions','clarifications':'clarifications','checkpoints':'workflow_checkpoints','queue':'workflow_queue','intakes':'intake_manifests','dormancy':'dormancy_assessments','frameworks':'framework_baselines','analyses':'ace_analyses','plans':'migration_plans','generated':'generated_artifacts','audit-ledger':'audit_ledger','security-findings':'security_findings','metrics':'metrics','connectors':'connector_profiles','connector-operations':'connector_operations','routing-policies':'routing_policies','unsupported-constructs':'unsupported_constructs','validation-reports':'validation_reports','approval-packages':'approval_packages','mapping-catalogues':'mapping_catalogues','unsupported-mappings':'unsupported_mappings','migration-risks':'migration_risks','quality-runs':'quality_runs','differential-packages':'differential_packages','differential-evidence':'differential_evidence','service-registry':'service_registry','prompt-registry':'prompt_registry','model-registry':'model_registry','model-requests':'model_requests','knowledge-index':'knowledge_index','gate-controls':'gate_controls','delivery-operations':'delivery_operations','notifications':'notifications','observability-events':'observability_events','retention-policies':'retention_policies','skill-registry':'skills','skill-runtimes':'skill_runtimes','skill-agent-bindings':'skill_agent_bindings'}
+
+#: Syntax highlighting hint per generated file. Everything used to be labelled
+#: java/xml/yaml, so a Dockerfile, a README and a .properties file all rendered
+#: as YAML.
+_LANGUAGES = {'.java': 'java', '.xml': 'xml', '.yml': 'yaml', '.yaml': 'yaml',
+              '.properties': 'properties', '.md': 'markdown', '.json': 'json',
+              '.sql': 'sql', '.sh': 'bash'}
+
+
+def _language(path):
+    import posixpath
+    name = posixpath.basename(path.replace('\\', '/'))
+    if name == 'Dockerfile':
+        return 'dockerfile'
+    return _LANGUAGES.get('.' + name.rsplit('.', 1)[-1] if '.' in name else '', 'text')
+
 
 def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
     """Resolve an agent's output IDs to displayable content from service tables.
@@ -164,10 +180,21 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
             a = {'title': 'Generated Spring Boot Project', 'format': 'code',
                  'files': [], 'quality': None}
             artifacts = r.rows('select path,content,provenance from generated_artifacts where job_id=? order by path', (job_id,))
-            a['files'] = [{'path': x['path'], 'content': x['content'], 'language': 'java' if x['path'].endswith('.java') else 'xml' if x['path'].endswith('.xml') else 'yaml'} for x in artifacts[:50]]
+            a['files'] = [{'path': x['path'], 'content': x['content'],
+                           'language': _language(x['path'])} for x in artifacts[:200]]
+            a['file_count'] = len(artifacts)
             qr = r.one('select status,payload from quality_runs where job_id=? order by created_at desc limit 1', (job_id,))
             if qr:
                 a['quality'] = {'status': qr['status'], 'checks': json.loads(qr['payload'] or '{}').get('checks', [])}
+            # What the generator could not derive. Recorded on the run's metrics
+            # by the agent, so it is visible beside the code rather than only in
+            # the generated README.
+            run = r.one("select metrics from agent_runs where job_id=? and agent_id='code-generation'"
+                        " and status='COMPLETED' order by created_at desc limit 1", (job_id,))
+            if run:
+                items = json.loads(run['metrics'] or '{}').get('action_items') or []
+                if items:
+                    a['sections'] = [{'heading': 'Needs a decision', 'items': items}]
         elif agent_id == 'variance-analysis':
             variances = r.rows('select path,expected,actual,severity,kind,disposition from variances where job_id=? order by severity,path', (job_id,))
             a = {'title': 'Variance Analysis', 'format': 'variances',
@@ -256,7 +283,7 @@ class H(BaseHTTPRequestHandler):
     server_version='ACEMigrationFactory'
     sys_version=''
     def end_headers(self):
-        for k,v in {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:",'Permissions-Policy':'camera=(), microphone=(), geolocation=()','Cache-Control':'no-store'}.items(): self.send_header(k,v)
+        for k,v in {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':getattr(self,'csp_override',None) or "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:",'Permissions-Policy':'camera=(), microphone=(), geolocation=()','Cache-Control':'no-store'}.items(): self.send_header(k,v)
         super().end_headers()
     def disconnected(self,e):
         """A client that went away is not a server fault.
@@ -467,6 +494,18 @@ class H(BaseHTTPRequestHandler):
             detail=pipelines.detail(m.group(1))
             self.authorize_job(self.principal(),detail['job_id'])
             return self.sendj(200,detail)
+        # The HTML form of a stored parity / hardcoding report, rendered from its JSON on request.
+        m=re.fullmatch(r'/api/v2/reports/([^/]+)/html',p)
+        if m:
+            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS')",(m.group(1),))
+            if not row: return self.sendj(404,{'error':'report_not_found'})
+            self.authorize_job(self.principal(),row['job_id'])
+            stored=json.loads(row['payload'] or '{}')
+            page=static_check_reports.render_html(stored.get('report'),static_check_reports.meta_from_stored(stored,row))
+            # This page has its own inline stylesheet and no script; give it exactly that policy, for this response only.
+            self.csp_override=static_check_reports.CONTENT_SECURITY_POLICY
+            try: return self.respond(200,'text/html; charset=utf-8',page.encode('utf-8'))
+            finally: self.csp_override=None
         m=re.fullmatch(r'/api/v2/pipelines/([^/]+)/steps/([^/]+)/output',p)
         if m:
             detail=pipelines.detail(m.group(1))

@@ -417,3 +417,99 @@ def test_a_damaged_skill_skips_hardcoding_without_touching_the_runtime_compariso
     assert result.metrics['hardcoding']['status'] == 'SKIPPED'
     assert 'hardcoding_skill_unavailable:skill_file_modified' in result.metrics['hardcoding']['reason']
     assert result.outputs['variance_records'][0]['status'] == 'VARIANCE'
+
+
+# =================================================================================================
+# The HTML report: each check writes a page next to its stored JSON report.
+# =================================================================================================
+
+def reports_dir(tmp_path, job):
+    return tmp_path / 'reports' / str(job['id'])
+
+
+def test_a_parity_run_writes_its_html_report(repo, job, executed_package, seeded, both_prompts, tmp_path):
+    result = run(repo, job, executed_package, parity=True, provider=RoutingProvider())
+    parity = result.metrics['parity']
+    assert parity['status'] == 'ANALYSED' and 'html_error' not in parity
+    assert parity['html_path'] == 'reports/%s/parity-report.html' % job['id']
+    assert parity['html_url'] == '/api/v2/reports/%s/html' % parity['report_id']
+    page = (tmp_path / parity['html_path']).read_text(encoding='utf-8')
+    assert page.startswith('<!DOCTYPE html>') and 'Parity report' in page and 'Orders' in page
+    assert parity['report_id'] in page                                  # the footer names the stored report
+
+
+def test_a_hardcoding_run_writes_its_own_separate_page(repo, job, executed_package, seeded, both_prompts, tmp_path):
+    result = run(repo, job, executed_package, parity=True, hardcoding=True, provider=RoutingProvider())
+    folder = reports_dir(tmp_path, job)
+    assert sorted(p.name for p in folder.iterdir()) == ['hardcoding-report.html', 'parity-report.html']
+    hardcoding = (folder / 'hardcoding-report.html').read_text(encoding='utf-8')
+    assert 'Hardcoding report' in hardcoding and 'Boolean encoding' in hardcoding
+    assert 'Hardcoding report' not in (folder / 'parity-report.html').read_text(encoding='utf-8')
+    assert result.metrics['hardcoding']['html_path'].endswith('hardcoding-report.html')
+
+
+def test_the_stored_report_records_where_its_page_went(repo, job, executed_package, seeded, both_prompts):
+    result = run(repo, job, executed_package, hardcoding=True, provider=RoutingProvider())
+    row = repo.one("select * from validation_reports where report_type='HARDCODING_ANALYSIS'")
+    assert json.loads(row['payload'])['html_path'] == result.metrics['hardcoding']['html_path']
+
+
+def test_the_page_lands_in_the_pipelines_workspace_when_the_job_has_one(repo, job, executed_package, seeded,
+                                                                       both_prompts, tmp_path):
+    with repo.connect() as c:
+        repo.insert(c, 'pipelines', {'id': 'p1', 'job_id': job['id'], 'workspace_dir': 'membereobpreferences',
+                                     'created_at': now()})
+    result = run(repo, job, executed_package, parity=True, provider=RoutingProvider())
+    assert result.metrics['parity']['html_path'] == 'membereobpreferences/reports/parity-report.html'
+    assert (tmp_path / 'membereobpreferences' / 'reports' / 'parity-report.html').is_file()
+
+
+def test_a_second_run_replaces_the_latest_page_but_both_reports_stay_stored(repo, job, executed_package, seeded,
+                                                                           both_prompts, tmp_path):
+    first = run(repo, job, executed_package, parity=True, provider=RoutingProvider())
+    second = run(repo, job, executed_package, parity=True, provider=RoutingProvider(parity=dict(
+        REPORT, application_name='SecondRun')))
+    page = (tmp_path / second.metrics['parity']['html_path']).read_text(encoding='utf-8')
+    assert 'SecondRun' in page and first.metrics['parity']['report_id'] != second.metrics['parity']['report_id']
+    assert repo.one("select count(*) n from validation_reports where report_type='PARITY_ANALYSIS'")['n'] == 2
+
+
+def test_no_page_is_written_when_nothing_was_analysed(repo, job, executed_package, seeded, gateway, tmp_path):
+    gateway(PARITY_PROMPT)
+    result = run(repo, job, executed_package, hardcoding=True, parity=True, provider=RoutingProvider(
+        parity={'answer': 'not a report'}))
+    assert result.metrics['parity']['status'] == 'INVALID_RESPONSE'
+    assert result.metrics['hardcoding']['status'] == 'NOT_ANALYSED'
+    assert not (tmp_path / 'reports').exists()
+
+
+def test_a_failure_to_write_the_page_does_not_lose_the_analysis(repo, job, executed_package, seeded, both_prompts,
+                                                               monkeypatch):
+    def broken(*args, **kwargs):
+        raise OSError('disk full')
+
+    monkeypatch.setattr('app.agents.variance_analysis.static_check_reports.render_html', broken)
+    result = run(repo, job, executed_package, parity=True, provider=RoutingProvider())
+    parity = result.metrics['parity']
+    assert parity['status'] == 'ANALYSED' and parity['html_error'] == 'OSError:disk full'
+    assert 'html_path' not in parity
+    row = repo.one("select * from validation_reports where report_type='PARITY_ANALYSIS'")
+    assert row['id'] == parity['report_id'] and json.loads(row['payload'])['html_error'] == 'OSError:disk full'
+
+
+def test_the_page_cannot_be_written_outside_the_workspace(repo, job, executed_package, seeded, both_prompts, tmp_path):
+    with repo.connect() as c:
+        repo.insert(c, 'pipelines', {'id': 'p1', 'job_id': job['id'], 'workspace_dir': '../escape',
+                                     'created_at': now()})
+    result = run(repo, job, executed_package, parity=True, provider=RoutingProvider())
+    assert result.metrics['parity']['status'] == 'ANALYSED'                     # the analysis still stands
+    assert result.metrics['parity']['html_error'].startswith('WorkspaceError')
+    assert not (tmp_path.parent / 'escape').exists()
+
+
+def test_the_html_form_does_not_change_what_the_runtime_comparison_produces(repo, job, executed_package, seeded,
+                                                                          both_prompts):
+    plain = run(repo, job, executed_package)
+    with_pages = run(repo, job, executed_package, parity=True, hardcoding=True, provider=RoutingProvider())
+    assert set(with_pages.outputs) == {'variance_records', 'severity'}
+    assert with_pages.outputs['severity'] == plain.outputs['severity']

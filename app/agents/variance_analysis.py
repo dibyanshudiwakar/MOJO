@@ -21,7 +21,7 @@ from app.agents.base import AgentResult, BaseAgent
 from app.agents.skills import SkillIntegrityError
 from app.agents.reasoning import ReasoningGateway
 from app.repository import digest, now, uid
-from app.services import workspace
+from app.services import static_check_reports, workspace
 from app.services.differential import DifferentialService
 from app.services.factory_v3 import IntakeService
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
@@ -92,6 +92,26 @@ class VarianceAnalysisAgent(BaseAgent):
             raise ValueError('differential_package_not_executed:' + str(package_id))
         return payload['executions'], context.param('policy', payload.get('policy') or {})
 
+    def _write_html(self, context, spec, answer, provenance, report_id):
+        """Render the report to ``<pipeline workspace>/reports/<kind>-report.html``.
+
+        The skills return JSON and leave presentation to the server; this is that presentation, written
+        where the migration's other files are. A failure here must not lose the analysis -- the report is
+        stored regardless and the API can render it on demand -- so it is reported, not raised.
+        """
+        try:
+            page = static_check_reports.render_html(answer, static_check_reports.meta_from_stored(
+                {'provenance': provenance}, {'id': report_id, 'job_id': context.job_id, 'created_at': now()}))
+            pipeline = self.repo.one('select workspace_dir from pipelines where job_id=? order by created_at desc limit 1',
+                                     (context.job_id,))
+            base = (pipeline or {}).get('workspace_dir')
+            folder = (str(base).rstrip('/\\') + '/reports') if base else 'reports/' + str(context.job_id)
+            path = workspace.resolve(folder, must_exist=False, create=True) / static_check_reports.filename(spec['action'])
+            path.write_text(page, encoding='utf-8')
+            return {'html_path': path.relative_to(workspace.root()).as_posix()}
+        except Exception as exc:
+            return {'html_error': '%s:%s' % (type(exc).__name__, exc)}
+
     def _static_check(self, context, name):
         """Static comparison of the IIB source against the migrated code. Opt-in, model-only.
 
@@ -142,15 +162,17 @@ class VarianceAnalysisAgent(BaseAgent):
         if not (isinstance(answer, dict) and answer.get('action') == spec['action']
                 and isinstance(answer.get('rows'), list)):
             return {'status': 'INVALID_RESPONSE', 'reason': 'not_a_%s_report' % spec['action']}
-        payload = json.dumps({'report': answer, 'provenance': provenance}, sort_keys=True, default=str)
         report_id = uid()
+        page = self._write_html(context, spec, answer, provenance, report_id)
+        payload = json.dumps({'report': answer, 'provenance': provenance, **page}, sort_keys=True, default=str)
         with self.repo.connect() as c:
             self.repo.insert(c, 'validation_reports',
                              {'id': report_id, 'job_id': context.job_id, 'report_type': spec['report_type'],
                               'version': '1.0.0', 'payload': payload, 'content_hash': digest(payload),
                               'status': 'ANALYSED', 'created_at': now(),
                               'reference_id': (analysis or {}).get('id', '')})
-        return {'status': 'ANALYSED', 'report_id': report_id, **spec['summary'](answer)}
+        return {'status': 'ANALYSED', 'report_id': report_id, 'html_url': '/api/v2/reports/%s/html' % report_id,
+                **page, **spec['summary'](answer)}
 
     def execute(self, context):
         package_id = context.param('package_id')
