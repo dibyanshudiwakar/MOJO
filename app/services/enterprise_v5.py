@@ -206,10 +206,10 @@ class SpringProjectGenerator:
   tasks=tasks or []
   backend=(model.get('backend_type') or {}).get('type','UNDETERMINED')
   out=Path(out_dir);root=out/service
-  files={}
+  files={};stub_sources={}
   self._scaffold(files,root,service,package,model,framework)
   if backend=='REST_EXTERNAL_DIRECT':
-   self._rest_sources(files,root,service,package,model,tasks,plan_id)
+   self._rest_sources(files,root,service,package,model,tasks,plan_id,stub_sources)
   else:
    self._fallback_sources(files,root,service,package,model,plan_id)
   manifest=[]
@@ -217,7 +217,11 @@ class SpringProjectGenerator:
    path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content)
    manifest.append({'path':str(path.relative_to(root)).replace('\\','/'),'hash':digest(content),'plan_id':plan_id})
   (root/'generated-manifest.json').write_text(json.dumps(manifest,indent=2))
-  return {'root':str(root),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+  # Which generated file holds which task's HAND_WRITTEN_PROTECTED stub, and
+  # the source_references cited in it -- so code-generation's business-logic
+  # synthesis step can find exactly what to translate without re-parsing its
+  # own TODO comment back out of the Java text.
+  return {'root':str(root),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True)),'stub_sources':stub_sources}
 
  # -- repository-level scaffolding (always produced, every backend type) ----
  def _scaffold(self,files,root,service,package,model,framework):
@@ -495,7 +499,7 @@ data: {}
           f'   * This method intentionally returns a placeholder until that step runs. */\n'
           f'  {return_stmt}\n')
 
- def _rest_sources(self,files,root,service,package,model,tasks,plan_id):
+ def _rest_sources(self,files,root,service,package,model,tasks,plan_id,stub_sources):
   cls=self._cls(service);pkg=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/main/java'/Path(package.replace('.','/'))
   test=root/('cvs-v1-'+service.lower()+'-oci-web')/'src/test/java'/Path(package.replace('.','/'))
   by=self._by_module(tasks)
@@ -507,9 +511,11 @@ data: {}
   files[pkg/'controller'/(cls+'Controller.java')]=self._controller(package,cls)
   files[test/'controller'/(cls+'ControllerTest.java')]=self._empty_test(package+'.controller',cls+'Controller')
   files[pkg/'swagger/api'/(cls+'Api.java')]=self._api_interface(package,cls,context_root)
-  files[pkg/'service'/(cls+'Service.java')]=self._service(package,cls,service_srcs)
+  service_path=pkg/'service'/(cls+'Service.java');files[service_path]=self._service(package,cls,service_srcs)
+  if service_srcs:stub_sources[str(service_path.relative_to(root)).replace('\\','/')]=service_srcs
   files[test/'service'/(cls+'ServiceTest.java')]=self._empty_test(package+'.service',cls+'Service')
-  files[pkg/'connector'/(cls+'ConnectorService.java')]=self._connector(package,cls,connector_srcs)
+  connector_path=pkg/'connector'/(cls+'ConnectorService.java');files[connector_path]=self._connector(package,cls,connector_srcs)
+  if connector_srcs:stub_sources[str(connector_path.relative_to(root)).replace('\\','/')]=connector_srcs
   files[test/'connector'/(cls+'ConnectorServiceTest.java')]=self._empty_test(package+'.connector',cls+'ConnectorService')
   files[pkg/'util'/(cls+'ConnectorUtil.java')]=self._connector_util(package,cls)
   files[pkg/'util'/(cls+'Util.java')]=self._util(package,cls)

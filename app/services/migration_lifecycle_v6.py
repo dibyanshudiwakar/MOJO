@@ -170,7 +170,8 @@ class MappingAndPlanningService:
   framework={'standards':json.loads(f['standards']),'version':f['version'],'content_hash':f['content_hash']} if f else {'standards':{},'version':'0.0.0','content_hash':''}
   model=json.loads(a['semantic_model']);tasks=json.loads(p['tasks'] or '[]')
   result=self.generator.generate(output_root,service_name,package_name,model,plan_id,framework,tasks=tasks)
-  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2));return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2))
+  return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True)),'stub_sources':result.get('stub_sources',{}),'semantic_model':model}
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
   checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists()))
