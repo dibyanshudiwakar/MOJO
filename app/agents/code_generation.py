@@ -14,6 +14,7 @@ does not hold.
 import json
 import re
 from pathlib import Path
+from app.agents.artefact import produce
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import ReasoningGateway
 from app.agents.skills import SkillIntegrityError
@@ -122,12 +123,20 @@ class CodeGenerationAgent(BaseAgent):
             # Guidance, not authority -- a damaged/missing skill or reference
             # must not block synthesis; it just proceeds without that context.
             skill = None
-        answer, provenance = ReasoningGateway(self.repo).reason(
+        # Schema-validated before any of it reaches the disk. These edits are
+        # applied to generated source, so a malformed edit list is refused here
+        # rather than relied on being caught by accept_edit's path confinement
+        # and the old_str match -- those bound the damage, they do not check the
+        # shape. A response that does not validate is treated as no answer.
+        answer, provenance = produce(
             context, self.BUSINESS_LOGIC_PROMPT,
-            {'stub_files': stub_files, 'real_source': real_source}, skill=skill)
-        if not isinstance(answer, dict) or not answer.get('edits'):
-            return {'attempted': bool(answer), 'applied': [], 'refused': [],
-                    'outcome': 'no_edits_proposed', 'mode': provenance.get('mode', '')}
+            {'stub_files': stub_files, 'real_source': real_source},
+            lambda: {'edits': []}, skill=skill)
+        if not answer.get('edits'):
+            return {'attempted': provenance.get('artefact_source') == 'MODEL',
+                    'applied': [], 'refused': [],
+                    'outcome': 'no_edits_proposed', 'mode': provenance.get('mode', ''),
+                    'reason': provenance.get('reason', '')}
         applied, refused = [], []
         for edit in list(answer['edits'])[:MAX_EDITS]:
             target, why = accept_edit(root, edit)

@@ -19,6 +19,7 @@ leave either RCA unable to see half the variances or promotion unable to see any
 import json
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.skills import SkillIntegrityError
+from app.agents.artefact import produce
 from app.agents.reasoning import ReasoningGateway
 from app.repository import digest, now, uid
 from app.services import static_check_reports, workspace
@@ -75,7 +76,7 @@ class VarianceAnalysisAgent(BaseAgent):
     SKILL = 'iib-to-ms-variance-analysis'
     TOOLS = ('evidence.read', 'comparison.execute', 'variance.write')
     OUTPUTS = ('variance_records', 'severity')
-    PROMPT = 'agent/variance-analysis/severity-rationale'
+    PROMPT = 'agent/variance-analysis/findings'
 
     def _executions(self, context, package_id):
         """The captured runtime result pairs for this package."""
@@ -206,9 +207,23 @@ class VarianceAnalysisAgent(BaseAgent):
                             'variances': recorded['variances']})
         flat = [v for x in records for v in x['variances']]
         severity = max((v['severity'] for v in flat), key=lambda s: RANK.get(s, 0), default='NONE')
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'policy': policy,
-            'variances': [{'path': v['path'], 'kind': v['kind'], 'severity': v['severity']} for v in flat]})
+        # The comparator has already established *where* the two systems differ,
+        # and that stays deterministic: it is a byte-level comparison and it is
+        # the evidence. What the model adds is whether each divergence is
+        # materially behavioural, which the comparator cannot judge -- its
+        # severity is derived from the variance kind alone.
+        judged, provenance = produce(
+            context, self.PROMPT,
+            {'policy': policy,
+             'variances': [{'path': v['path'], 'kind': v['kind'], 'severity': v['severity'],
+                            'expected': v.get('expected'), 'actual': v.get('actual')}
+                           for v in flat]},
+            lambda: {'findings': [{'path': v['path'], 'kind': v['kind'],
+                                   'severity': v['severity'], 'material': True,
+                                   'explanation': 'severity derived from the variance kind'}
+                                  for v in flat]})
+        findings = judged.get('findings') or []
+        immaterial = [f['path'] for f in findings if f.get('material') is False]
         metrics = {'case_count': len(records), 'variance_count': len(flat),
                    'variance_cases': sum(1 for x in records if x['status'] == 'VARIANCE'),
                    'by_kind': {k: sum(1 for v in flat if v['kind'] == k)
@@ -216,11 +231,16 @@ class VarianceAnalysisAgent(BaseAgent):
                    # Distinguishes "replayed and found nothing" from "nothing to
                    # replay yet" -- both give case_count==0, so this is the only
                    # thing that tells the two apart on the run.
-                   'runtime_comparison': 'EXECUTED' if executions else 'NOT_EXECUTED'}
-        if isinstance(answer, dict) and answer.get('assessments'):
-            # Advisory only: a model may not close a variance. Disposition is the
-            # G4 decision recorded through ``disposition_differential``.
-            metrics['model_behavioural_count'] = sum(1 for a in answer['assessments'] if a.get('behavioural'))
+                   'runtime_comparison': 'EXECUTED' if executions else 'NOT_EXECUTED',
+                   'findings': findings,
+                   'findings_source': provenance.get('artefact_source', 'DETERMINISTIC'),
+                   # Judged immaterial by the model. Recorded, never applied:
+                   # closing a variance is the G4 ACCEPT_EXCEPTION decision and
+                   # disposition_differential is the only thing that may do it.
+                   'immaterial_paths': immaterial}
+        # Advisory only: a model may not close a variance. Disposition is the
+        # G4 decision recorded through ``disposition_differential``.
+        metrics['material_count'] = sum(1 for f in findings if f.get('material') is not False)
         for name in CHECKS:
             if context.param(name, False):
                 metrics[name] = self._static_check(context, name)
