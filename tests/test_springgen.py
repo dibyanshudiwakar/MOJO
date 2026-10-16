@@ -21,7 +21,7 @@ import pytest
 
 from app.services.enterprise_v5 import ACEParser
 from app.services.springgen import (SpringProjectGenerator, WIDTH, annotation, argument, javadoc,
-                                    parse_esql, signature, tidy)
+                                    kebab, parse_esql, pascal, signature, tidy)
 
 #: ``quality_validate``'s rules, verbatim. Duplicated on purpose: if they are
 #: ever relaxed there, these tests should keep holding the generator to the
@@ -177,6 +177,28 @@ def test_the_queue_ace_used_is_the_configured_default(generate):
     publisher = _java(root, 'messaging/PublishAuditPublisher.java')
     assert '@Value("${integration.queues.publish-audit}")' in publisher
     assert 'jmsTemplate.convertAndSend(destination, payload)' in publisher
+
+
+def test_the_outbound_client_is_named_after_the_detected_vendor(generate, tmp_path):
+    """A node id like FCMComposite_1_4 carries no meaning; when ACEParser found
+    exactly one real backend vendor in the ACE repo's own *.properties files,
+    the client is named and configured after that vendor instead, matching the
+    real reference's own MedForceConnector and
+    application.http.restclient.medforce.* convention."""
+    vendored = tmp_path / 'vendored'
+    vendored.mkdir()
+    (vendored / 'Orders.msgflow').write_text(FLOW)
+    (vendored / 'Orders.esql').write_text(ESQL)
+    (vendored / 'Orders.DEV.properties').write_text(
+        'GET#VendorServiceURL=https://vendor.example/api/orders\n')
+    _, root = generate(source=vendored)
+    client = _java(root, 'client/VendorClient.java')
+    assert '@Value("${integration.clients.vendor.base-url}")' in client
+    service = _java(root, 'service/OrdersService.java')
+    assert 'vendorClient.call(' in service
+    yml = _read(root, 'src/main/resources/application.yml')
+    assert '    vendor:' in yml
+    assert 'base-url: ${VENDOR_BASE_URL:http://localhost:8081}' in yml
 
 
 def test_dependencies_follow_the_constructs_present(generate, tmp_path):
@@ -427,6 +449,25 @@ def test_a_single_inbound_node_keeps_the_plain_flow_name(generate):
     result, _ = generate()
     paths = {x['path'] for x in result['manifest']}
     assert 'src/main/java/com/example/orders/controller/OrdersController.java' in paths
+
+
+def test_pascal_title_cases_an_acronym_run_like_any_other_word():
+    """An ACE service already named in all-caps acronym style must still read
+    the way the real migrated reference's own classes do: DmrClaimStatus, not
+    DMRClaimStatus. Confirmed live against the real DMRClaimStatus service --
+    this was generating DMRClaimStatusController before this fix."""
+    assert pascal('DMRClaimStatus') == 'DmrClaimStatus'
+    assert pascal('FCMComposite_1_4') == 'FcmComposite14'
+    # Unaffected: no acronym run to normalise.
+    assert pascal('order-detail') == 'OrderDetail'
+    assert pascal('ORDER_DETAIL') == 'OrderDetail'
+    assert pascal('orderDetail') == 'OrderDetail'
+
+
+def test_kebab_and_pascal_split_on_the_same_case_boundaries():
+    """The two must never name the same source differently."""
+    assert kebab('DMRClaimStatus') == 'dmr-claim-status'
+    assert kebab('HTTPInput') == 'http-input'
 
 
 def test_javadoc_wraps_instead_of_carrying_hand_placed_breaks():

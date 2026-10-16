@@ -49,6 +49,14 @@ from pathlib import Path
 from app.repository import digest
 
 _WORDS = re.compile(r'[^A-Za-z0-9]+')
+#: Splits on case boundaries as well as punctuation, so an ACE node id like
+#: ``PublishAudit`` becomes the readable configuration key ``publish-audit``
+#: rather than ``publishaudit``, and a name's own acronym run normalises the
+#: way Java convention (and the real migrated reference's own class names,
+#: e.g. ``DmrClaimStatus`` not ``DMRClaimStatus``) title-cases it like any
+#: other word: ``HTTPInput`` -> ``http-input`` / ``HttpInput``, not
+#: ``HTTPInput`` kept shouting.
+_HUMPS = re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+')
 _JAVA_KEYWORDS = {
     'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const',
     'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final', 'finally', 'float',
@@ -63,9 +71,22 @@ def _parts(text):
     return [p for p in _WORDS.split(str(text or '')) if p]
 
 
+def _humps(text):
+    return [hump for part in _parts(text) for hump in _HUMPS.findall(part)]
+
+
 def pascal(text):
-    """``order-detail`` / ``ORDER_DETAIL`` / ``orderDetail`` -> ``OrderDetail``."""
-    return ''.join(p[0].upper() + p[1:] for p in _parts(text)) or 'Generated'
+    """``order-detail`` / ``ORDER_DETAIL`` / ``orderDetail`` / ``DMRClaimStatus``
+    -> ``OrderDetail`` / ``OrderDetail`` / ``OrderDetail`` / ``DmrClaimStatus``.
+
+    Shares ``_humps`` with ``kebab`` rather than its own split, so the two can
+    never name the same source differently -- confirmed live: ``DMRClaimStatus``
+    used to survive this unchanged (title-casing only the first letter of the
+    whole string leaves an all-caps run alone), which is why the real
+    generated classes read ``DMRClaimStatusController`` instead of the
+    reference's own ``DmrClaimStatusController``.
+    """
+    return ''.join(h[0].upper() + h[1:].lower() for h in _humps(text)) or 'Generated'
 
 
 def camel(text):
@@ -74,15 +95,8 @@ def camel(text):
     return name + '_' if name in _JAVA_KEYWORDS else name
 
 
-#: Splits on case boundaries as well as punctuation, so an ACE node id like
-#: ``PublishAudit`` becomes the readable configuration key ``publish-audit``
-#: rather than ``publishaudit``. Acronyms stay whole: ``HTTPInput`` -> ``http-input``.
-_HUMPS = re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+')
-
-
 def kebab(text):
-    parts = [hump for part in _parts(text) for hump in _HUMPS.findall(part)]
-    return '-'.join(p.lower() for p in parts) or 'service'
+    return '-'.join(h.lower() for h in _humps(text)) or 'service'
 
 
 def _stem(path):
@@ -970,7 +984,7 @@ jobs:
                     files[self._file('messaging', pascal(node['id']) + 'Publisher')] = \
                         self._publisher(flow, node)
                 elif node['role'] in ('HTTP_REQUEST', 'SOAP_REQUEST'):
-                    files[self._file('client', pascal(node['id']) + 'Client')] = \
+                    files[self._file('client', pascal(self._client_key(node)) + 'Client')] = \
                         self._client(flow, node)
                 elif node['role'] == 'FILE_IN':
                     files[self._file('file', pascal(node['id']) + 'Ingest')] = self._file_in(flow, node)
@@ -1204,7 +1218,8 @@ public class %s {
                 name, field = pascal(node['id']) + 'Publisher', camel(node['id']) + 'Publisher'
                 imports.append('%s.messaging.%s' % (self.package, name))
             elif role in ('HTTP_REQUEST', 'SOAP_REQUEST'):
-                name, field = pascal(node['id']) + 'Client', camel(node['id']) + 'Client'
+                key = self._client_key(node)
+                name, field = pascal(key) + 'Client', camel(key) + 'Client'
                 imports.append('%s.client.%s' % (self.package, name))
             elif role == 'FILE_OUT':
                 name, field = pascal(node['id']) + 'Writer', camel(node['id']) + 'Writer'
@@ -1474,8 +1489,40 @@ public class %(cls)sPublisher {
              '@Value("${%s}") String destination' % setting])}
         return self._header('messaging', imports, comment, [], body)
 
+    def _client_key(self, node):
+        """The identity an outbound HTTP/SOAP client is named and configured
+        under: the real backend vendor when ACEParser found exactly one in
+        the ACE repo's own ``*.properties`` files
+        (``model['backend_properties']``, populated during ace-analysis),
+        else the raw ACE node id.
+
+        A node id like ``FCMComposite_1_4`` is how ACE auto-names a composite
+        node and carries no meaning to a reader; the real reference service
+        this was checked against names its client after the vendor it calls
+        (``MedForceConnector`` for ``MedForce``) instead. Only applies with
+        exactly one vendor -- with two or more there is no single name to
+        prefer over the node's own.
+        """
+        vendors = self.model.get('backend_properties') or {}
+        return next(iter(vendors)) if len(vendors) == 1 else node['id']
+
+    def _client_slug(self, node):
+        """Config-key form of ``_client_key``.
+
+        A vendor name is a proper noun, kept as one lowercase token
+        (``medforce``, matching the real reference's own
+        ``application.http.restclient.medforce.uri``) rather than hump-split
+        into ``med-force`` the way a generic node id benefits from being
+        (``FCMComposite_1_4`` -> ``fcm-composite-1-4``, still via ``kebab``).
+        """
+        key = self._client_key(node)
+        vendors = self.model.get('backend_properties') or {}
+        return key.lower() if key in vendors else kebab(key)
+
     def _client(self, flow, node):
-        key = kebab(node['id'])
+        client_key = self._client_key(node)
+        key = self._client_slug(node)
+        cls = pascal(client_key)
         raw = str(node['properties'].get('URLSpecifier') or node['properties'].get('url') or '')
         path = '/' + raw.split('://', 1)[1].split('/', 1)[-1].strip('/') if '://' in raw and '/' in raw.split('://', 1)[1] \
             else ('/' + raw.strip('/') if raw and '://' not in raw else '/')
@@ -1491,7 +1538,7 @@ public class %(cls)sPublisher {
             construction = '''%s
         this.restClient = builder.baseUrl(baseUrl).build();
     }''' % signature(
-                'public %sClient' % pascal(node['id']),
+                'public %sClient' % cls,
                 ['RestClient.Builder builder',
                  '@Value("${%s.clients.%s.base-url}") String baseUrl' % (self.prefix, key)])
             field = '    private final RestClient restClient;'
@@ -1508,7 +1555,7 @@ public class %(cls)sPublisher {
             construction = '''%s
         this.restTemplate = builder.rootUri(baseUrl).build();
     }''' % signature(
-                'public %sClient' % pascal(node['id']),
+                'public %sClient' % cls,
                 ['RestTemplateBuilder builder',
                  '@Value("${%s.clients.%s.base-url}") String baseUrl' % (self.prefix, key)])
             field = '    private final RestTemplate restTemplate;'
@@ -1539,7 +1586,7 @@ public class %(cls)sClient {
                     "the %(key)s call did not complete successfully", 502);
         }
     }
-}''' % {'cls': pascal(node['id']), 'field': field, 'construction': construction,
+}''' % {'cls': cls, 'field': field, 'construction': construction,
         'call': call, 'key': key}
         return self._header('client', imports, comment, [], body)
 
@@ -1880,17 +1927,19 @@ public class MessagingConfig {
         schedules = {}
         for flow in self.flows:
             for node in flow['nodes']:
-                key = kebab(node['id'])
                 if node['role'] in ('HTTP_REQUEST', 'SOAP_REQUEST'):
-                    clients[key] = True
+                    # Keyed the same way _client() names the @Value lookup,
+                    # so the property path this writes is the one the
+                    # generated client actually resolves.
+                    clients[self._client_slug(node)] = True
                 elif node['role'] in ('JMS_IN', 'JMS_OUT'):
-                    queues[key] = self._destination(node, 'QUEUE')
+                    queues[kebab(node['id'])] = self._destination(node, 'QUEUE')
                 elif node['role'] in ('KAFKA_IN', 'KAFKA_OUT'):
-                    topics[key] = self._destination(node, 'TOPIC')
+                    topics[kebab(node['id'])] = self._destination(node, 'TOPIC')
                 elif node['role'] in ('FILE_IN', 'FILE_OUT'):
-                    files[key] = self._destination(node, 'DIR')
+                    files[kebab(node['id'])] = self._destination(node, 'DIR')
                 elif node['role'] == 'SCHEDULE':
-                    schedules[key] = '0 */5 * * * *'
+                    schedules[kebab(node['id'])] = '0 */5 * * * *'
         if clients:
             lines.append('  clients:')
             for key in sorted(clients):
