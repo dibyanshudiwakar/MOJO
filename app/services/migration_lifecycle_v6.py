@@ -220,13 +220,14 @@ class MappingAndPlanningService:
   self._register_artifacts(job_id,plan_id,result)
   manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'action_items':result.get('action_items',[]),'generated_roles':result.get('roles',[]),'ace_endpoints':[x for x in model.get('interfaces',[]) if x.get('endpoint') not in ('','UNKNOWN',None)],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2))
   # stub_sources/semantic_model: code-generation's business-logic synthesis
-  # (Phase B, from before this generator moved to springgen.py) reads these
-  # to fill a HAND_WRITTEN_PROTECTED stub from real ACE source. springgen's
-  # own ESQL-to-Java transpilation does not produce stubs -- whatever it
-  # could not translate shows up in action_items instead -- so this is
-  # honestly {} rather than a guess; code_generation.py's .get(...,{}) means
-  # synthesis just no-ops instead of erroring.
-  return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True)),'action_items':result.get('action_items',[]),'stub_sources':{},'semantic_model':model}
+  # reads these to fill a placeholder body from the real ACE source. This was
+  # {} from when the generator moved to springgen.py, which meant the synthesis
+  # stage returned 'no_stubs' on every run and the model was never asked for
+  # the logic at all -- silently, because an empty dict is a valid answer.
+  # springgen now reports the transformer bodies it could not fully translate
+  # and the routing predicates it left accepting everything, each with the ACE
+  # source reference the real implementation comes from.
+  return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True)),'action_items':result.get('action_items',[]),'stub_sources':result.get('stub_sources',{}),'semantic_model':model}
  #: Generated text worth keeping in the database. Build output and binaries are
  #: on disk and in git; what the UI renders and what variance analysis diffs
  #: against the IIB source is source and configuration.
