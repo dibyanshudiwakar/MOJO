@@ -32,7 +32,13 @@ class CodeGenerationAgent(BaseAgent):
             context.job_id, plan_id,
             context.param('output_root'),
             context.param('service_name'),
-            context.param('package_name'))
+            context.param('package_name'),
+            # Optional, and read-only: the ESQL statements that become the
+            # transformer bodies live in the source tree, not in the semantic
+            # model (which records module names). Absent, the project is still
+            # generated and its README says which transformers came through
+            # without translated assignments.
+            source_root=context.param('ace_path', '') or None)
         manifest_path = Path(generated['manifest'])
         manifest = json.loads(manifest_path.read_text())
         quality = service.quality_validate(
@@ -68,6 +74,10 @@ class CodeGenerationAgent(BaseAgent):
                                    'quality_status': quality['status']}),),
             metrics={'file_count': generated['file_count'], 'test_count': len(tests),
                      'quality_status': quality['status'], 'failed_checks': failed,
+                     # What the generator could not derive from the plan and the
+                     # semantic model. Surfaced on the run so the output panel
+                     # shows it beside the code, not only in the README.
+                     'action_items': generated.get('action_items', []),
                      'model_failure_triage': (answer or {}).get('failures', [])
                      if isinstance(answer, dict) else []},
             reasoning=provenance)

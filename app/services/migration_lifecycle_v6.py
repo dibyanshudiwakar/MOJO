@@ -158,7 +158,16 @@ class MappingAndPlanningService:
   risks=self.repo.rows('select * from migration_risks where catalogue_id=?',(catalogue_id,));items=[{'kind':'MIGRATION_PLAN','id':p['id'],'version':p['version'],'hash':p['content_hash']},{'kind':'MAPPING_CATALOGUE','id':c['id'],'version':c['version'],'hash':c['content_hash']}];package={'gate':'G3','approver_role':'SOLUTION_ARCHITECT','decision_options':['APPROVE','REJECT','CLARIFY'],'plan':p,'mapping_catalogue':c,'risks':risks,'artefacts':items,'decision':'PENDING_APPROVAL','created_at':now()};raw=json.dumps(package,sort_keys=True,default=str);package_id=uid()
   with self.repo.connect() as db:db.execute('insert into approval_packages values(?,?,?,?,?,?,?,?,?)',(package_id,job_id,'G3','PENDING_APPROVAL',raw,digest(raw),json.dumps(items),'[]',now()))
   return {'package_id':package_id,'status':'PENDING_APPROVAL','content_hash':digest(raw),'artefacts':items}
- def generate_spring(self,job_id,plan_id,output_root,service_name,package_name):
+ def generate_spring(self,job_id,plan_id,output_root,service_name,package_name,source_root=None):
+  """Write the target project from the approved plan.
+
+  ``source_root`` is the ACE repository the analysis was taken from. It is
+  optional and only ever read: the generator translates each ESQL module's own
+  SET assignments into the transformer bodies, which the semantic model cannot
+  carry because it records module *names* rather than statements. Without it
+  the project is still generated and wired -- the transformers simply arrive
+  without translated assignments, which the README then lists as an action.
+  """
   p=self.repo.one('select * from migration_plans where id=? and job_id=?',(plan_id,job_id))
   if not p:raise ValueError('plan_not_found')
   if not self._approved(job_id,'G3',p['content_hash']):raise PermissionError('g3_plan_approval_required')
@@ -168,8 +177,40 @@ class MappingAndPlanningService:
   if not a or not s:raise ValueError('generation_inputs_missing')
   # Framework is optional: when absent, generate with default conventions.
   framework={'standards':json.loads(f['standards']),'version':f['version'],'content_hash':f['content_hash']} if f else {'standards':{},'version':'0.0.0','content_hash':''}
-  model=json.loads(a['semantic_model']);result=self.generator.generate(output_root,service_name,package_name,model,plan_id,framework)
-  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2));return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True))}
+  # The plan carries the approved Spring pattern per ACE construct, and the
+  # generator emits what the plan says rather than re-deciding from the node's
+  # name -- so what G3 authorised and what is written are the same thing.
+  plan={'tasks':json.loads(p['tasks'] or '[]'),'mappings':json.loads(p['mappings'] or '[]')}
+  model=json.loads(a['semantic_model']);result=self.generator.generate(output_root,service_name,package_name,model,plan_id,framework,source_root=source_root,plan=plan)
+  self._register_artifacts(job_id,plan_id,result)
+  manifest={'plan_id':plan_id,'analysis_id':a['id'],'analysis_hash':a['content_hash'],'specification_id':s['id'],'specification_hash':s['content_hash'],'framework_id':f['id'] if f else '','framework_hash':f['content_hash'] if f else '','files':result['manifest'],'action_items':result.get('action_items',[]),'generated_roles':result.get('roles',[]),'ace_endpoints':[x for x in model.get('interfaces',[]) if x.get('endpoint') not in ('','UNKNOWN',None)],'generated_at':now()};mf=Path(result['root'])/'provenance-manifest.json';mf.write_text(json.dumps(manifest,indent=2));return {'project_root':result['root'],'file_count':len(result['manifest'])+1,'manifest':str(mf),'content_hash':digest(json.dumps(manifest,sort_keys=True)),'action_items':result.get('action_items',[])}
+ #: Generated text worth keeping in the database. Build output and binaries are
+ #: on disk and in git; what the UI renders and what variance analysis diffs
+ #: against the IIB source is source and configuration.
+ REGISTERED_SUFFIXES=('.java','.xml','.yml','.yaml','.properties','.md','.json')
+ def _register_artifacts(self,job_id,plan_id,result):
+  """Record each generated file in ``generated_artifacts``.
+
+  Nothing wrote this table on the agent path, which had two visible
+  consequences: the agent output panel resolves a code-generation run through
+  it and therefore showed an empty file list, and ``variance-analysis``
+  skipped every structural check with ``no_generated_artifacts``. The project
+  was on disk the whole time -- it was simply never registered.
+
+  Re-registering is idempotent per (job, plan, path): a re-run of the same
+  plan replaces its rows rather than accumulating a second copy.
+  """
+  root=Path(result['root']);rows=[]
+  for item in result['manifest']:
+   path=item['path'];file=root/path
+   if not file.suffix.lower() in self.REGISTERED_SUFFIXES:continue
+   try:content=file.read_text(encoding='utf-8')
+   except OSError:continue
+   rows.append((uid(),job_id,plan_id,path,content,json.dumps({'plan_id':plan_id,'path':path,'content_hash':item['hash']}),'GENERATED_REGION_LOCKED',item['hash'],now()))
+  with self.repo.connect() as c:
+   c.execute('delete from generated_artifacts where job_id=? and plan_id=?',(job_id,plan_id))
+   c.executemany('insert into generated_artifacts values(?,?,?,?,?,?,?,?,?)',rows)
+  return len(rows)
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
   checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists()))

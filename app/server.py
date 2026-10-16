@@ -58,6 +58,22 @@ try: connectors.load(ROOT/'config'/'integrations.json')
 except FileNotFoundError: pass
 TABLES={'jobs':'jobs','approvals':'approvals','evidence':'evidence','agents':'agent_runs','agent-registry':'agent_registry','specifications':'migration_specs','comparisons':'comparisons','variances':'variances','rca':'root_causes','remediations':'remediations','events':'workflow_events','versions':'versions','clarifications':'clarifications','checkpoints':'workflow_checkpoints','queue':'workflow_queue','intakes':'intake_manifests','dormancy':'dormancy_assessments','frameworks':'framework_baselines','analyses':'ace_analyses','plans':'migration_plans','generated':'generated_artifacts','audit-ledger':'audit_ledger','security-findings':'security_findings','metrics':'metrics','connectors':'connector_profiles','connector-operations':'connector_operations','routing-policies':'routing_policies','unsupported-constructs':'unsupported_constructs','validation-reports':'validation_reports','approval-packages':'approval_packages','mapping-catalogues':'mapping_catalogues','unsupported-mappings':'unsupported_mappings','migration-risks':'migration_risks','quality-runs':'quality_runs','differential-packages':'differential_packages','differential-evidence':'differential_evidence','service-registry':'service_registry','prompt-registry':'prompt_registry','model-registry':'model_registry','model-requests':'model_requests','knowledge-index':'knowledge_index','gate-controls':'gate_controls','delivery-operations':'delivery_operations','notifications':'notifications','observability-events':'observability_events','retention-policies':'retention_policies','skill-registry':'skills','skill-runtimes':'skill_runtimes','skill-agent-bindings':'skill_agent_bindings'}
 
+#: Syntax highlighting hint per generated file. Everything used to be labelled
+#: java/xml/yaml, so a Dockerfile, a README and a .properties file all rendered
+#: as YAML.
+_LANGUAGES = {'.java': 'java', '.xml': 'xml', '.yml': 'yaml', '.yaml': 'yaml',
+              '.properties': 'properties', '.md': 'markdown', '.json': 'json',
+              '.sql': 'sql', '.sh': 'bash'}
+
+
+def _language(path):
+    import posixpath
+    name = posixpath.basename(path.replace('\\', '/'))
+    if name == 'Dockerfile':
+        return 'dockerfile'
+    return _LANGUAGES.get('.' + name.rsplit('.', 1)[-1] if '.' in name else '', 'text')
+
+
 def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
     """Resolve an agent's output IDs to displayable content from service tables.
 
@@ -164,10 +180,21 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
             a = {'title': 'Generated Spring Boot Project', 'format': 'code',
                  'files': [], 'quality': None}
             artifacts = r.rows('select path,content,provenance from generated_artifacts where job_id=? order by path', (job_id,))
-            a['files'] = [{'path': x['path'], 'content': x['content'], 'language': 'java' if x['path'].endswith('.java') else 'xml' if x['path'].endswith('.xml') else 'yaml'} for x in artifacts[:50]]
+            a['files'] = [{'path': x['path'], 'content': x['content'],
+                           'language': _language(x['path'])} for x in artifacts[:200]]
+            a['file_count'] = len(artifacts)
             qr = r.one('select status,payload from quality_runs where job_id=? order by created_at desc limit 1', (job_id,))
             if qr:
                 a['quality'] = {'status': qr['status'], 'checks': json.loads(qr['payload'] or '{}').get('checks', [])}
+            # What the generator could not derive. Recorded on the run's metrics
+            # by the agent, so it is visible beside the code rather than only in
+            # the generated README.
+            run = r.one("select metrics from agent_runs where job_id=? and agent_id='code-generation'"
+                        " and status='COMPLETED' order by created_at desc limit 1", (job_id,))
+            if run:
+                items = json.loads(run['metrics'] or '{}').get('action_items') or []
+                if items:
+                    a['sections'] = [{'heading': 'Needs a decision', 'items': items}]
         elif agent_id == 'variance-analysis':
             variances = r.rows('select path,expected,actual,severity,kind,disposition from variances where job_id=? order by severity,path', (job_id,))
             a = {'title': 'Variance Analysis', 'format': 'variances',

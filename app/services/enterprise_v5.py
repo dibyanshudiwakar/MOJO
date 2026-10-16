@@ -2,6 +2,12 @@ import base64, hashlib, json, os, re, ssl, subprocess, time, urllib.request, url
 from dataclasses import dataclass
 from pathlib import Path
 from app.repository import uid,now,digest
+#: Re-exported so ``from app.services.enterprise_v5 import SpringProjectGenerator``
+#: keeps working. The generator moved to its own module when it stopped being a
+#: scaffolder: it now emits controllers, flow services, ESQL-derived
+#: transformers, messaging and HTTP adapters, configuration and tests, which is
+#: far more code than belongs beside the parsers here.
+from app.services.springgen import SpringProjectGenerator
 
 class ACEParser:
  EXT={'.msgflow':'flows','.subflow':'subflows','.esql':'esql','.map':'maps','.xslt':'maps','.xsd':'schemas','.wsdl':'schemas','.policyxml':'policies'}
@@ -134,21 +140,6 @@ class FrameworkConventionExtractor:
    m=re.search(p,t)
    if m:return m.group(1)
 
-class SpringProjectGenerator:
- def generate(self,out_dir,service,package,model,plan_id,framework):
-  out=Path(out_dir);root=out/service;pkg=root/'src/main/java'/Path(package.replace('.','/'));test=root/'src/test/java'/Path(package.replace('.','/'));res=root/'src/main/resources';pkg.mkdir(parents=True,exist_ok=True);test.mkdir(parents=True,exist_ok=True);res.mkdir(parents=True,exist_ok=True)
-  spring=framework.get('standards',{}).get('build',{}).get('springBootVersion') or '3.3.0';java=framework.get('standards',{}).get('build',{}).get('javaVersion') or '21'
-  files={root/'pom.xml':self._pom(package,service,spring,java),res/'application.yml':'spring:\n  application:\n    name: '+service+'\nace:\n  endpoint: ${ACE_ENDPOINT:}\n',pkg/(self._cls(service)+'Application.java'):self._app(package,service)}
-  for i,flow in enumerate(model.get('flows',[])+model.get('subflows',[]),1):
-   cls=self._cls(Path(flow['path']).stem)+'Flow';files[pkg/(cls+'.java')]=self._flow(package,cls,flow,plan_id);files[test/(cls+'Test.java')]=self._test(package,cls)
-  manifest=[]
-  for path,content in files.items():path.write_text(content);manifest.append({'path':str(path.relative_to(root)),'hash':digest(content),'plan_id':plan_id})
-  (root/'generated-manifest.json').write_text(json.dumps(manifest,indent=2));return {'root':str(root),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
- def _pom(self,g,a,s,j):return f'''<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>{s}</version></parent><groupId>{g}</groupId><artifactId>{a}</artifactId><version>1.0.0</version><properties><java.version>{j}</java.version></properties><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency></dependencies><build><plugins><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build></project>'''
- def _app(self,p,s):c=self._cls(s)+'Application';return f'package {p};\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication public class {c} {{ public static void main(String[] a) {{ SpringApplication.run({c}.class,a); }} }}\n'
- def _flow(self,p,c,f,plan):return f'package {p};\nimport org.springframework.stereotype.Service;\n/** provenance plan={plan} source={f["path"]} */\n@Service public final class {c} {{ public Object process(Object input) {{ return input; }} }}\n'
- def _test(self,p,c):return f'package {p};\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.*;\nclass {c}Test {{ @Test void preservesInput() {{ Object x=new Object(); assertSame(x,new {c}().process(x)); }} }}\n'
- def _cls(self,x):return ''.join(w.capitalize() for w in re.split(r'[^A-Za-z0-9]+',x) if w)
 
 class BuildRunner:
  def run(self,project,timeout=600):
