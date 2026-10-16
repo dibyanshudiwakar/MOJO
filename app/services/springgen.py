@@ -554,7 +554,8 @@ class SpringProjectGenerator:
         (self.root / 'generated-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
         return {'root': str(self.root), 'manifest': manifest,
                 'content_hash': digest(json.dumps(manifest, sort_keys=True)),
-                'action_items': self.action_items, 'roles': sorted(self.roles)}
+                'action_items': self.action_items, 'roles': sorted(self.roles),
+                'stub_sources': {k: v for k, v in sorted(self.stub_sources.items()) if v}}
 
     # -- input resolution ---------------------------------------------------
     def _prepare(self, out_dir, service, package, model, plan_id, framework, source_root, plan):
@@ -568,6 +569,11 @@ class SpringProjectGenerator:
         self.model = model or {}
         self.action_items = []
         self.roles = set()
+        #: Generated file -> the ACE source references whose logic it is still
+        #: missing. code-generation's business-logic synthesis reads this to ask
+        #: the model for the real implementation of each placeholder body. Empty
+        #: means every body was translated, not that nothing was generated.
+        self.stub_sources = {}
         self.prefix = 'integration'
 
         standards = (framework or {}).get('standards') or {}
@@ -1186,7 +1192,16 @@ public record %s(
         for flow in self.flows:
             for module in flow['modules']:
                 name = pascal(module.name) + 'Transformer'
-                files[self._file('transform', name)] = self._transformer(flow, module, name)
+                path = self._file('transform', name)
+                files[path] = self._transformer(flow, module, name)
+                # A body the transpiler could not fully translate is a stub: it
+                # compiles and returns null where the ESQL did something. The
+                # ESQL file is the source the real implementation comes from.
+                if module.unresolved or not module.translated:
+                    self.stub_sources.setdefault(path, [])
+                    reference = module.source_path or (flow['path'] or '')
+                    if reference and reference not in self.stub_sources[path]:
+                        self.stub_sources[path].append(reference)
         return files
 
     def _transformer(self, flow, module, class_name):
