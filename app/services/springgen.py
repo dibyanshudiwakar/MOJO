@@ -57,6 +57,12 @@ _WORDS = re.compile(r'[^A-Za-z0-9]+')
 #: other word: ``HTTPInput`` -> ``http-input`` / ``HttpInput``, not
 #: ``HTTPInput`` kept shouting.
 _HUMPS = re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+')
+#: Kubernetes cluster suffixes a real CVS deployment's ConfigMap and Helm
+#: values carry one overlay per (confirmed against the real
+#: EIPMS_cvs-v1-dmrclaimstatus-oci reference's own config/config-map/ and
+#: config/deploy-config/ directories).
+ENV_CLUSTERS = ('dev-pbmaz', 'dev2-pbmaz', 'dev3-pbmaz', 'qa-pbmaz', 'qa2-pbmaz', 'qa3-pbmaz',
+                'stress-pbmaz', 'uat-pbmaz', 'prod-pbmaz', 'prod-pbmri')
 _JAVA_KEYWORDS = {
     'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const',
     'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final', 'finally', 'float',
@@ -538,6 +544,7 @@ class SpringProjectGenerator:
         files.update(self._java_files())
         files.update(self._resource_files())
         files.update(self._test_files())
+        files.update(self._config_files())
         manifest = []
         for relative, content in sorted(files.items()):
             target = self.root / relative
@@ -892,6 +899,127 @@ class SpringProjectGenerator:
 </project>
 ''' % {'plan': self.plan_id, 'spring': self.spring_version, 'package': self.package,
        'artifact': kebab(self.service), 'java': self.java_version, 'deps': '\n'.join(deps)}
+
+    # -- deployable config: ConfigMap overlays + a minimal Helm chart -------
+    def _outbound_clients(self):
+        """{config slug -> vendor name, or None} for every HTTP/SOAP outbound
+        node, keyed exactly as ``_client()``/``_integration_block()`` do."""
+        vendors = self.model.get('backend_properties') or {}
+        out = {}
+        for flow in self.flows:
+            for node in flow['nodes']:
+                if node['role'] in ('HTTP_REQUEST', 'SOAP_REQUEST'):
+                    key = self._client_key(node)
+                    out[self._client_slug(node)] = key if key in vendors else None
+        return out
+
+    def _config_files(self):
+        files = {}
+        for cluster in ENV_CLUSTERS:
+            files['config/config-map/application-%s.yml' % cluster] = self._config_map_yml(cluster)
+        files['config/deploy-config/Chart.yaml'] = self._helm_chart()
+        files['config/deploy-config/templates/deployment.yaml'] = self._helm_deployment()
+        files['config/deploy-config/templates/service.yaml'] = self._helm_service()
+        for cluster in ENV_CLUSTERS:
+            files['config/deploy-config/values-%s.yaml' % cluster] = self._helm_values(cluster)
+        return files
+
+    def _config_map_yml(self, cluster):
+        """The ConfigMap overlay a real deployment of this cluster would use.
+
+        Only the outbound backend connection is cluster-specific here; every
+        other setting a deployed pod needs is already externalised onto
+        plain environment variables in ``application.yml`` and does not need
+        restating per cluster. ``is_externalized_config``
+        (``app/services/feedback.py``) exempts anything under
+        ``config-map/`` from ``HARDCODED_ENDPOINT_SCAN`` -- this is the
+        externalisation that check exists to require, not a violation of it.
+        """
+        env = cluster.split('-', 1)[0].upper()
+        lines = ['# Generated from ACE migration plan %s.' % self.plan_id,
+                 '# ConfigMap overlay for the %s cluster.' % cluster,
+                 '', 'server:', '  port: ${PORT:8080}']
+        vendored = {slug: vendor for slug, vendor in self._outbound_clients().items() if vendor}
+        if vendored:
+            lines += ['', '%s:' % self.prefix, '  clients:']
+            for slug, vendor in sorted(vendored.items()):
+                vendor_envs = (self.model.get('backend_properties') or {}).get(vendor) or {}
+                info = vendor_envs.get(env) or {}
+                lines.append('    %s:' % slug)
+                url = info.get('service_url')
+                if url:
+                    lines.append('      base-url: %s' % url)
+                else:
+                    reason = ('no %s backend URL for env "%s" was found in the ACE repo\'s own '
+                              '*.properties (environments found: %s) -- assign it deliberately, '
+                              'do not guess' % (vendor, env, ', '.join(sorted(vendor_envs)) or 'none'))
+                    lines.append('      # TODO: %s' % reason)
+                    self._action('config/config-map/application-%s.yml: %s' % (cluster, reason))
+                if info.get('test_harness_url'):
+                    lines.append('      test-harness-url: %s' % info['test_harness_url'])
+        return '\n'.join(lines) + '\n'
+
+    def _helm_chart(self):
+        return '''# Generated from ACE migration plan %s.
+apiVersion: v2
+name: %s
+description: Helm chart for %s, migrated from IBM ACE/IIB.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+''' % (self.plan_id, kebab(self.service), self.service)
+
+    def _helm_deployment(self):
+        return '''# Generated from ACE migration plan %s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Chart.Name }}-config
+''' % self.plan_id
+
+    def _helm_service(self):
+        return '''# Generated from ACE migration plan %s.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}
+spec:
+  selector:
+    app: {{ .Chart.Name }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+''' % self.plan_id
+
+    def _helm_values(self, cluster):
+        return '''# Generated from ACE migration plan %s.
+# Values overlay for the %s cluster. image.repository/tag are set by the
+# deploy pipeline, never guessed here.
+replicaCount: 1
+image:
+  repository: ""
+  tag: latest
+service:
+  port: 8080
+''' % (self.plan_id, cluster)
 
     def _dockerfile(self):
         return '''# Generated from ACE migration plan %s.

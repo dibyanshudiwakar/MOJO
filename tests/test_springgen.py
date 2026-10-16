@@ -201,6 +201,46 @@ def test_the_outbound_client_is_named_after_the_detected_vendor(generate, tmp_pa
     assert 'base-url: ${VENDOR_BASE_URL:http://localhost:8081}' in yml
 
 
+def test_config_map_overlays_carry_the_real_vendor_url_per_environment(generate, tmp_path):
+    """The real backend host per environment belongs in config-map/, which
+    HARDCODED_ENDPOINT_SCAN's own externalised-config exemption
+    (is_externalized_config, app/services/feedback.py) exists to allow --
+    unlike application.yml, which must stay generic. An environment cluster
+    with no exact match in the ACE repo's own *.properties is flagged with a
+    TODO and an action item, never a guessed URL."""
+    vendored = tmp_path / 'vendored'
+    vendored.mkdir()
+    (vendored / 'Orders.msgflow').write_text(FLOW)
+    (vendored / 'Orders.esql').write_text(ESQL)
+    (vendored / 'Orders.DEV.properties').write_text(
+        'GET#VendorServiceURL=https://vendor.example/api/orders\n'
+        'GET#testHarnessVendorUrl=http://wiremock.example/api/orders\n')
+    (vendored / 'Orders.PROD.properties').write_text(
+        'GET#VendorServiceURL=https://vendor.prod.example/api/orders\n')
+    result, root = generate(source=vendored)
+    dev = _read(root, 'config/config-map/application-dev-pbmaz.yml')
+    assert 'base-url: https://vendor.example/api/orders' in dev
+    assert 'test-harness-url: http://wiremock.example/api/orders' in dev
+    prod = _read(root, 'config/config-map/application-prod-pbmaz.yml')
+    assert 'base-url: https://vendor.prod.example/api/orders' in prod
+    # No ACE env maps to the uat cluster -- flagged, never guessed.
+    uat = _read(root, 'config/config-map/application-uat-pbmaz.yml')
+    assert '# TODO:' in uat and 'base-url' not in uat
+    assert any('application-uat-pbmaz.yml' in item for item in result['action_items'])
+    from app.services.feedback import is_externalized_config
+    assert is_externalized_config(root / 'config/config-map/application-dev-pbmaz.yml')
+
+
+def test_deploy_config_helm_chart_is_generated(generate):
+    _, root = generate()
+    chart = _read(root, 'config/deploy-config/Chart.yaml')
+    assert 'name: orders' in chart
+    assert _read(root, 'config/deploy-config/templates/deployment.yaml').startswith('# Generated')
+    assert _read(root, 'config/deploy-config/templates/service.yaml').startswith('# Generated')
+    values = _read(root, 'config/deploy-config/values-dev-pbmaz.yaml')
+    assert 'replicaCount' in values
+
+
 def test_dependencies_follow_the_constructs_present(generate, tmp_path):
     """A POM carrying what the code does not import is the rule-2 defect."""
     _, root = generate()
