@@ -274,6 +274,15 @@ th,td{text-align:left}
 .live-summary b{font-size:20px;color:var(--primary);margin:0 4px 0 16px}
 .notice{padding:10px 14px;background:var(--success-bg);color:var(--success-text);border-radius:var(--r);margin-bottom:12px}
 .notice.bad{background:var(--error-bg);color:var(--error-text)}
+/* Only the transient status host fades out. The same .notice class is reused
+   inline on the auth page, where the message reports why a sign-in failed and
+   has to stay put -- so the dismissal affordance is scoped to #notice. */
+#notice .notice{transition:opacity .22s ease,transform .22s ease;cursor:pointer}
+#notice .notice-out{opacity:0;transform:translateY(-4px)}
+@media (prefers-reduced-motion:reduce){
+  #notice .notice{transition:opacity .22s ease}
+  #notice .notice-out{transform:none}
+}
 .eyebrow{font-size:11px;color:var(--primary);font-weight:800;letter-spacing:.08em}
 
 /* ══ Status badges ════════════════════════════════════════════════════════════ */

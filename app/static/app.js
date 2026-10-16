@@ -20,7 +20,28 @@ async function api(u,o={}){
  if(r.status===401){const e=Error(d.error||'unauthorized');e.reauth=true;throw e}
  if(r.status===403){const e=Error(d.error||'forbidden');e.forbidden=true;throw e}
  if(!r.ok)throw Error(d.error||'request_failed');return d}
-function notice(m,b=false){$('#notice').innerHTML=m?`<div class="notice ${b?'bad':''}">${esc(m)}</div>`:''}
+// A status line reports that something just happened, so it dismisses itself
+// rather than sitting there until the next action overwrites it. An error stays
+// longer: a failure the user has to act on is not worth losing to a two-second
+// timer. Either can be clicked away.
+const NOTICE_MS={ok:2200,bad:7000};
+let noticeTimer=null,noticeToken=0;
+function notice(m,b=false){
+ const host=$('#notice');if(!host)return;
+ // The previous notice's timer must not outlive it, or it clears the message
+ // that replaced it. The token is what makes a late timer a no-op.
+ clearTimeout(noticeTimer);noticeTimer=null;
+ const token=++noticeToken;
+ if(!m){host.innerHTML='';return}
+ host.innerHTML=`<div class="notice ${b?'bad':''}" role="status" title="Click to dismiss">${esc(m)}</div>`;
+ const el=host.firstElementChild;
+ el.onclick=()=>{if(token===noticeToken)notice('')};
+ noticeTimer=setTimeout(()=>{
+  if(token!==noticeToken)return;
+  el.classList.add('notice-out');
+  setTimeout(()=>{if(token===noticeToken)host.innerHTML=''},240);
+ },b?NOTICE_MS.bad:NOTICE_MS.ok);
+}
 let session=null,githubState=null;
 const initials=n=>String(n||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
 function renderIdentity(){
