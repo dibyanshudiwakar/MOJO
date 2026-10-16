@@ -43,7 +43,13 @@ class ACEAnalysisAgent(BaseAgent):
         metrics = {'coverage_score': result['coverage_score'],
                    'unsupported_count': result['unsupported_count'],
                    'ambiguity_count': result['ambiguity_count'],
-                   'interface_count': len(model.get('interfaces', []))}
+                   'interface_count': len(model.get('interfaces', [])),
+                   # Determined in this step, the same as the master skill's
+                   # own INTAKE output states "Backend type: determined in
+                   # INTAKE" up front -- code-generation reads model['backend_type']
+                   # directly rather than re-deriving it later.
+                   'backend_type': model.get('backend_type', {}).get('type', 'UNDETERMINED'),
+                   'backend_type_signal': model.get('backend_type', {}).get('signal', '')}
         if isinstance(answer, dict) and answer.get('ambiguities'):
             metrics['model_ambiguity_count'] = len(answer['ambiguities'])
         return AgentResult(

@@ -20,7 +20,33 @@ class ACEParser:
     elif ext=='.policyxml':self._policy(model,rel,text)
    except Exception as e:model['ambiguities'].append(self._ambiguity(rel,'parse_failure:'+type(e).__name__,'ACE_SME','analysis incomplete'))
   if not model['flows'] and not model['subflows']:model['ambiguities'].append(self._ambiguity('$','no_ace_flow_detected','ACE_SME','analysis blocked'))
+  model['backend_type']=self._detect_backend_type(model)
   model['content_hash']=digest(json.dumps(model,sort_keys=True,separators=(',',':')));return model
+ #: Master skill's own INTAKE detection table
+ #: (external-skills/iib-to-ms-migration/SKILL.md Step 1 "Backend Type
+ #: Detection"), applied in the same priority order: a signal earlier in this
+ #: list wins over one later, matching the skill's own
+ #: "don't default MQ straight to QL_CICS" caution. The SOAP check reuses
+ #: _classify_node's WS*-node domain disambiguation rather than re-deriving
+ #: the same signal from raw ESQL text a second time.
+ def _detect_backend_type(self,m):
+  soap=next((i for i in m['interfaces'] if i['protocol']=='SOAP'),None)
+  if soap:
+   return {'type':'SOAP','signal':'SOAP envelope on node %s (%s)'%(soap['node'],soap['source'])}
+  queues=[n['properties'].get('queueName') for flow in m['flows']+m['subflows'] for n in flow['nodes']
+          if 'mqoutput' in n['type'].lower() and n['properties'].get('queueName')]
+  ql=next((q for q in queues if 'QL' in q.upper()),None)
+  tran_code=any(re.search(r'\bTRAN(?:SACTION)?[_ ]?CODE\b|\bTRAN\b',e.get('source','') or '',re.I) for e in m['esql'])
+  if ql and tran_code:
+   return {'type':'QL_CICS','signal':'MQ output queue %s with a QL transaction code in ESQL'%ql}
+  rxclaim=next((q for q in queues if 'RXCLAIM' in q.upper() or 'SBO' in q.upper()),None)
+  if rxclaim:
+   return {'type':'RXCLAIM_SBO','signal':'MQ output queue referencing RxClaim/SBO: %s'%rxclaim}
+  if queues:
+   return {'type':'MQ_COBOL','signal':'MQ output queue %s, no QL/RxClaim signal'%queues[0]}
+  if any(i['protocol']=='HTTP' for i in m['interfaces']):
+   return {'type':'REST_EXTERNAL_DIRECT','signal':'HTTP interface(s), no QL/RxClaim/SOAP routing'}
+  return {'type':'UNDETERMINED','signal':'no recognised backend-type signal found'}
  def _attrs(self,element):return {k.split('}')[-1]:v for k,v in element.attrib.items()}
  def _flow(self,m,rel,text,ext):
   root=ET.fromstring(text);nodes=[];connections=[]
@@ -31,7 +57,10 @@ class ACEParser:
     node={'id':nid,'type':typ,'properties':a};nodes.append(node);self._classify_node(m,rel,node)
    src=a.get('sourceNode') or a.get('source');dst=a.get('targetNode') or a.get('target')
    if src and dst:connections.append({'from':src,'to':dst})
-  item={'path':rel,'nodes':nodes,'connections':connections};m['subflows' if ext=='.subflow' else 'flows'].append(item)
+  # Raw text travels with the flow so a later stage (code-generation's
+  # business-logic synthesis) can read the real routing/ESQL-reference wiring
+  # rather than only the structural metadata _classify_node derived from it.
+  item={'path':rel,'nodes':nodes,'connections':connections,'source':text};m['subflows' if ext=='.subflow' else 'flows'].append(item)
   for n in nodes:
    if 'custom' in n['type'].lower():m['ambiguities'].append(self._ambiguity(rel,'unsupported_custom_node:'+n['type'],'ACE_SME','manual mapping required'))
  def _classify_node(self,m,rel,node):
@@ -67,16 +96,19 @@ class ACEParser:
   calls=re.findall(r'(?i)CALL\s+([\w.]+)',clean);propagates=len(re.findall(r'(?i)\bPROPAGATE\b',clean));throws=len(re.findall(r'(?i)\bTHROW\b',clean))
   dbrefs=sorted(set(re.findall(r'(?i)\b(?:Database|PASSTHRU)\.([\w.]+)|\bFROM\s+Database\.([\w.]+)',clean)))
   flatdb=sorted({x for pair in dbrefs for x in pair if x})
-  m['esql'].append({'path':rel,'modules':modules,'procedures':procedures,'functions':functions,'sharedVariables':[{'name':a,'declaration':b.strip()} for a,b in shared],'calls':calls,'propagateCount':propagates,'throwCount':throws,'databases':flatdb})
+  # 'source' (the real ESQL, structural metadata above was derived *from* it)
+  # is what lets a later stage translate the actual business logic rather
+  # than reproduce only module/call names.
+  m['esql'].append({'path':rel,'modules':modules,'procedures':procedures,'functions':functions,'sharedVariables':[{'name':a,'declaration':b.strip()} for a,b in shared],'calls':calls,'propagateCount':propagates,'throwCount':throws,'databases':flatdb,'source':text})
   m['dependencies'] += [{'from':rel,'to':c,'kind':'ESQL_CALL'} for c in calls]+[{'from':rel,'to':d,'kind':'DATABASE'} for d in flatdb]
   if propagates:m['behaviour']['routing'].append({'source':rel,'type':'ESQL_PROPAGATE','count':propagates})
   if throws:m['behaviour']['errorHandling'].append({'source':rel,'type':'ESQL_THROW','count':throws})
  def _map(self,m,rel,text,ext):
   root=ET.fromstring(text);templates=[]
   if ext=='.xslt':templates=[self._attrs(x).get('match') or self._attrs(x).get('name') for x in root.iter() if x.tag.split('}')[-1]=='template']
-  m['maps'].append({'path':rel,'type':'XSLT' if ext=='.xslt' else 'GRAPHICAL_MAP','templates':[x for x in templates if x]});m['behaviour']['transformations'].append({'source':rel,'type':ext[1:].upper()})
+  m['maps'].append({'path':rel,'type':'XSLT' if ext=='.xslt' else 'GRAPHICAL_MAP','templates':[x for x in templates if x],'source':text});m['behaviour']['transformations'].append({'source':rel,'type':ext[1:].upper()})
  def _schema(self,m,rel,text,ext):
-  root=ET.fromstring(text);names=sorted({self._attrs(x).get('name') for x in root.iter() if self._attrs(x).get('name')});m['schemas'].append({'path':rel,'type':ext[1:].upper(),'declarations':names})
+  root=ET.fromstring(text);names=sorted({self._attrs(x).get('name') for x in root.iter() if self._attrs(x).get('name')});m['schemas'].append({'path':rel,'type':ext[1:].upper(),'declarations':names,'source':text})
  def _policy(self,m,rel,text):
   root=ET.fromstring(text);props={}
   for e in root.iter():
