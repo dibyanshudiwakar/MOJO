@@ -14,7 +14,7 @@ responsible for turning a reported gap into a question.
 """
 import json
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services.factory_v3 import IntakeService
 
 
@@ -23,31 +23,32 @@ class RepositoryIntakeAgent(BaseAgent):
     SKILL = 'iib-to-ms-repository-intake'
     TOOLS = ('repository.read', 'evidence.write')
     OUTPUTS = ('intake_manifest', 'gaps')
-    PROMPT = 'agent/repository-intake/gap-triage'
+    PROMPT = 'agent/repository-intake/inventory'
 
     def execute(self, context):
-        manifest = IntakeService(self.repo).scan(
-            context.job_id,
-            context.param('path'),
-            context.param('branch', 'main'),
-            context.param('revision', ''))
+        service = IntakeService(self.repo)
+        branch = context.param('branch', 'main')
+        root = service.root(context.param('path'))
+        listing = service.listing(root)
+        git_gaps, revision = service.git_gaps(root, branch, context.param('revision', ''))
+        # Paths and sizes, never the per-file hashes: the listing is almost
+        # nothing but hashes, and a payload of them trips the PAN data-loss
+        # rule often enough to make every run a refusal. The hashes are
+        # computed and stamped in record_manifest either way -- they are what
+        # an approval binds, and no model can produce a SHA-256 of bytes.
+        classified, provenance = produce(
+            context, self.PROMPT,
+            {'branch': branch,
+             'files': [{'path': x['path'], 'bytes': x['bytes']} for x in listing]},
+            lambda: service.compute_inventory(listing))
+        manifest = service.record_manifest(context.job_id, root, branch, revision,
+                                            classified, listing, git_gaps)
         gaps = json.loads(manifest['gaps'] or '[]')
         inventory = json.loads(manifest['inventory'])
-        # Counts and gap labels only. The inventory itself carries a hash per
-        # file, and a payload of hashes trips the PAN data-loss rule often
-        # enough to make every run a refusal.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'gaps': gaps,
-            'file_count': len(inventory.get('files', [])),
-            'flow_count': len(inventory.get('flows', [])),
-            'branch': manifest['branch']})
         metrics = {'file_count': len(inventory.get('files', [])),
                    'flow_count': len(inventory.get('flows', [])),
-                   'gap_count': len(gaps)}
-        if isinstance(answer, dict) and answer.get('ranked_gaps'):
-            metrics['model_ranked_gaps'] = answer['ranked_gaps']
-            metrics['model_blocking_gaps'] = [x.get('gap') for x in answer['ranked_gaps']
-                                              if isinstance(x, dict) and x.get('severity') == 'BLOCKING']
+                   'gap_count': len(gaps),
+                   'inventory_source': provenance.get('artefact_source', 'DETERMINISTIC')}
         return AgentResult(
             status='COMPLETED',
             outputs={'intake_manifest': manifest['id'], 'gaps': gaps},

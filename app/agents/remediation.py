@@ -20,7 +20,7 @@ Two boundaries this agent holds deliberately:
 import json
 import os
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
 
@@ -62,6 +62,22 @@ class RemediationAgent(BaseAgent):
             'variance_ids': variance_ids,
         }
 
+    def _fallback_plan(self, variances):
+        """The deterministic change set: one descriptive intent per varying path.
+
+        Descriptive on purpose -- the change an approved plan should carry, not
+        an edit this agent performs. It is a lookup over variance kinds, which
+        is why authoring it is worth moving to the model.
+        """
+        intents = {'STRUCTURAL': 'restore the omitted mapping for this path',
+                   'TYPE': 'align the generated contract model type',
+                   'VALUE': 'correct the transformation that produces this value'}
+        return {'pattern': 'APPROVED_PATTERN_REQUIRED',
+                'changes': [{'path': x['path'],
+                             'intent': intents.get(x['kind'], 'investigate')}
+                            for x in variances],
+                'tests': [], 'bounded': None}
+
     def execute(self, context):
         job = context.job()
         cause = self.repo.one('select * from root_causes where id=? and job_id=?',
@@ -81,18 +97,22 @@ class RemediationAgent(BaseAgent):
         proposal = scorer.propose({'path': ','.join(sorted({x['path'] for x in variances})) or 'UNKNOWN',
                                    'root_cause_id': cause['id']},
                                   eligibility, int(job['iteration'] or 1), rollback)
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'hypothesis': cause['hypothesis'], 'confidence': cause['confidence'],
-            'variances': [{'path': x['path'], 'kind': x['kind']} for x in variances]})
-        # Intent per varying path. Descriptive: the change set an approved plan
-        # should carry, not an edit this agent performs.
-        changes = [{'source_reference': x['path'], 'kind': x['kind'],
-                    'intent': {'STRUCTURAL': 'restore the omitted mapping for this path',
-                               'TYPE': 'align the generated contract model type',
-                               'VALUE': 'correct the transformation that produces this value'}.get(x['kind'], 'investigate')}
-                   for x in variances]
-        if isinstance(answer, dict) and answer.get('changes'):
-            proposal['model_changes'] = answer['changes']
+        # The model proposes the change set; eligibility stays deterministic.
+        # Whether a remediation may proceed turns on the governed confidence
+        # threshold, an approved pattern and a bounded blast radius -- that is
+        # enforcement, and this agent holds no repository.write tool either way.
+        plan, provenance = produce(
+            context, self.PROMPT,
+            {'hypothesis': cause['hypothesis'], 'confidence': cause['confidence'],
+             'variances': [{'path': x['path'], 'kind': x['kind']} for x in variances]},
+            lambda: self._fallback_plan(variances))
+        changes = [{'source_reference': c.get('path', ''), 'intent': c.get('intent', '')}
+                   for c in (plan.get('changes') or [])] or self._fallback_plan(variances)['changes']
+        if plan.get('pattern'):
+            proposal['proposed_pattern'] = plan['pattern']
+        # The model declaring the change bounded does not make it so: the
+        # eligibility check below is what decides, and a disagreement is kept.
+        proposal['model_claims_bounded'] = plan.get('bounded')
         if not eligibility['eligible']:
             return AgentResult(
                 status='CLARIFICATION_REQUIRED',

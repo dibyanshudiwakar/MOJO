@@ -13,7 +13,7 @@ that ambiguity into every migrated service, so the question is raised before G1
 rather than discovered after generation.
 """
 from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.services.priority1 import PriorityOneService
 
 OWNER = 'JAVA_ARCHITECT'
@@ -24,28 +24,42 @@ class FrameworkBaselineAgent(BaseAgent):
     SKILL = 'iib-to-ms-framework-baseline'
     TOOLS = ('repository.read', 'evidence.write', 'clarification.create')
     OUTPUTS = ('framework_template', 'conflicts')
-    PROMPT = 'agent/framework-baseline/convention-conflict-triage'
+    PROMPT = 'agent/framework-baseline/standards'
 
     def execute(self, context):
         version = context.param('version', '1.0.0')
-        result = PriorityOneService(self.repo).baseline_framework(
-            context.job_id,
-            context.param('path'),
-            version,
-            context.param('effective_from', None),
-            context.param('golden_path', None))
+        service = PriorityOneService(self.repo)
+        path = context.param('path')
+        effective_from = context.param('effective_from', None)
+        extractor = service.framework
+        # The build files whole, then a bounded sample of Java and
+        # configuration: the versions and dependencies the whole baseline turns
+        # on live in the build files, and credential values are redacted before
+        # anything reaches the gateway.
+        try:
+            sources = extractor.sources(path)
+        except ValueError:
+            sources = None
+        if sources is None:
+            read = service.compute_framework(path, version, effective_from)
+            provenance = {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+                          'reason': 'framework_repository_not_accessible',
+                          'artefact_source': 'DETERMINISTIC'}
+        else:
+            answer, provenance = produce(
+                context, self.PROMPT,
+                {'version': version, 'files': [{'path': p, 'text': t} for p, t in sources]},
+                lambda: service.compute_framework(path, version, effective_from))
+            # Assembled deterministically either way: the template markdown is
+            # what a framework baseline hashes, so both paths must derive it
+            # the same way for one G1 approval to bind either.
+            read = (extractor.assemble(answer.get('standards') or {},
+                                       answer.get('conflicts') or [], version, effective_from)
+                    if provenance.get('artefact_source') == 'MODEL' else answer)
+        result = service.record_framework(context.job_id, read, version,
+                                          context.param('golden_path', None) or path)
         row = self.repo.one('select * from framework_baselines where id=?', (result['framework_id'],))
         conflicts = result['conflicts']
-        # The conflict labels and the golden verification, not ``template_md``:
-        # the template is the whole extracted convention set and sending it would
-        # be both the largest payload in the factory and the likeliest to be
-        # refused. Every conflict still becomes a clarification regardless of
-        # what the model says -- this only tells the architect what the
-        # references favour.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'conflicts': conflicts,
-            'golden_verification': result['golden_verification'],
-            'version': version})
         clarifications = tuple(
             Clarification('FRAMEWORK_BASELINE',
                           'Which approved convention resolves the framework conflict "%s"?' % x,

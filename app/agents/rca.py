@@ -18,7 +18,7 @@ all three would be too vague to act on.
 """
 import json
 from app.agents.base import AgentResult, BaseAgent
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce_many
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
 
@@ -75,6 +75,17 @@ class RCAAgent(BaseAgent):
             'historical_validation': history,
         }
 
+    def _template(self, kind, variances):
+        """The deterministic hypothesis statement: the fallback wording.
+
+        Kept because a hypothesis has to say something even when the gateway
+        cannot answer -- but it is a template over variance paths, which is why
+        authoring it is worth moving to the model.
+        """
+        paths = sorted({x['path'] for x in variances if x.get('kind') == kind})             or sorted({x['path'] for x in variances})
+        joined = ', '.join(paths[:5])
+        return HYPOTHESIS[kind] % joined if kind in HYPOTHESIS else             'Unclassified variance at ' + joined
+
     def execute(self, context):
         variances = self._open_variances(context.job_id)
         if not variances:
@@ -84,9 +95,21 @@ class RCAAgent(BaseAgent):
         service = RCAService(self.repo)
         scorer = ConfidenceRemediationService()
         history = self._history(context.job_id)
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'variances': [{'path': x['path'], 'kind': x['kind'], 'severity': x['severity']} for x in variances]})
         kinds = sorted({x['kind'] for x in variances})
+        # The model authors the hypothesis for each group of variances; the
+        # grouping and the confidence stay here. Which variances a hypothesis
+        # covers decides what evidence it rests on, and the score is coverage
+        # arithmetic over that evidence -- neither is a judgement, and a
+        # model-supplied confidence would raise the figure a gate reads without
+        # any more evidence existing.
+        authored, provenance = produce_many(
+            context, self.PROMPT,
+            [(kind, {'kind': kind,
+                     'variances': [{'path': x['path'], 'kind': x['kind'],
+                                    'severity': x['severity']} for x in variances
+                                   if x['kind'] == kind]})
+             for kind in kinds],
+            lambda kind: {'hypotheses': [{'hypothesis': self._template(kind, variances)}]})
         hypotheses = []
         missing = []
         for kind in kinds:
@@ -100,7 +123,13 @@ class RCAAgent(BaseAgent):
                 '' if components['historical_validation'] else 'a previously validated root cause on this job',
             ) if g})
             paths = sorted({x['path'] for x in group})
-            statement = HYPOTHESIS[kind] % ', '.join(paths[:5]) if kind in HYPOTHESIS else 'Unclassified variance at ' + ', '.join(paths[:5])
+            proposed = (authored.get(kind) or {}).get('hypotheses') or []
+            statement = (proposed[0].get('hypothesis') if proposed else '') \
+                or self._template(kind, group)
+            # Evidence the model says is missing counts towards the gaps a
+            # reviewer has to close, alongside the ones the scorer derives.
+            for item in proposed[:1]:
+                gaps = sorted(set(gaps) | {str(g) for g in item.get('missing_evidence') or []})
             recorded = service.record_root_cause(
                 context.job_id, [x['id'] for x in group], statement, score['score'],
                 [{'variance_id': x['id'], 'path': x['path'], 'case_id': x.get('case_id') or ''} for x in group],
@@ -111,8 +140,8 @@ class RCAAgent(BaseAgent):
             missing += gaps
         metrics = {'variance_count': len(variances), 'hypothesis_count': len(hypotheses),
                    'kinds': kinds, 'history': history}
-        if isinstance(answer, dict) and answer.get('hypotheses'):
-            metrics['model_hypothesis_count'] = len(answer['hypotheses'])
+        metrics['hypotheses_from_model'] = provenance.get('items_from_model', 0)
+        metrics['hypotheses_computed'] = provenance.get('items_from_fallback', 0)
         return AgentResult(
             outputs={'rca_hypotheses': hypotheses,
                      'confidence': max(x['confidence'] for x in hypotheses),

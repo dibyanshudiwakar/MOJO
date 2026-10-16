@@ -14,7 +14,7 @@ Indexing is idempotent by (reference, content hash), so running this agent
 repeatedly across a lifecycle does not split citations across duplicate entries.
 """
 from app.agents.base import AgentResult, BaseAgent
-from app.agents.reasoning import ReasoningGateway
+from app.agents.artefact import produce
 from app.repository import digest
 from app.services.platform_v7 import KnowledgeService
 
@@ -38,7 +38,7 @@ class KnowledgeEvidenceAgent(BaseAgent):
     #: serve -- there is no embeddings endpoint -- so it is now a chat alias and
     #: this is a judgement prompt, not a vector operation. Retrieval itself is
     #: still ``KnowledgeService.search``.
-    PROMPT = 'agent/knowledge-evidence/citation-sufficiency'
+    PROMPT = 'agent/knowledge-evidence/citations'
 
     def _artefacts(self, job_id):
         for table, kind, column, version_column, scheme in SOURCES:
@@ -50,6 +50,52 @@ class KnowledgeEvidenceAgent(BaseAgent):
                        'version': str(row.get(version_column) or '1') if version_column else '1',
                        'artefact_id': row['id'], 'content_hash': row.get('content_hash') or '',
                        'content': content}
+
+    def _cite(self, context, query, lineage, retrieved):
+        """Which indexed artefact answers the query, chosen by the model.
+
+        Resolution against the lineage is deliberate and is what enforces the
+        prompt's rule rather than trusting it: a citation naming a reference the
+        job never indexed is dropped here, because a fabricated citation
+        corrupts the audit trail the index exists to serve. The retrieval score
+        is the deterministic one -- it is a measurement of the index, not a
+        judgement.
+
+        Hashes reach the model as a 12-character prefix: full digests are long
+        hex runs and this payload is almost nothing but hashes, so sending them
+        whole would have the data-loss scan refuse most runs as PANs. A prefix
+        still identifies the version and still shows an absent hash.
+        """
+        if not query.strip():
+            return retrieved, {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+                               'reason': 'no_query_supplied',
+                               'artefact_source': 'DETERMINISTIC'}
+        by_reference = {x['reference']: x for x in lineage}
+        answer, provenance = produce(
+            context, self.PROMPT,
+            {'query': query,
+             'lineage': [{'kind': x['kind'], 'reference': x['reference'], 'version': x['version'],
+                          'content_hash': (x['content_hash'] or '')[:12]} for x in lineage],
+             'retrieved': [{'kind': x['kind'], 'reference': x['reference'],
+                            'version': x['version'], 'score': x['score'],
+                            'content_hash': (x['content_hash'] or '')[:12]} for x in retrieved]},
+            lambda: {'citations': [{'evidence_id': x['reference'], 'claim': query,
+                                    'locator': x['kind']} for x in retrieved],
+                     'uncited_claims': []})
+        if provenance.get('artefact_source') != 'MODEL':
+            return retrieved, provenance
+        scores = {x['reference']: x['score'] for x in retrieved}
+        out = []
+        for citation in answer.get('citations') or []:
+            row = by_reference.get(citation.get('evidence_id'))
+            if row is None:
+                continue
+            out.append({**row, 'score': scores.get(row['reference'], 0.0),
+                        'claim': citation.get('claim', ''),
+                        'locator': citation.get('locator', '')})
+        provenance['citations_dropped'] = len(answer.get('citations') or []) - len(out)
+        provenance['uncited_claims'] = answer.get('uncited_claims') or []
+        return out or retrieved, provenance
 
     def execute(self, context):
         service = KnowledgeService(self.repo)
@@ -73,18 +119,10 @@ class KnowledgeEvidenceAgent(BaseAgent):
         # hex runs and this payload is almost nothing but hashes, so sending
         # them whole would have the data-loss scan refuse most runs as PANs. A
         # prefix still identifies the version and still shows an absent hash.
-        answer, provenance = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'query': query,
-            'lineage': [{'kind': x['kind'], 'reference': x['reference'], 'version': x['version'],
-                         'content_hash': (x['content_hash'] or '')[:12]} for x in lineage],
-            'citations': [{'kind': x['kind'], 'reference': x['reference'],
-                           'version': x['version'], 'score': x['score'],
-                           'content_hash': (x['content_hash'] or '')[:12]} for x in cited]})
+        cited, provenance = self._cite(context, query, lineage, cited)
         metrics = {'indexed_count': len(indexed), 'artefact_count': len(lineage),
-                   'citation_count': len(cited), 'query': query}
-        if isinstance(answer, dict) and 'sufficient' in answer:
-            metrics['model_sufficient'] = answer.get('sufficient')
-            metrics['model_missing_kinds'] = answer.get('missing_kinds', [])
+                   'citation_count': len(cited), 'query': query,
+                   'citations_from_model': provenance.get('artefact_source') == 'MODEL'}
         return AgentResult(
             outputs={'cited_context': [{'reference': x['reference'], 'kind': x['kind'],
                                         'version': x['version'], 'content_hash': x['content_hash'],

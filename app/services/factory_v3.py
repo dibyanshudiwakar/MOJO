@@ -99,35 +99,91 @@ class WorkflowOrchestrator:
 class IntakeService:
  EXT={'.msgflow':'flows','.subflow':'subflows','.esql':'esql','.xsd':'schemas','.wsdl':'schemas','.map':'maps','.xslt':'maps','.policyxml':'policies'}
  def __init__(self,repo):self.repo=repo
- def scan(self,job_id,path,branch='main',revision=''):
+ def root(self,path):
   from app.services import workspace as _ws
   try:root=_ws.resolve(path,must_exist=True)
   except Exception:raise ValueError('repository_not_accessible')
   if not root.is_dir():raise ValueError('repository_not_accessible')
-  inv={k:[] for k in set(self.EXT.values())};inv['files']=[]
-  for f in root.rglob('*'):
+  return root
+ def listing(self,root):
+  """Every file with its size and content hash: the facts, for either path.
+
+  The hash is computed here in both cases. It is what an intake approval
+  binds, and a model cannot compute a SHA-256 of bytes.
+  """
+  out=[]
+  for f in sorted(root.rglob('*')):
    if f.is_file() and '.git' not in f.parts:
-    rel=str(f.relative_to(root));inv['files'].append({'path':rel,'hash':hashlib.sha256(f.read_bytes()).hexdigest()})
-    if f.suffix.lower() in self.EXT:inv[self.EXT[f.suffix.lower()]].append(rel)
-  gaps=[] if inv['flows'] else ['no_message_flows_detected']
+    out.append({'path':str(f.relative_to(root)),'bytes':f.stat().st_size,'hash':hashlib.sha256(f.read_bytes()).hexdigest()})
+  return out
+ def git_gaps(self,root,branch,revision):
+  """Branch and revision from git itself -- a fact, not a judgement."""
+  gaps=[]
   if (root/'.git').exists():
    try:
     actual=subprocess.check_output(['git','-C',str(root),'rev-parse','--abbrev-ref','HEAD'],text=True).strip()
     if actual!=branch:gaps.append('branch_mismatch:'+actual)
     revision=revision or subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
    except Exception:gaps.append('git_metadata_unavailable')
+  return gaps,revision
+ def compute_inventory(self,listing):
+  """Classify files by extension: the fallback."""
+  inv={k:[] for k in set(self.EXT.values())};inv['files']=[]
+  for item in listing:
+   inv['files'].append({'path':item['path'],'hash':item['hash']})
+   suffix=('.'+item['path'].rsplit('.',1)[-1]).lower() if '.' in item['path'] else ''
+   if suffix in self.EXT:inv[self.EXT[suffix]].append(item['path'])
+  return {'inventory':inv,'gaps':[] if inv['flows'] else ['no_message_flows_detected']}
+ def record_manifest(self,job_id,root,branch,revision,classified,listing,gaps=()):
+  """Persist an inventory, however it was classified.
+
+  ``files`` is always rebuilt from the real listing with the real hashes: the
+  manifest's content hash is what an approval binds, and the file set is a
+  fact about the repository rather than something to take from an answer.
+  """
+  inv={k:[] for k in set(self.EXT.values())}
+  supplied=classified.get('inventory') or {}
+  for area in set(self.EXT.values()):
+   items=supplied.get(area)
+   if isinstance(items,list):inv[area]=[str(x) for x in items]
+  inv['files']=[{'path':x['path'],'hash':x['hash']} for x in listing]
+  allgaps=sorted({*(str(g) for g in classified.get('gaps') or []),*(str(g) for g in gaps)})
   i=uid();raw=json.dumps(inv,sort_keys=True)
-  with self.repo.connect() as c:c.execute('insert into intake_manifests values(?,?,?,?,?,?,?,?,?)',(i,job_id,str(root),branch,revision,raw,json.dumps(gaps),digest(raw),now()))
+  with self.repo.connect() as c:c.execute('insert into intake_manifests values(?,?,?,?,?,?,?,?,?)',(i,job_id,str(root),branch,revision,raw,json.dumps(allgaps),digest(raw),now()))
   return self.repo.one('select * from intake_manifests where id=?',(i,))
+ def scan(self,job_id,path,branch='main',revision=''):
+  """Deterministic end to end, for callers with no agent context to reason with."""
+  root=self.root(path);listing=self.listing(root);gaps,revision=self.git_gaps(root,branch,revision)
+  return self.record_manifest(job_id,root,branch,revision,self.compute_inventory(listing),listing,gaps)
 
 class DormancyService:
  def __init__(self,repo):self.repo=repo
- def assess(self,job_id,traffic_count=None,last_seen_days=None,deployed=None,already_migrated=None):
-  e={'traffic_count':traffic_count,'last_seen_days':last_seen_days,'deployed':deployed,'already_migrated':already_migrated};known=sum(v is not None for v in e.values());confidence=known/4
-  cls='ALREADY_MIGRATED' if already_migrated else ('UNKNOWN' if known<2 else ('INACTIVE' if deployed is False else ('DORMANT' if traffic_count==0 and (last_seen_days or 0)>=90 else ('ACTIVE' if (traffic_count or 0)>0 else 'UNKNOWN'))))
-  i=uid();r='classification uses supplied evidence only'
-  with self.repo.connect() as c:c.execute('insert into dormancy_assessments values(?,?,?,?,?,?,?)',(i,job_id,cls,confidence,json.dumps(e),r,now()))
+ def signals(self,traffic_count=None,last_seen_days=None,deployed=None,already_migrated=None):
+  return {'traffic_count':traffic_count,'last_seen_days':last_seen_days,'deployed':deployed,'already_migrated':already_migrated}
+ def classify(self,e):
+  """The deterministic classification: the fallback when the model cannot answer.
+
+  Confidence is how much of the evidence was supplied, not how sure anything
+  is about the verdict -- which is why it stays computed here even when the
+  classification itself is model-authored.
+  """
+  known=sum(v is not None for v in e.values());confidence=known/4
+  cls='ALREADY_MIGRATED' if e.get('already_migrated') else ('UNKNOWN' if known<2 else ('INACTIVE' if e.get('deployed') is False else ('DORMANT' if e.get('traffic_count')==0 and (e.get('last_seen_days') or 0)>=90 else ('ACTIVE' if (e.get('traffic_count') or 0)>0 else 'UNKNOWN'))))
+  return {'classification':cls,'confidence':confidence,'rationale':'classification uses supplied evidence only'}
+ def record(self,job_id,e,verdict):
+  """Persist a classification, however it was reached.
+
+  ``confidence`` is always the evidence-coverage figure from ``classify``: a
+  model's own confidence is advisory and recorded in the run's metrics, never
+  substituted for the measured one a gate reads.
+  """
+  i=uid();measured=self.classify(e)['confidence']
+  with self.repo.connect() as c:c.execute('insert into dormancy_assessments values(?,?,?,?,?,?,?)',(i,job_id,verdict.get('classification') or 'UNKNOWN',measured,json.dumps(e),verdict.get('rationale') or '',now()))
   return self.repo.one('select * from dormancy_assessments where id=?',(i,))
+ def assess(self,job_id,traffic_count=None,last_seen_days=None,deployed=None,already_migrated=None):
+  """Deterministic end to end, for callers with no agent context to reason with."""
+  e=self.signals(traffic_count,last_seen_days,deployed,already_migrated)
+  return self.record(job_id,e,self.classify(e))
 
 class FrameworkService:
  def __init__(self,repo):self.repo=repo
