@@ -189,11 +189,15 @@ def gateway(repo):
         aliases.discard(None)
         aliases.discard('')
         aliases.add(model_name)
+        # Idempotent per alias: a test that approves more than one prompt calls
+        # this more than once, and model_registry is unique on (name, version).
         model = None
         for alias in sorted(aliases):
-            model = ai.register_model({'name': alias, 'version': '1',
-                                       'provider_profile': 'model-primary', 'status': 'APPROVED',
-                                       'region': 'approved-region'}, _Approver())
+            existing = repo.one('select * from model_registry where name=? and version=?',
+                                (alias, '1'))
+            model = existing or ai.register_model(
+                {'name': alias, 'version': '1', 'provider_profile': 'model-primary',
+                 'status': 'APPROVED', 'region': 'approved-region'}, _Approver())
         return prompt, model
     return approve
 
