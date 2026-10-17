@@ -29,3 +29,16 @@ def test_backend_type_detection_soap_envelope(tmp_path):
   '<flow><node id="n1" type="ComIbmWSRequest.msgnode" URLSpecifier="https://backend/x" messageDomainProperty="XMLNSC"/></flow>')
  model=ACEParser().parse(tmp_path)
  assert model['backend_type']['type']=='SOAP'
+
+def test_merge_backfills_a_model_authored_ambiguity_missing_status():
+ # agent/ace-analysis/semantic-model's own response schema requires only
+ # 'question' on an ambiguity -- confirmed live against a real run that
+ # authored 84 with no 'status' at all. migration-specification's
+ # clarifications schema requires status/owner/impact/evidenceReference too,
+ # so finalise() (merge's own tail call) must backfill them regardless of
+ # which path produced the fragment.
+ fragment={'ambiguities':[{'question':'q only, no status'}]}
+ model=ACEParser().merge([fragment])
+ a=model['ambiguities'][0]
+ assert a=={'question':'q only, no status','status':'OPEN','owner':'ACE_SME',
+           'impact':'','evidenceReference':''}

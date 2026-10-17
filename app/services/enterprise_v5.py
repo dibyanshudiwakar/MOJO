@@ -54,6 +54,20 @@ class ACEParser:
   Both paths end here, so a model-authored semantic model and a parsed one
   hash the same way -- which is what lets one G2 approval bind either.
   """
+  # agent/ace-analysis/semantic-model's own response schema requires only
+  # 'question' on an ambiguity -- confirmed live: a real run authored 84 with
+  # no 'status' at all, which that schema permits. migration-specification's
+  # clarifications schema requires status/question/owner/impact/
+  # evidenceReference on every entry, and its deterministic fallback just
+  # copies ambiguities through unchanged, so a model-authored analysis
+  # missing any of these broke every downstream specification run. Normalised
+  # here -- the one place the parsed and model-authored paths both end --
+  # so every consumer of model['ambiguities'] gets the complete shape
+  # regardless of which path produced it.
+  for a in model['ambiguities']:
+   if isinstance(a,dict):
+    a.setdefault('status','OPEN');a.setdefault('owner','ACE_SME')
+    a.setdefault('impact','');a.setdefault('evidenceReference','')
   if not model['flows'] and not model['subflows']:model['ambiguities'].append(self._ambiguity('$','no_ace_flow_detected','ACE_SME','analysis blocked'))
   model['backend_type']=self._detect_backend_type(model)
   model['content_hash']=digest(json.dumps(model,sort_keys=True,separators=(',',':')));return model
