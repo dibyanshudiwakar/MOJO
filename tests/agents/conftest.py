@@ -180,8 +180,13 @@ def gateway(repo):
 
         ``model_name`` is registered too, for a test that pins a specific alias.
         """
-        prompt = ai.register_prompt({'name': prompt_name, 'version': '1', 'template': template,
-                                     'status': 'APPROVED'}, _Approver())
+        # Idempotent, like the models below: Repository seeds prompt_registry
+        # APPROVED on init, so a prompt this fixture names may already exist
+        # and prompt_registry is unique on (name, version).
+        prompt = repo.one('select * from prompt_registry where name=? and version=?',
+                          (prompt_name, '1')) or ai.register_prompt(
+            {'name': prompt_name, 'version': '1', 'template': template,
+             'status': 'APPROVED'}, _Approver())
         catalogue = json.loads(
             (Path(__file__).resolve().parents[2] / 'config' / 'agent-catalogue.v1.json')
             .read_text(encoding='utf-8'))

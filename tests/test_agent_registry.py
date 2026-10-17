@@ -238,7 +238,10 @@ def test_reasoning_provenance_is_snapshotted_onto_the_run(registry, repo, job, a
     provenance = json.loads(run['model_provenance'])
     assert run['reasoning'] == 'DETERMINISTIC_FALLBACK'
     assert provenance['prompt_name'] == 'agent/dormancy-intelligence/classification-rationale'
-    assert provenance['reason'] == 'no_approved_prompt_or_model'
+    # Repository seeds prompt_registry and model_registry APPROVED on init
+    # (FACTORY_SEED_MODEL_GATEWAY), so a fresh database resolves both and the
+    # remaining reason for falling back is that no provider is configured.
+    assert provenance['reason'] == 'no_provider_execution_adapter'
 
 
 def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo, job, ace_repo):
@@ -256,16 +259,28 @@ def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo,
                                     'config': {'base_url': 'https://m.example.invalid',
                                                'region': 'approved-region'}})
     ai = AIRegistryService(repo)
-    ai.register_prompt({'name': 'agent/dormancy-intelligence/classification-rationale',
-                        'version': '1', 'template': 't', 'status': 'APPROVED'}, Approver())
+    # Repository seeds prompt_registry and model_registry APPROVED on init, so
+    # both of these may already exist and both tables are unique on
+    # (name, version). Register only what is missing -- the point of this test
+    # is the DLP rule, not who wrote the registry row.
+    def ensure_prompt(name):
+        if not repo.one('select 1 from prompt_registry where name=? and version=?', (name, '1')):
+            ai.register_prompt({'name': name, 'version': '1', 'template': 't',
+                                'status': 'APPROVED'}, Approver())
+
+    def ensure_model(name):
+        if not repo.one('select 1 from model_registry where name=?', (name,)):
+            ai.register_model({'name': name, 'version': '1',
+                               'provider_profile': 'model-primary', 'status': 'APPROVED',
+                               'region': 'approved-region'}, Approver())
+
+    ensure_prompt('agent/dormancy-intelligence/classification-rationale')
     # Registered under the alias the agent actually resolves to. Registering any
     # other name populates model_registry, which arms the AT-13 fail-closed
     # guard in dispatch for every agent, and the run is then refused with
     # default_model_alias_not_in_approved_model_registry before the gateway --
     # and therefore the DLP rule this test is about -- is ever reached.
-    ai.register_model({'name': 'reasoning-small', 'version': '1',
-                       'provider_profile': 'model-primary',
-                       'status': 'APPROVED', 'region': 'approved-region'}, Approver())
+    ensure_model('reasoning-small')
     registry.dispatch(job['id'], 'repository-intake', '1.0.0', ROLES, 'svc', {'path': str(ace_repo)})
     # A 16-digit telemetry counter trips the PAN rule.
     outcome = registry.dispatch(job['id'], 'dormancy-intelligence', '1.0.0',
