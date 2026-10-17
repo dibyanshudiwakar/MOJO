@@ -93,7 +93,17 @@ def test_the_skill_reaches_the_provider_focused_on_the_files_at_hand(
     dispatch(job['id'], 'ace-analysis', params, provider=provider)
     supplied = [s for s in provider.skills if s is not None]
     assert supplied, 'the agent has a skill and the adapter accepts one'
-    assert all(s.name == 'iib-to-ms-ace-analysis' for s in supplied)
+    assert all(s.name.startswith('iib-to-ms-ace-analysis') for s in supplied)
+    # Narrowed to the construct-mapping reference, not the whole SKILL.md.
+    # This assertion previously required the bare name, and passed only
+    # because FOCUS named a reference no skill carried: focus_many raised,
+    # the agent fell back to the unfocused skill, and the narrowing silently
+    # never happened.
+    assert all(s.focused_on == 'references/construct-mapping.md' for s in supplied)
+    # SKILL.md survives the narrowing -- focus_many adds to the standards.
+    from app.agents.skills import skill_for
+    whole = skill_for('ace-analysis')
+    assert all(whole.text.strip()[:60] in s.text for s in supplied)
 
 
 def test_without_a_provider_the_analysis_is_still_produced_and_says_it_was_computed(

@@ -1,4 +1,4 @@
-import json, uuid, hashlib
+import json, os, uuid, hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from app import persistence
@@ -92,6 +92,47 @@ class Repository:
    self._upgrade_skill_registry(c)
    self._upgrade_notifications(c)
    self._seed_skill_runtimes(c)
+   self._seed_model_gateway(c)
+ #: Aliases every agent in the catalogue can resolve to. Seeded together
+ #: because AT-13 in AgentRegistry.dispatch arms for *every* agent as soon as
+ #: model_registry holds any row: registering one alias and not the rest turns
+ #: a silent fallback into a hard refusal on every other agent.
+ GATEWAY_ALIASES=('reasoning-small','reasoning-large','coding','semantic-review','embeddings')
+ def _seed_model_gateway(self,c):
+  """Make the model path the default: prompts, aliases and a gateway profile.
+
+  Without these three groups ``ReasoningGateway.reason`` returns
+  ``no_approved_prompt_or_model`` on every call and all 15 agents run their
+  deterministic fallback -- which looks like a healthy pipeline, because a
+  recorded fallback is a successful run. A fresh database therefore came up
+  with the model switched off and nothing saying so.
+
+  ``approved_by`` is ``SYSTEM_BOOTSTRAP``, not a person. These rows are not a
+  governance decision and must not read like one: the design has an
+  ``AI_GOVERNANCE_ADMIN`` approve prompts through the governed endpoint, and a
+  deployment that wants that control back sets
+  ``FACTORY_SEED_MODEL_GATEWAY=0`` and approves them itself. The audit trail
+  then says plainly which rows a human signed and which the bootstrap wrote.
+
+  Idempotent by name: an existing row is never overwritten, so a prompt an
+  administrator has since rejected or re-approved keeps its own status.
+  """
+  if (os.getenv('FACTORY_SEED_MODEL_GATEWAY','1') or '').strip().lower() in ('0','false','no'):return
+  ts=now()
+  if not c.execute("select 1 from connector_profiles where category='model-gateway' limit 1").fetchone():
+   c.execute('insert into connector_profiles(id,category,name,provider,config,secret_reference,priority,enabled,status,created_at,updated_at) values(?,?,?,?,?,?,?,?,?,?,?)',
+             (uid(),'model-gateway','model-primary','anthropic-compatible',json.dumps({'note':'base url and key come from the provider adapter, not from here'}),'',100,1,'VERIFIED',ts,ts))
+  for alias in self.GATEWAY_ALIASES:
+   if not c.execute('select 1 from model_registry where name=? limit 1',(alias,)).fetchone():
+    c.execute('insert into model_registry(id,name,version,provider_profile,policy,region,status,approved_by,created_at) values(?,?,?,?,?,?,?,?,?)',
+              (uid(),alias,'v1','model-primary','{}','','APPROVED','SYSTEM_BOOTSTRAP',ts))
+  path=Path(__file__).resolve().parents[1]/'config'/'agent-prompts.v1.json'
+  try:prompts=json.loads(path.read_text(encoding='utf-8'))['prompts']
+  except (OSError,ValueError,KeyError):return
+  for p in prompts:
+   if c.execute('select 1 from prompt_registry where name=? and version=? limit 1',(p['name'],str(p['version']))).fetchone():continue
+   c.execute('insert into prompt_registry(id,name,version,template,content_hash,status,approved_by,effective_from,created_at) values(?,?,?,?,?,?,?,?,?)',
+             (uid(),p['name'],str(p['version']),p['template'],digest(p['template']),'APPROVED','SYSTEM_BOOTSTRAP',ts,ts))
  def _catalogue(self):
   p=Path(__file__).resolve().parents[1]/'config'/'agent-catalogue.v1.json'
   return json.loads(p.read_text(encoding='utf-8'))['agents']

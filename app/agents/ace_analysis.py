@@ -30,7 +30,12 @@ from app.services.priority1 import PriorityOneService
 #: Which skill reference a source file's reading is guided by. The whole skill
 #: is thousands of lines; narrowing it per file keeps each request about the one
 #: construct family in front of the model, which is what ``Skill.focus`` is for.
-FOCUS = {'.esql': 'references/esql-translation.md',
+#: Verified against the skill's own reference list -- a name this skill does
+#: not carry makes focus_many raise, the agent fall back to the unfocused
+#: skill, and the narrowing silently stop happening. tests/agents/
+#: test_agent_skill_focus.py checks every name named in an agent against the
+#: skill it belongs to for exactly that reason.
+FOCUS = {'.esql': 'references/construct-mapping.md',
          '.msgflow': 'references/construct-mapping.md',
          '.subflow': 'references/construct-mapping.md'}
 
