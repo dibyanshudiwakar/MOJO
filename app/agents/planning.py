@@ -50,10 +50,7 @@ class PlanningAgent(BaseAgent):
             context, self.PROMPT,
             {'semantic_model': model,
              'framework_standards': json.loads(framework['standards']) if framework else {},
-             'specification': specification['yaml_text']},
-            lambda: service.compute_mapping_catalogue(
-                context.job_id, framework_id, analysis_id, specification_id,
-                context.param('overrides', None)))
+             'specification': specification['yaml_text']})
         catalogue = service.record_mapping_catalogue(
             context.job_id, framework_id, analysis_id, specification_id, mapped, version)
         risks = self.repo.rows(
@@ -62,7 +59,7 @@ class PlanningAgent(BaseAgent):
         metrics = {'mapping_count': catalogue['mapping_count'],
                    'unsupported_count': catalogue['unsupported_count'],
                    'risk_count': len(risks),
-                   'catalogue_source': provenance.get('artefact_source', 'DETERMINISTIC')}
+                   'model_attempts': provenance.get('attempts', 0)}
         if catalogue['unsupported_count']:
             # The service has already raised a clarification per unsupported
             # construct, so the questions exist; there is simply no plan yet.

@@ -22,11 +22,9 @@ from app.agents.artefact import produce_many
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
 
-HYPOTHESIS = {
-    'STRUCTURAL': 'A field present in one runtime is absent in the other: the mapping for %s omits or adds a construct.',
-    'TYPE': 'The runtimes disagree on the type at %s: the generated contract model diverges from the ACE message model.',
-    'VALUE': 'The runtimes agree on shape but not value at %s: transformation logic differs from the ESQL or map it replaced.',
-}
+#: Evidence strength per variance kind, a component of the confidence score.
+#: Not a hypothesis and not a fallback: it is coverage arithmetic the scorer
+#: reads, which is why it stays while the hypothesis wording does not.
 STRENGTH = {'STRUCTURAL': 1.0, 'TYPE': 0.8, 'VALUE': 0.6}
 
 
@@ -75,17 +73,6 @@ class RCAAgent(BaseAgent):
             'historical_validation': history,
         }
 
-    def _template(self, kind, variances):
-        """The deterministic hypothesis statement: the fallback wording.
-
-        Kept because a hypothesis has to say something even when the gateway
-        cannot answer -- but it is a template over variance paths, which is why
-        authoring it is worth moving to the model.
-        """
-        paths = sorted({x['path'] for x in variances if x.get('kind') == kind})             or sorted({x['path'] for x in variances})
-        joined = ', '.join(paths[:5])
-        return HYPOTHESIS[kind] % joined if kind in HYPOTHESIS else             'Unclassified variance at ' + joined
-
     def execute(self, context):
         variances = self._open_variances(context.job_id)
         if not variances:
@@ -108,8 +95,7 @@ class RCAAgent(BaseAgent):
                      'variances': [{'path': x['path'], 'kind': x['kind'],
                                     'severity': x['severity']} for x in variances
                                    if x['kind'] == kind]})
-             for kind in kinds],
-            lambda kind: {'hypotheses': [{'hypothesis': self._template(kind, variances)}]})
+             for kind in kinds])
         hypotheses = []
         missing = []
         for kind in kinds:
@@ -124,8 +110,14 @@ class RCAAgent(BaseAgent):
             ) if g})
             paths = sorted({x['path'] for x in group})
             proposed = (authored.get(kind) or {}).get('hypotheses') or []
-            statement = (proposed[0].get('hypothesis') if proposed else '') \
-                or self._template(kind, group)
+            # No ``or self._template(...)``. The template was a sentence built
+            # from the variance kind and the affected paths -- a restatement of
+            # the variance, not a root cause -- and it made an absent hypothesis
+            # look like a weak one. produce_many has already failed the agent if
+            # the model could not answer, so an empty list here means the model
+            # answered that it has no hypothesis for this kind, which is
+            # information worth keeping as itself.
+            statement = (proposed[0].get('hypothesis') if proposed else '') or ''
             # Evidence the model says is missing counts towards the gaps a
             # reviewer has to close, alongside the ones the scorer derives.
             for item in proposed[:1]:
@@ -140,8 +132,11 @@ class RCAAgent(BaseAgent):
             missing += gaps
         metrics = {'variance_count': len(variances), 'hypothesis_count': len(hypotheses),
                    'kinds': kinds, 'history': history}
-        metrics['hypotheses_from_model'] = provenance.get('items_from_model', 0)
-        metrics['hypotheses_computed'] = provenance.get('items_from_fallback', 0)
+        metrics['model_attempts'] = provenance.get('attempts', 0)
+        # Every hypothesis is model-authored now, so what is worth counting is
+        # the kinds the model declined to explain rather than which path ran.
+        metrics['kinds_without_a_hypothesis'] = [
+            x['kind'] for x in hypotheses if not x['hypothesis']]
         return AgentResult(
             outputs={'rca_hypotheses': hypotheses,
                      'confidence': max(x['confidence'] for x in hypotheses),

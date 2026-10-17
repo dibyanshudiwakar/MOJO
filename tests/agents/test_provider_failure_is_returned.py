@@ -1,23 +1,30 @@
-"""A provider failure degrades the run; it does not take the agent down.
+"""A provider failure is *returned* by ``reason``, not raised out of it.
 
-``ReasoningGateway`` exists to make the model optional: when it cannot answer,
-the agent computes instead and the run records why. That contract was broken for
-the one exception type every shipped adapter actually raises.
-``CvscodeClaudeAdapter`` wraps an SDK or network failure as
+The model is no longer optional -- ``artefact.produce`` has no fallback and
+fails the agent -- but this boundary is unchanged and still matters, because it
+is what the retry loop is built on. ``reason`` turns an adapter failure into
+``(None, provenance)`` with a reason, and ``produce`` decides whether that
+reason is worth another attempt. An exception escaping here instead would skip
+the retry entirely and fail the agent on the first blip.
+
+That contract was broken for the one exception type every shipped adapter
+actually raises. ``CvscodeClaudeAdapter`` wraps an SDK or network failure as
 ``provider_error:<type>:<detail>``, a gateway refusal as ``provider_refused``
 and a missing key as ``cvscode_api_key_unavailable`` -- all ``RuntimeError`` --
 and ``reason()`` caught only ``PermissionError``, ``ValueError`` and
 ``NotImplementedError``.
 
-So an expired gateway token failed the whole agent. Observed in practice:
-governance died mid-pipeline on
+So an expired gateway token failed the whole agent on the spot. Observed in
+practice: governance died mid-pipeline on
 ``RuntimeError:provider_error:AuthenticationError:Error code: 401 -
 {'detail': 'Authorization header missing'}`` while four agents either side of it
-had reached the model successfully.
+had reached the model successfully. Under the current contract that token would
+still fail the run -- but after three attempts, with the 401 named, rather than
+by an exception nobody classified.
 """
 import pytest
 
-from app.agents.reasoning import DETERMINISTIC, MODEL_GATEWAY, ReasoningGateway
+from app.agents.reasoning import MODEL_GATEWAY, UNAVAILABLE, ReasoningGateway
 
 
 class _Boom:
@@ -65,10 +72,13 @@ def ask(repo, job, gateway):
     (PermissionError('refused'), 'refused'),
     (NotImplementedError('no adapter'), 'no adapter'),
 ])
-def test_a_failing_provider_degrades_and_says_why(ask, exc, expected):
+def test_a_failing_provider_is_reported_and_says_why(ask, exc, expected):
     answer, provenance = ask(exc)
-    assert answer is None, 'no answer means the agent computes instead'
-    assert provenance['mode'] == DETERMINISTIC
+    assert answer is None, 'no answer, so produce retries or fails the agent'
+    assert provenance['mode'] == UNAVAILABLE
+    # provider_execution_failed is in artefact.RETRYABLE, so this exact prefix
+    # is what buys the run another attempt. Changing it without changing that
+    # tuple would silently turn every transient failure terminal.
     assert provenance['reason'].startswith('provider_execution_failed:')
     assert expected in provenance['reason'], 'the cause has to survive into the record'
 
@@ -77,7 +87,8 @@ def test_a_401_does_not_raise_out_of_reason(ask):
     """The regression, stated as its own case.
 
     This is what failed the governance step: the adapter's RuntimeError escaped
-    ``reason()`` entirely, so the agent raised instead of falling back.
+    ``reason()`` entirely. It still must not, because an exception here is an
+    exception ``produce`` never gets to classify or retry.
     """
     ask(RuntimeError("provider_error:AuthenticationError:Error code: 401"))
 
@@ -87,7 +98,8 @@ def test_what_is_not_a_degradation_still_propagates(ask, exc):
     """Catching RuntimeError must not have become catching everything.
 
     An interrupt or an exhausted machine is not the model declining to answer,
-    and recording either as a deterministic fallback would hide it.
+    and retrying either three times before reporting it as a model outage would
+    hide what actually happened.
     """
     with pytest.raises(type(exc)):
         ask(exc)

@@ -892,7 +892,9 @@
         },
         "content": {
           "type": "string",
-          "maxLength": 200000
+          "minLength": 1,
+          "maxLength": 200000,
+          "description": "minLength is 1 because an empty file is not an authored one. The agent used to filter empty content out and then generate the whole project deterministically instead, so one blank file silently discarded the other forty the model had authored. Emptiness is now a violation on that single file, which is re-asked on its own."
         },
         "language": {
           "type": "string"
@@ -948,6 +950,7 @@
     "agent/test-engineering/case-design": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Differential test cases",
+      "description": "minItems is 1 because zero differential cases is not an answer: the whole point of this artefact is to find where the two systems behave differently, and an empty set proves nothing. The agent used to accept an empty array and substitute its own one-nominal-case-per-interface derivation; with no fallback left, emptiness is a schema violation so the model is re-asked with the violation rather than quietly replaced.",
       "type": "object",
       "required": [
         "cases"
@@ -955,6 +958,7 @@
       "properties": {
         "cases": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 512,
           "items": {
             "type": "object",

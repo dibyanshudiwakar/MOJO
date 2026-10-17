@@ -63,8 +63,21 @@ def test_supplied_cases_take_precedence_over_derivation(repo, job, planned):
     assert [x['id'] for x in cases] == ['GOLDEN-1']
 
 
-def test_derivation_needs_an_analysis_with_interfaces(repo, job, planned, tmp_path):
-    with repo.connect() as c:
-        c.execute('delete from ace_analyses where job_id=?', (job['id'],))
-    with pytest.raises(ValueError, match='analysis_required_to_derive_test_cases'):
-        EngineeringAgent(repo).run(job['id'], params={'plan_id': planned['plan_id']})
+def test_the_model_is_told_which_interfaces_there_are_to_design_against(repo, job, planned,
+                                                                        model):
+    """The design call carries the analysed interfaces, or it is a guess.
+
+    This test previously deleted the analysis and expected
+    ``analysis_required_to_derive_test_cases`` from the one-case-per-interface
+    derivation. That derivation is gone -- it produced exactly one nominal case
+    per interface, with no boundary values and no error paths, so it could not
+    distinguish the two systems behaving differently, which is the only thing a
+    differential case is for. What is left to assert is that the model is given
+    the interfaces to design from.
+    """
+    EngineeringAgent(repo).run(job['id'], params={'plan_id': planned['plan_id']})
+    payload, = [c['payload'] for c in model.calls
+                if c['prompt'] == 'agent/test-engineering/case-design']
+    assert payload['plan_id'] == planned['plan_id']
+    assert payload['interfaces'], 'the analysed interfaces are what a case exercises'
+    assert {x['protocol'] for x in payload['interfaces']} == {'HTTP'}

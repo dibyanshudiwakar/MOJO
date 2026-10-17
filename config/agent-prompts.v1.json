@@ -1,6 +1,6 @@
 {
   "catalogue_version": "1.0",
-  "note": "Version-controlled prompt templates for the model-assisted agent steps. These are registered through POST /api/v7/prompts and require an AI_GOVERNANCE_ADMIN to move them to APPROVED; they are never self-approved by an agent. Until a prompt here is approved and a provider execution adapter is configured, the corresponding agent produces its deterministic service-backed result and records mode=DETERMINISTIC_FALLBACK.",
+  "note": "Version-controlled prompt templates for the model-assisted agent steps. These are registered through POST /api/v7/prompts and require an AI_GOVERNANCE_ADMIN to move them to APPROVED; they are never self-approved by an agent. Until a prompt here is approved and a provider execution adapter is configured, the corresponding agent cannot produce its artefact at all: there is no deterministic fallback, so app.agents.artefact.produce raises ArtefactUnavailable, the run is recorded FAILED and the pipeline halts. Repository._seed_model_gateway registers and approves this catalogue on a fresh database so that is not the out-of-the-box state.",
   "prompts": [
     {
       "name": "agent/dormancy-intelligence/classification-rationale",

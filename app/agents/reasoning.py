@@ -7,25 +7,33 @@ rules and the region policy. Agents never hold a provider credential or a raw
 endpoint; they hold a prompt *name*.
 
 The important property of this module is what happens when the gateway cannot
-answer -- which, in this system, is the normal case:
+answer. ``reason`` returns ``(None, provenance)`` with a ``reason`` naming the
+blocker; it never raises for a governed outcome. What the *caller* does with
+that has changed: ``app.agents.artefact.produce`` used to compute the artefact
+instead, and now retries or fails the agent. So these are no longer degradations
+with a working alternative behind them -- each one stops a migration, and the
+reason string is the only thing that explains why:
 
-* No provider execution exists anywhere in the factory. ``gateway_request``
-  records ``PROVIDER_EXECUTION_REQUIRED`` and returns. Connectors are
-  deliberately boundaries rather than simulations, so a request alone yields no
-  completion.
-* Out of the box there are no APPROVED prompts. The catalogue in
+* ``no_approved_prompt_or_model`` -- the catalogue in
   ``config/agent-prompts.v1.json`` is registered and approved by an
-  ``AI_GOVERNANCE_ADMIN`` through the existing governed endpoint, never
-  self-approved here.
-* The data-loss rules refuse a great deal of legitimate migration content. The
-  ``PAN`` rule matches any run of 13 or more digits, which an ACE semantic model
-  or a differential payload trips routinely.
+  ``AI_GOVERNANCE_ADMIN`` through the governed endpoint, never self-approved
+  here. ``Repository._seed_model_gateway`` now does that on a fresh database so
+  this is not the out-of-the-box state.
+* ``no_provider_execution_adapter`` -- no provider is configured.
+  ``gateway_request`` records ``PROVIDER_EXECUTION_REQUIRED`` and returns;
+  connectors are deliberately boundaries rather than simulations, so a request
+  alone yields no completion.
+* ``gateway_refused`` -- the data-loss rules refuse a great deal of legitimate
+  migration content. The ``PAN`` rule matches any run of 13 or more digits,
+  which an ACE semantic model trips routinely. ``artefact.scrub`` exists to keep
+  that from ending runs.
+* ``provider_execution_failed`` -- a network error, an expired token, a
+  truncated answer. The one group worth another attempt, which is why
+  ``artefact.RETRYABLE`` names it.
 
-So the deterministic, service-backed computation is the agent's answer unless a
-provider is configured *and* the gateway permits the request. That is a
-fallback, not a silent one: ``mode`` is recorded on the run and in the evidence
-metadata, so an auditor can tell a model-assisted result from a computed one.
-Refusing to fall back would mean 14 agents that cannot complete.
+``mode`` is recorded on the run and in the evidence metadata either way, so an
+auditor can see which model and prompt version shaped a stored artefact, and
+which runs never reached one.
 """
 import json
 from pathlib import Path
@@ -35,7 +43,15 @@ from app.agents.skills import skill_for, SkillIntegrityError
 CATALOGUE = Path(__file__).resolve().parents[2] / 'config' / 'agent-prompts.v1.json'
 
 MODEL_GATEWAY = 'MODEL_GATEWAY'
-DETERMINISTIC = 'DETERMINISTIC_FALLBACK'
+#: The gateway could not answer. Named for what happened rather than for what
+#: used to happen next: there is no deterministic fallback any more, so a run
+#: carrying this mode produced no artefact. ``reason`` says which blocker fired.
+UNAVAILABLE = 'MODEL_UNAVAILABLE'
+#: The model was never asked, legitimately -- an operator supplied the artefact
+#: outright, or there was nothing to ask about (an empty plan has no files to
+#: list). Distinct from UNAVAILABLE: nothing is wrong, and distinct from
+#: MODEL_GATEWAY: the artefact is not model-authored.
+NOT_CONSULTED = 'MODEL_NOT_CONSULTED'
 
 
 def prompt_catalogue():
@@ -102,7 +118,7 @@ class ReasoningGateway:
         _log_warn = _log.warn if _log else (lambda m: None)
 
         alias = getattr(context, 'effective_model_alias', '') or None
-        provenance = {'mode': DETERMINISTIC, 'prompt_name': prompt_name,
+        provenance = {'mode': UNAVAILABLE, 'prompt_name': prompt_name,
                       'model_alias': alias or '', 'binding_source': getattr(context, 'binding_source', 'DEFAULT')}
         _log_info('LLM reasoning: looking up prompt "%s" with model alias "%s"' % (prompt_name, alias or '(default)'))
         # Which skill (by content hash) was available to this step, in every mode.
@@ -120,7 +136,7 @@ class ReasoningGateway:
                 missing.append('prompt')
             if not model:
                 missing.append('model')
-            _log_warn('LLM reasoning: no approved %s found — falling back to deterministic computation' % ' or '.join(missing))
+            _log_warn('LLM reasoning: no approved %s found — no artefact can be produced' % ' or '.join(missing))
             return None, provenance
         _log_info('LLM prompt resolved: "%s" v%s (hash: %s)' % (prompt['name'], prompt['version'], prompt['content_hash'][:12]))
         _log_info('LLM model resolved: "%s" v%s (id: %s)' % (model['name'], model['version'], model['id'][:12]))
@@ -129,11 +145,14 @@ class ReasoningGateway:
                 'job_id': context.job_id, 'prompt_id': prompt['id'], 'model_id': model['id'],
                 'input_evidence': payload, 'correlation_id': context.correlation_id or None})
         except (PermissionError, ValueError) as exc:
-            # A refusal is a governed outcome, not an agent failure: the request
-            # was recorded or rejected by policy and the agent computes instead.
-            provenance['mode'] = DETERMINISTIC
+            # A refusal is a governed outcome rather than a crash, so it is
+            # returned rather than raised -- but it is terminal for the
+            # artefact: the same payload trips the same rule on every attempt,
+            # so artefact.TERMINAL names it and the agent fails here rather
+            # than three model calls later.
+            provenance['mode'] = UNAVAILABLE
             provenance['reason'] = 'gateway_refused:' + str(exc)
-            _log_warn('LLM gateway refused request: %s — falling back to deterministic computation' % str(exc)[:200])
+            _log_warn('LLM gateway refused request: %s — no artefact can be produced' % str(exc)[:200])
             return None, provenance
         _log_info('LLM gateway request accepted: %s (status: %s)' % (request['request_id'][:12], request['status']))
         provenance.update({'request_id': request['request_id'], 'prompt_id': prompt['id'],
@@ -142,7 +161,7 @@ class ReasoningGateway:
                            'region': request.get('region', ''), 'status': request['status']})
         if context.provider is None:
             provenance['reason'] = 'no_provider_execution_adapter'
-            _log_warn('LLM reasoning: no provider execution adapter configured — using deterministic fallback')
+            _log_warn('LLM reasoning: no provider execution adapter configured — no artefact can be produced')
             return None, provenance
         # An adapter that serves more than one model exposes ``for_alias`` and is
         # pinned to the alias the registry resolved for this agent, so the
@@ -183,7 +202,7 @@ class ReasoningGateway:
                 provenance['skill_error'] = str(exc)
         # Recorded for whichever skill is actually in play, caller-supplied or
         # not. ``skill_hash`` is what gates passing it to the adapter below, so
-        # setting it only on the fallback path meant a focused skill was loaded
+        # setting it only on the unavailable path meant a focused skill was loaded
         # and then never handed over. Skill.provenance() also carries
         # ``skill_focus`` when the skill is narrowed to one reference.
         if skill is not None:
@@ -252,7 +271,7 @@ class ReasoningGateway:
             #
             # Deliberately not bare ``except``: a KeyboardInterrupt or a
             # MemoryError is not a degradation, and a programming error in an
-            # adapter should still surface rather than be recorded as a fallback.
+            # adapter should still surface rather than be reported as a model outage.
             provenance['reason'] = 'provider_execution_failed:' + str(exc)
             _log_warn('LLM provider execution failed: %s' % str(exc)[:200])
             try:

@@ -51,33 +51,29 @@ class ACEAnalysisAgent(BaseAgent):
         """The semantic model, read by the model one source file at a time.
 
         One request per file rather than per repository: a 200-node flow plus
-        its ESQL does not fit in a 16,384-token response, and a file the model
-        cannot read degrades to the deterministic parse of *that file* while the
-        rest stays model-authored. The merge itself is deterministic -- it is
-        list concatenation, and leaving it in code is what stops the assembly
-        inventing, dropping or reordering a construct.
+        its ESQL does not fit in one response.
+
+        All or nothing across the files. A per-file fallback to the parser left
+        an analysis that was part model-read and part regex-parsed, and nothing
+        downstream could tell which flows came from which -- so a construct the
+        parser does not understand looked identical to one the model decided was
+        absent. Each file gets its own retry budget instead.
         """
         parser = service.parser
-        try:
-            sources = parser.sources(path)
-        except ValueError:
-            # repository_not_accessible: nothing to read, and the deterministic
-            # path owns raising that so the error stays identical either way.
-            return service.compute_semantic_model(path), {'mode': 'DETERMINISTIC_FALLBACK',
-                                                          'prompt_name': self.PROMPT,
-                                                          'reason': 'repository_not_accessible'}
+        # ValueError('repository_not_accessible') propagates: an unreadable path
+        # is an operator error, not a model outage, and it used to be answered
+        # by parsing the same unreadable path -- which produced an empty model
+        # the pipeline then treated as a real analysis of a repository with
+        # nothing in it.
+        sources = parser.sources(path)
         by_path = {rel: (text, ext) for rel, text, ext in sources}
         skill = self._focused_skill(context, by_path)
-
-        def fallback(rel):
-            text, ext = by_path[rel]
-            fragment = parser.empty()
-            parser.fold(fragment, rel, text, ext)
-            return fragment
-
         items = [(rel, {'path': rel, 'kind': ext, 'text': text})
                  for rel, text, ext in sources]
-        fragments, provenance = produce_many(context, self.PROMPT, items, fallback, skill=skill)
+        fragments, provenance = produce_many(context, self.PROMPT, items, skill=skill)
+        # The merge stays deterministic: it is list concatenation, and leaving
+        # it in code is what stops the assembly inventing, dropping or
+        # reordering a construct the per-file answers established.
         return parser.merge([fragments[rel] for rel, _, _ in sources if rel in fragments]), provenance
 
     def _focused_skill(self, context, by_path):
@@ -116,10 +112,11 @@ class ACEAnalysisAgent(BaseAgent):
                    # directly rather than re-deriving it later.
                    'backend_type': model.get('backend_type', {}).get('type', 'UNDETERMINED'),
                    'backend_type_signal': model.get('backend_type', {}).get('signal', ''),
-                   # Which files the model read and which fell back to the
-                   # parser, so a half-model-authored analysis says so.
-                   'sources_from_model': provenance.get('items_from_model', 0),
-                   'sources_computed': provenance.get('items_from_fallback', 0)}
+                   # Every source file is model-read or the agent failed, so
+                   # what is left to record is how many files were read and how
+                   # many requests the last of them took.
+                   'sources_read': provenance.get('item_count', 0),
+                   'model_attempts': provenance.get('attempts', 0)}
         return AgentResult(
             status='CLARIFICATION_REQUIRED' if ambiguities else 'COMPLETED',
             outputs={'analysis_document': result['analysis_id'],

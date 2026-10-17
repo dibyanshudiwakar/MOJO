@@ -13,12 +13,18 @@ Usage:
         --api-key  your-key \
         --model    your-model-name
 
-    # Dry run: shows what would happen without a live endpoint
+    # Negative control: no provider, which must now FAIL rather than compute
     python scripts/verify_dormancy_execution.py --no-provider
 
 Pass/fail output:
     PASS  model_provenance.mode = MODEL_GATEWAY   (real HTTP call was made)
-    FAIL  model_provenance.mode = DETERMINISTIC_FALLBACK + reason explaining which gate failed
+    FAIL  ArtefactUnavailable, naming which gate or provider failed
+
+There is no deterministic fallback any more, so --no-provider is a negative
+control rather than a dry run: it proves the agent *refuses* to produce an
+artefact without a model, which is the behaviour that makes a PASS above mean
+anything. It exits 0 when that refusal happens, because the refusal is the
+expected result.
 """
 import argparse
 import json
@@ -30,6 +36,7 @@ from datetime import datetime, timezone
 # Ensure project root is on sys.path when run as a script
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.agents.artefact import ArtefactUnavailable
 from app.repository import Repository
 from app.services.agents import AgentRegistry
 from app.providers.http_adapter import HttpProviderAdapter
@@ -129,8 +136,8 @@ def main():
     parser.add_argument('--model',       default='qwen2.5:3b')
     parser.add_argument('--db',          default='factory-v2.db')
     parser.add_argument('--no-provider', action='store_true',
-                        help='Pass provider=None (expect DETERMINISTIC_FALLBACK; useful to confirm '
-                             'the gate works without a live endpoint)')
+                        help='Pass provider=None and expect ArtefactUnavailable: the negative '
+                             'control that proves no artefact is produced without a model')
     args = parser.parse_args()
 
     if not os.path.exists(args.db):
@@ -148,7 +155,7 @@ def main():
     # Provider
     if args.no_provider:
         provider = None
-        print('[adapter] provider=None (expect DETERMINISTIC_FALLBACK)')
+        print('[adapter] provider=None (expect ArtefactUnavailable — no fallback exists)')
     else:
         provider = HttpProviderAdapter(
             api_base=args.api_base,

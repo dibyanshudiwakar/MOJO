@@ -36,26 +36,20 @@ class FrameworkBaselineAgent(BaseAgent):
         # configuration: the versions and dependencies the whole baseline turns
         # on live in the build files, and credential values are redacted before
         # anything reaches the gateway.
-        try:
-            sources = extractor.sources(path)
-        except ValueError:
-            sources = None
-        if sources is None:
-            read = service.compute_framework(path, version, effective_from)
-            provenance = {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
-                          'reason': 'framework_repository_not_accessible',
-                          'artefact_source': 'DETERMINISTIC'}
-        else:
-            answer, provenance = produce(
-                context, self.PROMPT,
-                {'version': version, 'files': [{'path': p, 'text': t} for p, t in sources]},
-                lambda: service.compute_framework(path, version, effective_from))
-            # Assembled deterministically either way: the template markdown is
-            # what a framework baseline hashes, so both paths must derive it
-            # the same way for one G1 approval to bind either.
-            read = (extractor.assemble(answer.get('standards') or {},
-                                       answer.get('conflicts') or [], version, effective_from)
-                    if provenance.get('artefact_source') == 'MODEL' else answer)
+        # ValueError('framework_repository_not_accessible') propagates: a path
+        # that is not a directory is an operator error. It used to be answered
+        # by extracting from that same path, which produced a baseline of empty
+        # standards and a G1 approval bound to it.
+        sources = extractor.sources(path)
+        answer, provenance = produce(
+            context, self.PROMPT,
+            {'version': version, 'files': [{'path': p, 'text': t} for p, t in sources]})
+        # Assembly stays deterministic: the template markdown is what a
+        # framework baseline hashes and what a G1 approval binds, so deriving it
+        # in code is what keeps the hash a function of the standards rather than
+        # of how the model chose to render them.
+        read = extractor.assemble(answer.get('standards') or {},
+                                  answer.get('conflicts') or [], version, effective_from)
         result = service.record_framework(context.job_id, read, version,
                                           context.param('golden_path', None) or path)
         row = self.repo.one('select * from framework_baselines where id=?', (result['framework_id'],))

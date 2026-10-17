@@ -7,21 +7,25 @@ could never be honoured, and the one thing it reliably produced was an
 ``exception`` package that ``mandatory-migration-rules.md`` Rule 10 forbids by
 name.
 
-The synthesis call could not fix that either: it is edit-only, and
+The synthesis call could not fix that either: it was edit-only, and
 ``accept_edit`` refuses a path that is not already a file. A model correctly
 proposing the parent POM had every edit refused while the run still reported
-green.
+green. (That call is gone now -- its only input was springgen's stubs.)
 
-So the layout is now asked for first, and the files are authored one per call.
-These tests pin that the model's layout is what lands on disk, that the gate is
-no softer for the path that wrote the code, and that an incomplete answer falls
-back to a coherent generated project rather than leaving a half-authored tree.
+So the layout is asked for first and the files are authored one per call. These
+tests pin that the model's layout is what lands on disk, that the gate is no
+softer for the path that wrote the code, and that an incomplete answer fails the
+agent instead of leaving a half-authored tree -- there is nothing to fall back
+to, which is the point: springgen's layout is a different shape entirely, so
+substituting it would silently ship a project that breaches the skill it was
+asked to follow.
 """
 import json
 from pathlib import Path
 
 import pytest
 
+from app.agents.artefact import ArtefactUnavailable
 from app.agents.code_generation import CodeGenerationAgent
 from tests.agents.conftest import ArtefactProvider
 
@@ -85,7 +89,7 @@ def test_the_models_layout_is_what_lands_on_disk_parent_module_included(
     gateway(FILE, model_name=ALIAS)
     outcome = dispatch(job['id'], 'code-generation', params, provider=_provider())
 
-    assert outcome['metrics']['authored_by'] == 'MODEL'
+    assert outcome['reasoning']['artefact_source'] == 'MODEL'
     assert outcome['metrics']['layout_root'] == ROOT
     root = Path(outcome['outputs']['source_code'])
     assert root.name == ROOT, 'the repository root the skill prescribes'
@@ -129,31 +133,43 @@ def test_the_quality_gate_still_runs_on_the_authored_project(repo, job, params, 
     assert {'SECRET_SCAN', 'HARDCODED_ENDPOINT_SCAN', 'PROVENANCE'} <= names
 
 
-def test_an_incomplete_answer_falls_back_to_a_coherent_project(
-        repo, job, params, gateway, dispatch):
-    """A tree missing its parent POM does not build; a partial one is worse.
+def test_one_empty_file_fails_the_agent_and_writes_nothing(
+        repo, job, params, gateway, dispatch, tmp_path):
+    """A tree missing one file does not build, and nothing may stand in for it.
 
-    One empty file is enough to abandon the authored tree, because there is no
-    deterministic way to supply the missing one -- springgen's layout is a
-    different shape entirely.
+    ``content`` carries minLength 1, so the blank file is a schema violation on
+    that single request: it is re-asked twice and then the agent fails. This
+    used to substitute springgen's whole project, which meant one blank response
+    silently discarded the five files the model had authored correctly and
+    shipped a layout the skill forbids.
     """
     gateway(LAYOUT, model_name=ALIAS)
     gateway(FILE, model_name=ALIAS)
-    outcome = dispatch(job['id'], 'code-generation', params,
-                       provider=_provider(omit={'Dockerfile'}))
-    assert outcome['metrics']['authored_by'] == 'DETERMINISTIC'
-    assert 'incomplete_authorship' in outcome['metrics']['authoring_reason']
-    # And what landed is the generated project, whole.
-    root = Path(outcome['outputs']['source_code'])
-    assert (root / 'pom.xml').is_file()
+    with pytest.raises(ArtefactUnavailable) as raised:
+        dispatch(job['id'], 'code-generation', params,
+                 provider=_provider(omit={'Dockerfile'}))
+    assert raised.value.prompt_name == FILE
+    assert 'should be non-empty' in raised.value.reason
+    assert raised.value.attempts == 3
+    # No half-written tree, and nothing registered against the plan.
+    assert not (tmp_path / 'authored').exists()
+    assert repo.one('select count(*) n from generated_artifacts where job_id=?',
+                    (job['id'],))['n'] == 0
 
 
-def test_no_layout_from_the_model_falls_back(repo, job, params, gateway, dispatch):
+def test_an_empty_layout_fails_the_agent(repo, job, params, gateway, dispatch):
+    """``files`` carries minItems 1, so "no files" is not an answer.
+
+    The agent short-circuits before asking when the plan has no tasks (see
+    test_agent_code_generation_empty_plan); reaching the model and being told
+    the repository needs no files is a different thing, and it is a failure.
+    """
     gateway(LAYOUT, model_name=ALIAS)
-    outcome = dispatch(job['id'], 'code-generation', params,
-                       provider=_provider(layout={'files': []}))
-    assert outcome['metrics']['authored_by'] == 'DETERMINISTIC'
-    assert Path(outcome['outputs']['source_code'], 'pom.xml').is_file()
+    with pytest.raises(ArtefactUnavailable) as raised:
+        dispatch(job['id'], 'code-generation', params,
+                 provider=_provider(layout={'files': []}))
+    assert raised.value.prompt_name == LAYOUT
+    assert 'should be non-empty' in raised.value.reason
 
 
 def test_a_path_escaping_the_project_is_refused_not_written(

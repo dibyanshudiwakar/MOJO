@@ -39,8 +39,7 @@ class RepositoryIntakeAgent(BaseAgent):
         classified, provenance = produce(
             context, self.PROMPT,
             {'branch': branch,
-             'files': [{'path': x['path'], 'bytes': x['bytes']} for x in listing]},
-            lambda: service.compute_inventory(listing))
+             'files': [{'path': x['path'], 'bytes': x['bytes']} for x in listing]})
         manifest = service.record_manifest(context.job_id, root, branch, revision,
                                             classified, listing, git_gaps)
         gaps = json.loads(manifest['gaps'] or '[]')
@@ -48,7 +47,10 @@ class RepositoryIntakeAgent(BaseAgent):
         metrics = {'file_count': len(inventory.get('files', [])),
                    'flow_count': len(inventory.get('flows', [])),
                    'gap_count': len(gaps),
-                   'inventory_source': provenance.get('artefact_source', 'DETERMINISTIC')}
+                   # The inventory is model-authored or the agent failed, so a
+                   # source metric would be a constant. How many attempts it
+                   # took is the number that still carries information.
+                   'model_attempts': provenance.get('attempts', 0)}
         return AgentResult(
             status='COMPLETED',
             outputs={'intake_manifest': manifest['id'], 'gaps': gaps},

@@ -83,8 +83,17 @@ class GovernanceAgent(BaseAgent):
         about whether the evidence genuinely supports the transition, and that
         is worth recording precisely where it contradicts the decision.
 
-        One request per candidate target, each falling back to the evaluation's
-        own reasons when the gateway cannot answer.
+        One request per candidate target, and no substitute for it. The
+        assessment used to fall back to restating the evaluation's own decision
+        and reasons -- which is not a second opinion, it is the first one
+        echoed, and it guaranteed ``disagrees`` was False for every target
+        whenever the model was unreachable. A gate that can never be reported as
+        questionable is the one thing this assessment exists to prevent.
+
+        The gate itself is unaffected: ``_evaluate`` has already computed the
+        decision from the approver's role, the quorum and the artefact hash, and
+        that is what enforces the transition. What fails here is the agent, not
+        the gate.
         """
         out, provenance = [], {}
         for evaluation in evaluations:
@@ -94,15 +103,7 @@ class GovernanceAgent(BaseAgent):
             payload = {'state': job['state'], 'target_state': target,
                        'evaluation': {k: v for k, v in evaluation.items()
                                       if k != 'evidence_bundle'}}
-
-            def fallback(e=evaluation, t=target):
-                return {'recommendation': 'ALLOW' if e['decision'] == 'ALLOW' else 'DENY',
-                        'target_state': t,
-                        'rationale': '; '.join(e.get('reasons') or []) or 'no blocking reason',
-                        'evidence_sufficient': e['decision'] == 'ALLOW',
-                        'missing_evidence': list(e.get('reasons') or [])}
-
-            assessment, provenance = produce(context, self.PROMPT, payload, fallback)
+            assessment, provenance = produce(context, self.PROMPT, payload)
             recommendation = assessment.get('recommendation', '')
             out.append({'target': target, 'decision': decision.get(target, ''),
                         'recommendation': recommendation,

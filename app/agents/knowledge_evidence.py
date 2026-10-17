@@ -15,6 +15,7 @@ repeatedly across a lifecycle does not split citations across duplicate entries.
 """
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.artefact import produce
+from app.agents.reasoning import NOT_CONSULTED
 from app.repository import digest
 from app.services.platform_v7 import KnowledgeService
 
@@ -67,9 +68,12 @@ class KnowledgeEvidenceAgent(BaseAgent):
         still identifies the version and still shows an absent hash.
         """
         if not query.strip():
-            return retrieved, {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+            # Nothing was asked, so there is nothing to cite. Not a model
+            # outage: without a query there is no claim for a citation to
+            # support, and the retrieval list stands on its own.
+            return retrieved, {'mode': NOT_CONSULTED, 'prompt_name': self.PROMPT,
                                'reason': 'no_query_supplied',
-                               'artefact_source': 'DETERMINISTIC'}
+                               'artefact_source': 'NONE'}
         by_reference = {x['reference']: x for x in lineage}
         answer, provenance = produce(
             context, self.PROMPT,
@@ -78,12 +82,7 @@ class KnowledgeEvidenceAgent(BaseAgent):
                           'content_hash': (x['content_hash'] or '')[:12]} for x in lineage],
              'retrieved': [{'kind': x['kind'], 'reference': x['reference'],
                             'version': x['version'], 'score': x['score'],
-                            'content_hash': (x['content_hash'] or '')[:12]} for x in retrieved]},
-            lambda: {'citations': [{'evidence_id': x['reference'], 'claim': query,
-                                    'locator': x['kind']} for x in retrieved],
-                     'uncited_claims': []})
-        if provenance.get('artefact_source') != 'MODEL':
-            return retrieved, provenance
+                            'content_hash': (x['content_hash'] or '')[:12]} for x in retrieved]})
         scores = {x['reference']: x['score'] for x in retrieved}
         out = []
         for citation in answer.get('citations') or []:
@@ -122,7 +121,7 @@ class KnowledgeEvidenceAgent(BaseAgent):
         cited, provenance = self._cite(context, query, lineage, cited)
         metrics = {'indexed_count': len(indexed), 'artefact_count': len(lineage),
                    'citation_count': len(cited), 'query': query,
-                   'citations_from_model': provenance.get('artefact_source') == 'MODEL'}
+                   'model_attempts': provenance.get('attempts', 0)}
         return AgentResult(
             outputs={'cited_context': [{'reference': x['reference'], 'kind': x['kind'],
                                         'version': x['version'], 'content_hash': x['content_hash'],

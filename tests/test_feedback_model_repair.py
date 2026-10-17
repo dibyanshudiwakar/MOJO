@@ -12,6 +12,11 @@ import re
 
 import pytest
 
+# This module registers its own prompt and model rows, so it needs the registry
+# empty: the suite seeds the catalogue APPROVED now, and register_prompt is
+# unique on (name, version).
+pytestmark = pytest.mark.pristine_registry
+
 from app.repository import Repository, uid, now
 from app.service import FactoryService
 from app.services.feedback import CodeFeedbackService

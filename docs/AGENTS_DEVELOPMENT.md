@@ -199,32 +199,70 @@ codebase, because an external model call is an enterprise adapter boundary and
 those are not simulated here. Three things follow:
 
 1. `ProviderExecutionAdapter` is the seam. Supply an implementation as
-   `context.provider`; the response is recorded through the new
+   `context.provider`, or name one for the whole process with
+   `AI_PROVIDER=<module>:<attribute>`; the response is recorded through
    `AIRegistryService.complete_request`, which DLP-scans the *response* too — a
    provider that echoes a secret back is the same disclosure as sending one.
 2. Prompts in `config/agent-prompts.v1.json` are registered through
-   `POST /api/v7/prompts` and require an `AI_GOVERNANCE_ADMIN` to reach `APPROVED`.
-   Out of the box none are approved.
-3. Every agent keeps its deterministic, service-backed computation as the answer.
+   `POST /api/v7/prompts` and require an `AI_GOVERNANCE_ADMIN` to reach
+   `APPROVED`. `Repository._seed_model_gateway` registers and approves the
+   catalogue on a fresh database, attributed to `SYSTEM_BOOTSTRAP` so the audit
+   trail never claims a person signed them; `FACTORY_SEED_MODEL_GATEWAY=0`
+   turns that off and makes approval a real control again.
+3. **There is no deterministic fallback.** When the model cannot produce an
+   artefact, `artefact.produce` raises `ArtefactUnavailable`, the run is
+   recorded `FAILED` and the pipeline halts.
 
-So the normal mode is `DETERMINISTIC_FALLBACK`, recorded on the run in
-`agent_runs.reasoning` with full provenance in `agent_runs.model_provenance`:
+That third point was the reverse until recently, and the reversal is the thing
+to understand. A recorded fallback is a *successful* run: the step completes,
+the gate approves a computed artefact, and the pipeline reads as healthy. An
+invalid gateway token once left every agent on that path for an entire session
+with nothing anywhere saying Claude had not been reached. A substitute that
+silently replaces the thing being measured does not degrade gracefully.
 
 | `mode` | Meaning |
 | --- | --- |
-| `MODEL_GATEWAY` | An approved prompt/model answered through a configured provider. |
-| `DETERMINISTIC_FALLBACK` | No approved prompt/model, or no provider adapter. |
-| `DETERMINISTIC_FALLBACK` + `reason: gateway_refused:...` | The gateway refused — DLP, region or approval. |
+| `MODEL_GATEWAY` | An approved prompt/model answered, and the answer passed its response schema. |
+| `MODEL_UNAVAILABLE` | The gateway could not answer. No artefact was produced; `reason` names the blocker. |
+| `MODEL_NOT_CONSULTED` | The model was legitimately never asked — an operator supplied the artefact, or there was nothing to ask about. |
 
-Expect refusals routinely: the `PAN` data-loss rule matches any run of 13 or more
-digits, which a semantic model or a differential payload trips easily. A refusal is
-a governed outcome, not an agent failure.
+Recorded on the run in `agent_runs.reasoning`, with full provenance in
+`agent_runs.model_provenance` — including `attempts`, and `corrections` where
+the model's first answer had the wrong shape.
 
-Where a model does answer, its output is **advisory**. The deterministic result is
-what gets persisted, and a disagreement is recorded (for example
-`metrics.model_agrees` on the dormancy agent) rather than resolved silently. A
-classification that decides whether a migration proceeds must be reproducible from
-the evidence alone.
+**Failures are retried, selectively.** `artefact.RETRYABLE` names the reasons
+worth re-asking (a provider error, a schema violation) up to `ATTEMPTS`; a
+schema violation is handed back to the model as a `_correction` so the second
+question is better informed rather than identical. `artefact.TERMINAL` names the
+certainties — an unapproved prompt, a missing provider, a DLP refusal on the
+same payload — which fail on the first attempt, because two more model calls
+only make the failure slower. An unclassified reason is treated as terminal, and
+`tests/agents/test_artefact_retry.py` asserts every reason the gateway can emit
+is classified, so adding one without deciding fails the suite.
+
+Expect DLP refusals: the `PAN` rule matches any run of 13 or more digits, which
+a semantic model or a differential payload trips easily. `artefact.scrub` blanks
+values before anything reaches the gateway, which is what keeps a legitimate
+`password:` line in an ESQL file from ending a migration — it matters more now
+that a refusal is terminal.
+
+**What the model does not decide.** Hashing and the audit chain, RBAC, the tool
+allow-list, DLP, `workspace.resolve` path confinement, and the independent
+pass/fail verdicts (compile, the quality gate, the byte-level differential
+comparison) all stay in Python. The first group is arithmetic a model cannot
+perform; the second is enforcement that ACE source text must not be able to
+argue its way past; the third is the evidence that model output was correct in
+the first place — if the model both writes the code and grades it, the gate is
+theatre. Removing the fallback did not move that boundary: those were never
+fallbacks.
+
+Where a deterministic second opinion exists it is still recorded beside the
+model's answer rather than resolved silently — `metrics.agrees_with_rules` on
+the dormancy agent compares the model's classification against
+`DormancyService.classify`, and a disagreement is the signal worth keeping.
+Confidence remains measured, not claimed: it is evidence coverage, so a model
+reporting high confidence on two of four signals cannot raise the figure a gate
+reads.
 
 ## Autonomous orchestration
 

@@ -178,10 +178,7 @@ class MigrationOrchestratorAgent(BaseAgent):
             context, self.PROMPT,
             {'state': final['state'], 'iteration': int(final['iteration'] or 1),
              'stop_reason': stop, 'dispatched': [x['agent_id'] for x in commands],
-             'legal_targets': sorted(TRANSITIONS.get(final['state'], set()))},
-            lambda: {'next_agent': None, 'next_state': None, 'blocked_by': stop,
-                     'rationale': 'the next action follows the governed pipeline, '
-                                  'not a model proposal'})
+             'legal_targets': sorted(TRANSITIONS.get(final['state'], set()))})
         provenance['proposal'] = {k: proposed.get(k) for k in
                                   ('next_agent', 'next_state', 'blocked_by', 'rationale')}
         return provenance

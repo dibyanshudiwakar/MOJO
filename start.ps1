@@ -92,7 +92,9 @@ $env:PORT = "$Port"
 $env:HOST = $BindAddress
 if (-not $env:FACTORY_JWT_ISSUER) { $env:FACTORY_JWT_ISSUER = 'ace-factory-idp' }
 if (-not $env:FACTORY_JWT_AUDIENCE) { $env:FACTORY_JWT_AUDIENCE = 'ace-factory' }
-# Claude via the CVS cvscode gateway for all reasoning agents (set AI_PROVIDER=none to disable).
+# Claude via the CVS cvscode gateway for all reasoning agents. AI_PROVIDER=none
+# no longer "disables" anything usefully: there is no deterministic fallback, so
+# every agent fails with ArtefactUnavailable and the factory produces nothing.
 if (-not $env:AI_PROVIDER) { $env:AI_PROVIDER = 'gateway' }
 
 # --- Launch ------------------------------------------------------------------
