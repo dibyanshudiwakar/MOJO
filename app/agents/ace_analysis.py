@@ -15,16 +15,16 @@ exactly as a parsed one does and one G2 approval binds either.
 produced, deriving the content hash, the parser coverage report and the
 unsupported-construct rows from the model itself.
 
-This agent requests ``clarification.create`` but returns no clarifications of its
-own: ``analyze_ace`` already inserts one per ambiguity the parser could not
-resolve, on this agent's behalf. Returning them again would duplicate every
-question. The tool is in the requested set because the capability really is
-exercised during the run -- the registry checks what an agent may do, and this
-run does create clarifications.
+Each unresolved ambiguity becomes a clarification. ``record_analysis`` stores
+ambiguities on the analysis record itself but does not raise them as
+clarifications (clarification blocking is disabled at that layer -- see its
+own comment); this agent is the one holding ``clarification.create``, so it
+turns each OPEN ambiguity into an answerable question rather than leaving it
+visible only inside the semantic model's own JSON.
 """
 import json
 from app.agents.artefact import produce_many
-from app.agents.base import AgentResult, BaseAgent, EvidenceRef
+from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.services.priority1 import PriorityOneService
 
 #: Which skill reference a source file's reading is guided by. The whole skill
@@ -120,11 +120,17 @@ class ACEAnalysisAgent(BaseAgent):
                    # parser, so a half-model-authored analysis says so.
                    'sources_from_model': provenance.get('items_from_model', 0),
                    'sources_computed': provenance.get('items_from_fallback', 0)}
+        clarifications = tuple(
+            Clarification(stage='ACE_ANALYSIS', question=a.get('question', ''),
+                          owner=a.get('owner', 'ACE_SME'), impact=a.get('impact', 'unassessed'),
+                          evidence_ref=a.get('evidenceReference', '') or 'analysis://' + result['analysis_id'])
+            for a in ambiguities if isinstance(a, dict) and a.get('status', 'OPEN') == 'OPEN')
         return AgentResult(
             status='CLARIFICATION_REQUIRED' if ambiguities else 'COMPLETED',
             outputs={'analysis_document': result['analysis_id'],
                      'semantic_model': row['content_hash'],
                      'ambiguities': ambiguities},
+            clarifications=clarifications,
             # content_hash of an analysis is the digest of the semantic model
             # json, so a G2 approval binding this evidence also binds the model.
             evidence=(EvidenceRef('ACE_ANALYSIS', version,

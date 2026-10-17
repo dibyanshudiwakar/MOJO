@@ -527,7 +527,12 @@ class H(BaseHTTPRequestHandler):
             # agent (markdown, YAML, source code, structured tables) resolved
             # from the service tables using the output IDs.
             artefact=_resolve_agent_artefacts(repo,step.get('agent_id',''),outputs,detail['job_id']) if step.get('agent_id') else None
-            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact})
+            # Clarifications this specific run raised, so the output panel's
+            # Clarifications tab can show (and let the operator answer) just
+            # the questions blocking this step, not every clarification on
+            # the job.
+            clarifications=repo.rows('select * from clarifications where run_id=? order by created_at',(run_id,)) if run_id else []
+            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact,'clarifications':clarifications})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.
         if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})
@@ -894,12 +899,34 @@ class H(BaseHTTPRequestHandler):
                 if not item: return self.sendj(404,{'error':'clarification_not_found'})
                 # Section 7: the answer must come from an authorised actor and is
                 # versioned as an explicit input to subsequent steps.
-                if item['owner'] not in principal.roles and 'CLARIFICATION_ADMIN' not in principal.roles:
-                    raise PermissionError('clarification_owner_role_required:'+str(item['owner']))
+                #
+                # One an agent raised (run_id set) authorises against that
+                # agent's own governed required_role, not the free-text
+                # `owner` the model wrote on the clarification itself -- a
+                # model-authored owner like "ACE Analyst (DMRClaimStatus ESQL
+                # review)" names nobody's actual role, so checking it against
+                # principal.roles would leave the question unanswerable by
+                # anyone except CLARIFICATION_ADMIN. A clarification raised
+                # directly through this endpoint (no run_id) has no agent run
+                # to resolve a role from, so it still authorises by its own
+                # `owner`, since that is the only role it was ever given.
+                required_role=item['owner']
+                if item.get('run_id'):
+                    run=repo.one('select agent_id,agent_version from agent_runs where id=?',(item['run_id'],))
+                    if run and run['agent_id']:
+                        contract=repo.one('select required_role from agent_registry where agent_id=? and version=?',(run['agent_id'],run['agent_version']))
+                        if contract: required_role=contract['required_role']
+                if required_role not in principal.roles and 'CLARIFICATION_ADMIN' not in principal.roles:
+                    raise PermissionError('clarification_owner_role_required:'+str(required_role))
                 with repo.connect() as c:
                     n=c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",(d['answer'],now(),principal.identity,m.group(1))).rowcount
                 if not n: raise ValueError('clarification_not_open')
                 ledger.append(item['job_id'],principal.identity,'CLARIFICATION_ANSWERED',{'clarification_id':m.group(1),'answer_hash':digest(d['answer'])})
+                # A step parked at WAITING_CLARIFICATION resumes as soon as its
+                # own run's clarifications are all answered -- independent of
+                # whether every clarification on the whole job is resolved yet.
+                try: pipelines.resume_clarification_steps(item['job_id'],workflow)
+                except Exception: pass
                 # If all clarifications for this job are now resolved, attempt to
                 # resume the lifecycle that was stalled waiting for answers.
                 remaining=repo.one("select count(*) as n from clarifications where job_id=? and status='OPEN'",(item['job_id'],))

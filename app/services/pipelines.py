@@ -753,7 +753,8 @@ class PipelineService:
         cannot continue even once the approval lands.
         """
         statuses = {r['status'] for r in rows}
-        return 'FAILED' if 'FAILED' in statuses else (HELD if HELD in statuses else '')
+        return 'FAILED' if 'FAILED' in statuses else (
+            HELD if (HELD in statuses or 'WAITING_CLARIFICATION' in statuses) else '')
 
     def _park_queue_row(self, queue_id, workflow):
         """Stop this step's queue row from running, reversibly.
@@ -869,16 +870,19 @@ class PipelineService:
             if status == 'RUNNING':
                 c.execute("update pipeline_steps set status=?,started_at=?,updated_at=? where id=?", (status, now(), now(), step_id))
                 return
-            # A step already parked at a gate must not be dragged back out of
-            # it. ``app/worker.py`` records the same failure twice -- once in
-            # ``_execute`` and again in ``process_one``'s catch-all -- and
-            # without this guard the second write replaced WAITING_APPROVAL with
-            # FAILED and then re-attempted the WAITING_Gx transition the job had
-            # already made, which the state machine rejects. The visible effect
-            # was that a gate-blocked step ended FAILED and the hold was lost
-            # every time it ran through the worker.
-            written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status!=?",
-                                (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD)).rowcount
+            # A step already parked at a gate -- or on a clarification -- must
+            # not be dragged back out of it. ``app/worker.py`` records the same
+            # failure twice -- once in ``_execute`` and again in
+            # ``process_one``'s catch-all -- and without this guard the second
+            # write replaced WAITING_APPROVAL with FAILED and then re-attempted
+            # the WAITING_Gx transition the job had already made, which the
+            # state machine rejects. The visible effect was that a gate-blocked
+            # step ended FAILED and the hold was lost every time it ran through
+            # the worker. WAITING_CLARIFICATION is excluded for the same reason:
+            # it is parked by ``park_for_clarification`` before this call could
+            # ever race it, but a stray late write must still not clobber it.
+            written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status not in (?,?)",
+                                (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD, 'WAITING_CLARIFICATION')).rowcount
         if not written:
             return
         if status == 'COMPLETED':
@@ -1124,6 +1128,75 @@ class PipelineService:
         # another failure still halts the pipeline.
         self._set_status(step['pipeline_id'], 'RUNNING')
         return self.repo.one('select * from pipeline_steps where id=?', (step_id,))
+
+    # -- clarification waiting --------------------------------------------------
+
+    def park_for_clarification(self, step_id, outputs, clarification_ids):
+        """Park a step whose agent returned CLARIFICATION_REQUIRED.
+
+        Mirrors ``_enter_gate_wait``'s shape -- park the step, stop its queue
+        row, hold the pipeline -- but for a human-answerable question rather
+        than a gate signature. The step's own outputs are recorded (a partial
+        artefact, e.g. a risk register with no plan yet, is still worth
+        showing in the Output tab), but -- like a gate hold -- ``completed_at``
+        is deliberately left unset: waiting on a human answer is paused, not
+        finished, and the duration ticker (``LIVE_STEP_STATUS`` in app.js)
+        depends on an unset ``completed_at`` to keep counting while parked.
+        The status stays WAITING_CLARIFICATION so ``_ready_steps`` never
+        treats it as satisfying a dependency the way a wrongly-COMPLETED step
+        would.
+        """
+        with self.repo.connect() as c:
+            parked = c.execute(
+                "update pipeline_steps set status='WAITING_CLARIFICATION',outputs=?,error=?,updated_at=? "
+                "where id=? and status!='COMPLETED'",
+                (json.dumps(outputs or {}, default=str),
+                 'clarification_required:' + ','.join(clarification_ids), now(), step_id),
+            ).rowcount
+            row = c.execute('select pipeline_id,queue_id from pipeline_steps where id=?', (step_id,)).fetchone()
+        if not parked or not row:
+            return
+        self._park_queue_row(row['queue_id'], WorkflowOrchestrator(self.repo))
+        if self._halt_reason(self.repo.rows('select * from pipeline_steps where pipeline_id=?', (row['pipeline_id'],))) == HELD:
+            self._set_status(row['pipeline_id'], HELD)
+
+    def resume_clarification_steps(self, job_id, workflow):
+        """Un-park every step whose own clarifications are now all answered.
+
+        Unlike ``resume_after_clarification`` (job-wide, lifecycle-only), this
+        acts per step: a step parked at WAITING_CLARIFICATION is tied to one
+        agent run via the ``_run_id`` stamped into its outputs, so it resumes
+        as soon as *that run's* clarifications are resolved, not when every
+        clarification on the job happens to be. Resuming means re-running the
+        agent (status -> PENDING), not completing it -- the step's prior
+        result was incomplete by definition, which is why it parked.
+        """
+        pl = self.repo.one(
+            "select id from pipelines where job_id=? and status in ('RUNNING',?) order by created_at desc limit 1",
+            (job_id, HELD),
+        )
+        if not pl:
+            return False
+        parked = self.repo.rows(
+            "select * from pipeline_steps where pipeline_id=? and status='WAITING_CLARIFICATION'",
+            (pl['id'],),
+        )
+        resumed = False
+        for step in parked:
+            run_id = json.loads(step['outputs'] or '{}').get('_run_id', '')
+            if not run_id:
+                continue
+            remaining = self.repo.one(
+                "select count(*) n from clarifications where run_id=? and status='OPEN'", (run_id,))
+            if remaining and remaining['n']:
+                continue
+            with self.repo.connect() as c:
+                c.execute("update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
+                          (now(), step['id']))
+            resumed = True
+        if resumed:
+            self.advance(pl['id'], workflow)
+        return resumed
 
     # -- gate-approval waiting -------------------------------------------------
 

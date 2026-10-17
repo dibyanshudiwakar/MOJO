@@ -8,6 +8,11 @@
       "template": "You are given deployment and telemetry evidence for one integration service. State which dormancy classification the supplied evidence supports and which evidence item is decisive. Cite only the supplied evidence. If the evidence is insufficient for a classification, say UNKNOWN and list what is missing. Return JSON: {\"classification\":..., \"decisive_evidence\":..., \"missing_evidence\":[...]}."
     },
     {
+      "name": "agent/clarification/suggested-answers",
+      "version": "1",
+      "template": "You are given a list of open clarification questions raised during an IBM ACE to Spring Boot migration, each with the governed stage that raised it and the impact of leaving it unanswered. For each question, propose a concrete, defensible answer grounded only in standard IBM ACE and Spring Boot migration practice. If a question depends on information only a human with access to the live system can supply -- credentials, a specific URL or environment value, a business decision -- say so plainly as the answer and set confidence to LOW rather than inventing a value. Answer every question in the same order they were given. Return JSON: {\"suggestions\":[{\"question\":..., \"suggested_answer\":..., \"confidence\":\"HIGH\"|\"MEDIUM\"|\"LOW\", \"caveat\":...}]}."
+    },
+    {
       "name": "agent/ace-analysis/ambiguity-triage",
       "version": "1",
       "template": "You are given an IBM ACE semantic model and the ambiguities a deterministic parser could not resolve. For each ambiguity, state the question a named owner must answer and the migration impact if it stays open. Do not infer runtime behaviour that is not present in the model. Return JSON: {\"ambiguities\":[{\"question\":..., \"owner\":..., \"impact\":..., \"evidenceReference\":...}]}."

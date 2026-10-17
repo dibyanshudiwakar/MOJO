@@ -300,6 +300,43 @@
         }
       }
     },
+    "agent/clarification/suggested-answers": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "suggestions"
+      ],
+      "properties": {
+        "suggestions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": [
+              "question",
+              "suggested_answer",
+              "confidence"
+            ],
+            "properties": {
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "suggested_answer": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "string",
+                "enum": ["HIGH", "MEDIUM", "LOW"]
+              },
+              "caveat": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "agent/repository-intake/inventory": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Repository inventory and intake gaps",

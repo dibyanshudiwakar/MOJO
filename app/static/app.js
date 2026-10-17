@@ -1474,7 +1474,7 @@ $('#agentForm').onsubmit=async e=>{
  finally{btn.disabled=false}};
 
 // ---- Pipelines: list and live detail view ---------------------------------
-const STEP_STATUS_LABEL={PENDING:'Pending',QUEUED:'Queued',RUNNING:'Running',COMPLETED:'Completed',FAILED:'Failed',SKIPPED:'Skipped',CANCELLED:'Cancelled',WAITING_APPROVAL:'Waiting approval'};
+const STEP_STATUS_LABEL={PENDING:'Pending',QUEUED:'Queued',RUNNING:'Running',COMPLETED:'Completed',FAILED:'Failed',SKIPPED:'Skipped',CANCELLED:'Cancelled',WAITING_APPROVAL:'Waiting approval',WAITING_CLARIFICATION:'Needs clarification'};
 const STEP_KIND_LABEL={CLONE:'Clone',AGENT:'Agent',DELIVERY:'Delivery'};
 const AGENT_DESC_MAP={
  'repository-intake':'Clones and indexes the ACE repository structure and artefacts.',
@@ -1512,7 +1512,7 @@ function stepDesc(step){
 // write), and ticking those would show time accruing against something that
 // stopped. WAITING_APPROVAL does keep counting -- it is parked on a person, and
 // how long it has been parked is the number somebody needs to see.
-const LIVE_STEP_STATUS={RUNNING:1,WAITING_APPROVAL:1};
+const LIVE_STEP_STATUS={RUNNING:1,WAITING_APPROVAL:1,WAITING_CLARIFICATION:1};
 /** A duration chip for anything carrying ``started_at``/``completed_at``.
  *
  * ``live`` says whether an absent finish stamp means "still going" (so the
@@ -1529,7 +1529,7 @@ function durationTag(row,cls,live){
  // only while the span is still open -- a finished duration never moves again.
  return `<span class="${esc(cls)}"${row.completed_at?'':` data-dur-from="${esc(row.started_at)}"`}>${esc(text)}</span>`}
 function stepCard(step){
- const clickable=step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL';
+ const clickable=step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL'||step.status==='WAITING_CLARIFICATION';
  // The duration used to be the *alternative* to the call-to-action, and every
  // status that has a duration is also clickable -- so the branch that showed it
  // was unreachable and no step ever displayed one. They sit side by side now.
@@ -1603,7 +1603,7 @@ async function pipelineDetail(id){
  // is still running is not final and has no finish stamp yet.
  const pipeLive=!!p.started_at&&!p.completed_at;
  const pipeDur=durationTag(p,'pipeline-duration',pipeLive);
- const statusBadgeClass=s=>({COMPLETED:'completed',RUNNING:'running',FAILED:'failed',PENDING:'pending',QUEUED:'queued',SKIPPED:'skipped',CANCELLED:'cancelled',WAITING_APPROVAL:'warning'}[s]||'pending');
+ const statusBadgeClass=s=>({COMPLETED:'completed',RUNNING:'running',FAILED:'failed',PENDING:'pending',QUEUED:'queued',SKIPPED:'skipped',CANCELLED:'cancelled',WAITING_APPROVAL:'warning',WAITING_CLARIFICATION:'warning'}[s]||'pending');
  const actions=[
   p.status==='DRAFT'?`<button id="pConfirm" class="btn-sm primary">Confirm &amp; Run</button>`:'',
   p.status==='READY'?`<button id="pRun" class="btn-sm primary">Run pipeline</button>`:'',
@@ -1651,7 +1651,7 @@ async function pipelineDetail(id){
   try{await api('/api/v2/pipelines/'+id+'/cancel',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};};
  document.querySelectorAll('[data-step]').forEach(el=>{
   const step=p.steps.find(s=>s.id===el.dataset.step);
-  if(step&&(step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL'))
+  if(step&&(step.status==='COMPLETED'||step.status==='RUNNING'||step.status==='FAILED'||step.status==='WAITING_APPROVAL'||step.status==='WAITING_CLARIFICATION'))
    el.onclick=()=>openStepOutput(id,el.dataset.step,step)});
  // Cleared unconditionally. Previously this only ran inside the is-it-running
  // branch, so a pipeline that reached COMPLETED while being watched kept its
@@ -1783,13 +1783,63 @@ function renderOutputPane(outputs,artefact){
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`}
+const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
+function renderClarifyPane(clarifications){
+ if(!clarifications.length)return '<p class="authhint">No clarifications recorded for this step.</p>';
+ return clarifications.map(c=>{
+  const isOpen=c.status==='OPEN';
+  const questionType=esc((c.question||'').replace(/_/g,' '));
+  const hasSuggestion=isOpen&&!!(c.suggested_answer||'').trim();
+  // A proposal card, not an autofill: the textarea always starts empty, same
+  // as this editor's own suggestion/diff cards never touch a buffer until
+  // you accept them. "Accept" copies the text into the textarea for the user
+  // to edit before submitting; "Dismiss" just removes the card. Generated
+  // once, eagerly, when the clarification was raised (AgentRegistry.dispatch)
+  // -- never re-fetched here, so reopening this pane costs nothing.
+  const suggestionBlock=isOpen?(hasSuggestion
+   ?`<div class="clarif-suggestion">
+      <div class="clarif-suggestion-head">
+       <span class="clarif-suggestion-label">✦ Suggested answer</span>
+       ${c.suggestion_confidence?`<span class="badge badge-${SUGGESTION_CONFIDENCE_BADGE[c.suggestion_confidence]||'neutral'}">${esc(c.suggestion_confidence)}</span>`:''}
+      </div>
+      <div class="clarif-suggestion-body">${esc(c.suggested_answer)}</div>
+      ${c.suggestion_caveat?`<div class="clarif-suggestion-caveat">${esc(c.suggestion_caveat)}</div>`:''}
+      <div class="clarif-suggestion-actions">
+       <button class="btn-sm clarif-suggestion-accept">Accept</button>
+       <button class="btn-ghost clarif-suggestion-dismiss">Dismiss</button>
+      </div>
+     </div>`
+   :`<div class="clarif-suggestion clarif-suggestion-none">No AI suggestion available — enter an answer manually.</div>`):'';
+  return`<div class="clarif-item ${isOpen?'clarif-open':'clarif-done'}" data-clarif-id="${esc(c.id)}">
+   <div class="clarif-header">
+    ${isOpen?'<span class="badge badge-warning"><span class="badge-dot"></span>OPEN</span>':'<span class="badge badge-success"><span class="badge-dot"></span>ANSWERED</span>'}
+    ${c.owner?`<span class="badge badge-neutral">${esc(c.owner)}</span>`:''}
+    <span class="clarif-time">${fmtDt(c.created_at)}</span>
+   </div>
+   <div class="clarif-type">${questionType}</div>
+   ${c.impact?`<div class="clarif-impact">Impact: ${esc(c.impact)}</div>`:''}
+   ${isOpen?`<div class="clarif-form">
+    ${suggestionBlock}
+    <textarea class="clarif-textarea" placeholder="Enter your answer…" rows="3"></textarea>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+     <button class="btn-approve clarif-submit-btn">Submit Answer</button>
+    </div>
+   </div>`:
+   `<div class="clarif-answered-block">
+    <span class="clarif-answered-label">Answer</span>
+    <span class="clarif-answered-text">${esc(c.answer||'')}</span>
+    ${c.answered_at?`<span class="clarif-answered-meta">${esc(fmtDt(c.answered_at))}${c.answered_by?' · '+esc(c.answered_by):''}</span>`:''}
+   </div>`}
+  </div>`}).join('')}
 async function openStepOutput(pipelineId,stepId,step){
  let detail=step;
  try{detail=await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/output`)}catch(e){}
  const panel=$('#outputPanel'),backdrop=$('#panelBackdrop');
- const statusColors={COMPLETED:'#12b76a',RUNNING:'#3157e5',FAILED:'#d92d20',PENDING:'#98a2b3',QUEUED:'#98a2b3',WAITING_APPROVAL:'#f79009'};
+ const statusColors={COMPLETED:'#12b76a',RUNNING:'#3157e5',FAILED:'#d92d20',PENDING:'#98a2b3',QUEUED:'#98a2b3',WAITING_APPROVAL:'#f79009',WAITING_CLARIFICATION:'#7c3aed'};
  const sc=statusColors[detail.status]||'#98a2b3';
  const outputs=typeof detail.outputs==='object'&&detail.outputs?detail.outputs:{};
+ const clarifications=Array.isArray(detail.clarifications)?detail.clarifications:[];
+ const openClarifs=clarifications.filter(c=>c.status==='OPEN').length;
  const params=stepParams(detail);
  const metaRows=[
   ['Kind',STEP_KIND_LABEL[detail.kind]||detail.kind],
@@ -1826,21 +1876,29 @@ async function openStepOutput(pipelineId,stepId,step){
    </div>`:''}
   </div>
   <div class="op-tabs">
-   <button class="op-tab active" data-tab="output">Output</button>
+   <button class="op-tab" data-tab="output">Output</button>
+   ${clarifications.length?`<button class="op-tab" data-tab="clarify">Clarifications${openClarifs?` <span class="op-tab-badge">${openClarifs}</span>`:''}</button>`:''}
    <button class="op-tab" data-tab="logs">Logs</button>
    <button class="op-tab" data-tab="meta">Metadata</button>
    ${detail.status==='FAILED'?`<button class="op-tab" data-tab="error">Error</button>`:''}
   </div>
   <div class="op-body">
-   <div class="op-pane active" id="pane-output">
+   <div class="op-pane" id="pane-output">
     ${renderOutputPane(outputs,detail.artefact)}
    </div>
+   ${clarifications.length?`<div class="op-pane" id="pane-clarify">${renderClarifyPane(clarifications)}</div>`:''}
    <div class="op-pane" id="pane-logs">${logsHtml}</div>
    <div class="op-pane" id="pane-meta">
     ${metaRows.map(([k,v])=>`<div class="meta-row"><div class="meta-key">${esc(k)}</div><div class="meta-val">${esc(String(v))}</div></div>`).join('')}
    </div>
    ${detail.status==='FAILED'?`<div class="op-pane" id="pane-error">${renderStepError(detail)}</div>`:''}
   </div>`;
+ // Clarifications waiting on an answer are the one actionable thing about
+ // this step, so they take over the default tab instead of a mostly-empty
+ // Output pane; otherwise Output stays the default.
+ const defaultTab=(detail.status==='WAITING_CLARIFICATION'&&openClarifs)?'clarify':'output';
+ panel.querySelector(`.op-tab[data-tab="${defaultTab}"]`)?.classList.add('active');
+ panel.querySelector('#pane-'+defaultTab)?.classList.add('active');
  panel.classList.add('open');backdrop.classList.add('open');
  // Idempotent, and needed because the drawer can be opened on a running step
  // from a view that had no live chip of its own to start the ticker.
@@ -1855,7 +1913,31 @@ async function openStepOutput(pipelineId,stepId,step){
   panel.querySelector('#pane-'+tab.dataset.tab)?.classList.add('active')}});
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
-  try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}}}
+  try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};
+ panel.querySelectorAll('.clarif-submit-btn').forEach(btn=>{
+  const item=btn.closest('.clarif-item');
+  const cid=item?.dataset.clarifId;
+  if(!cid)return;
+  btn.onclick=async()=>{
+   const ta=item.querySelector('.clarif-textarea');
+   const answer=(ta?.value||'').trim();
+   if(!answer){notice('Please enter an answer before submitting',true);return}
+   btn.disabled=true;btn.textContent='Submitting…';
+   try{
+    await api('/api/v2/clarifications/'+cid+'/answer',{method:'POST',body:JSON.stringify({answer})});
+    notice('Answer submitted. If every clarification for this step is now answered, it will re-run automatically.');
+    pipelineDetail(pipelineId);
+    openStepOutput(pipelineId,stepId,step);
+   }catch(e){notice(e.message,true);btn.disabled=false;btn.textContent='Submit Answer'}}});
+ panel.querySelectorAll('.clarif-suggestion-accept').forEach(btn=>{
+  const card=btn.closest('.clarif-suggestion');
+  const item=btn.closest('.clarif-item');
+  const ta=item?.querySelector('.clarif-textarea');
+  const body=card?.querySelector('.clarif-suggestion-body');
+  if(!ta||!body)return;
+  btn.onclick=()=>{ta.value=body.textContent;ta.focus();card.remove()}});
+ panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
+  btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
 async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
  const p=(location.hash||'#dashboard').slice(1);navSetActive(p);

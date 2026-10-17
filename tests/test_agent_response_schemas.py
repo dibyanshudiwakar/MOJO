@@ -123,6 +123,10 @@ SAMPLES = {
     'agent/feedback/code-repair': {
         'edits': [{'path': 'src/main/resources/application.yml', 'old_str': 'password: x',
                    'new_str': 'password: ${DB_PASSWORD}', 'why': 'SECRET_SCAN'}]},
+    'agent/clarification/suggested-answers': {
+        'suggestions': [{'question': 'Which queue?',
+                         'suggested_answer': 'Use the default outbound queue manager alias.',
+                         'confidence': 'MEDIUM', 'caveat': ''}]},
 }
 
 
