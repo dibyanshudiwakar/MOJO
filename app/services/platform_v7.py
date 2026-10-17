@@ -109,9 +109,21 @@ class AIRegistryService:
   if findings:
    with self.repo.connect() as c:c.execute('update model_requests set status=?,response_metadata=? where id=?',('BLOCKED',json.dumps({'dlp':'FAILED','findings':findings}),request_id))
    raise PermissionError('dlp_violation_in_response:'+','.join(findings))
-  meta=dict(json.loads(r['response_metadata'] or '{}'));meta.update({'response_hash':digest(json.dumps(response,sort_keys=True,default=str)),'status':status,'completed_at':now()})
+  body=json.dumps(response,sort_keys=True,default=str)
+  # The response itself, bounded. Only the hash was kept, which made a schema
+  # failure unfalsifiable after the fact: the run said a required property was
+  # missing and nothing anywhere said what the model had answered. The request
+  # direction was already retained as input_evidence, so this makes the pair
+  # symmetric. It is DLP-scanned immediately above, so what is stored here has
+  # already passed the same rules as the request.
+  meta=dict(json.loads(r['response_metadata'] or '{}'));meta.update({'response_hash':digest(body),'response':body[:RESPONSE_RETENTION_CHARS],'response_truncated_in_store':len(body)>RESPONSE_RETENTION_CHARS,'status':status,'completed_at':now()})
   with self.repo.connect() as c:c.execute('update model_requests set status=?,response_metadata=? where id=?',(status,json.dumps(meta),request_id))
   return {'request_id':request_id,'status':status,'response_hash':meta['response_hash']}
+
+#: How much of a model response is retained on the request row. Enough to
+#: diagnose a schema failure or an audit question, bounded so a pathological
+#: answer cannot bloat the table.
+RESPONSE_RETENTION_CHARS=20000
 
 class KnowledgeService:
  def __init__(self,repo):self.repo=repo

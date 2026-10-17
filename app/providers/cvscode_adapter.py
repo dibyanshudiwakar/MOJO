@@ -206,6 +206,16 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             raise RuntimeError('provider_refused:' + str(getattr(message, 'stop_details', '')))
         text = ''.join(b.text for b in message.content if getattr(b, 'type', '') == 'text')
         parsed = _parse_json(text)
+        if parsed is None and getattr(message, 'stop_reason', '') == 'max_tokens':
+            # The answer was cut off mid-JSON, so it cannot parse. Reported as
+            # itself rather than wrapped as {'answer': <raw>}: that wrapper then
+            # fails the response schema and the run blames the model's shape for
+            # what is really a length limit. Seen on the specification document,
+            # which is the largest artefact any agent returns.
+            raise RuntimeError(
+                'provider_response_truncated:max_tokens=%d: the answer was cut off '
+                'mid-JSON. Raise max_tokens for this agent or ask for a smaller '
+                'artefact.' % self.max_tokens)
         answer = parsed if isinstance(parsed, dict) else {'answer': text}
         answer.setdefault('_model', self.model)
         return answer
