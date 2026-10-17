@@ -54,6 +54,24 @@ def test_approved_dependencies_are_taken_from_the_framework_baseline(repo, job, 
     assert 'spring-boot-starter-web' in spec['target']['approvedDependencies']
 
 
+def test_an_ambiguity_missing_status_from_the_model_still_produces_a_valid_specification(repo, job, analysis):
+    """ace-analysis's own response schema requires only 'question' on an
+    ambiguity -- confirmed live against a real model-authored run that
+    produced 84 of them with no 'status' at all, which broke every
+    specification built from that analysis. Pins that this is backfilled."""
+    import json
+    with repo.connect() as c:
+        c.execute('update ace_analyses set ambiguities=? where id=?',
+                  (json.dumps([{'question': 'no status at all', 'owner': 'x',
+                                'impact': 'y', 'evidenceReference': 'z'}]), analysis))
+    result = MigrationSpecificationAgent(repo).run(job['id'], params={'analysis_id': analysis})
+    row = repo.one('select validation_status,yaml_text from migration_specs where id=?',
+                   (result.outputs['migration_specification_yaml'],))
+    assert row['validation_status'] == 'VALID'
+    spec = yaml.safe_load(row['yaml_text'])
+    assert spec['clarifications'][0]['status'] == 'OPEN'
+
+
 def test_specification_requires_an_analysis_that_exists(repo, job):
     with pytest.raises(ValueError, match='missing_param:analysis_id'):
         MigrationSpecificationAgent(repo).run(job['id'])
