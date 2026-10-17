@@ -32,6 +32,14 @@ os.environ.setdefault('FACTORY_WORKSPACE_ROOT', _SESSION_ROOT)
 # None unless this is exactly 'gateway', but it is pinned so a developer's shell
 # cannot turn the suite into a live gateway client.
 os.environ['AI_PROVIDER'] = 'none'
+# Repository seeds prompt_registry, model_registry and a model-gateway profile
+# APPROVED on init so a real deployment has the model path on by default. Tests
+# opt out: a pristine database is what lets a test exercise the
+# no_approved_prompt_or_model path at all, and what stops a test's own
+# register_prompt/register_model colliding with a seeded row on
+# (name, version). A test that wants the bootstrap builds a Repository with the
+# flag set -- see tests/test_model_gateway_bootstrap.py.
+os.environ.setdefault('FACTORY_SEED_MODEL_GATEWAY', '0')
 
 
 @pytest.fixture(autouse=True)

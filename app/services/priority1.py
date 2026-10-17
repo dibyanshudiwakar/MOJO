@@ -60,6 +60,17 @@ class PriorityOneService:
   to the gate and to the next agent.
   """
   self._job(job_id);unsupported=[]
+  # Every ambiguity carries status/owner/impact before anything downstream
+  # sees it. schemas/migration-specification.schema.json requires status on a
+  # clarification, and migration-specification carries these through verbatim
+  # -- so a model-authored ambiguity without one made the *deterministic*
+  # specification invalid and failed that step outright
+  # ("$.clarifications.0: 'status' is a required property"). ACEParser always
+  # sets it; the semantic-model schema leaves it optional, which is the gap.
+  for a in model.get('ambiguities') or []:
+   if isinstance(a,dict):
+    a.setdefault('status','OPEN');a.setdefault('owner','ACE_SME');a.setdefault('impact','unassessed')
+    a.setdefault('evidenceReference',a.get('evidence_ref') or '$')
   for flow in model.get('flows',[])+model.get('subflows',[]):
    for node in flow.get('nodes',[]):
     typ=str(node.get('type',''));normal=''.join(c for c in typ.lower() if c.isalnum())
