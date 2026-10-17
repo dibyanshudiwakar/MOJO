@@ -41,6 +41,13 @@ os.environ['AI_PROVIDER'] = 'none'
 # test that dispatches one needs the governance rows the same way production
 # does. ``@pytest.mark.pristine_registry`` opts a test back out.
 os.environ.setdefault('FACTORY_SEED_MODEL_GATEWAY', '1')
+# artefact.produce waits between attempts at a *provider* failure, because the
+# live gateway rejects a valid key intermittently and three immediate retries
+# land in the same window. Zeroed here: the suite exercises those paths
+# deliberately and has no transient to wait out, and the backoff would add
+# minutes across the retry tests. tests/agents/test_artefact_retry.py asserts
+# the real delays separately, without sleeping.
+os.environ.setdefault('MOJO_RETRY_BACKOFF_SECONDS', '0,0')
 
 
 @pytest.fixture(autouse=True)

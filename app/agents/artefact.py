@@ -36,6 +36,8 @@ the third is the evidence that model output was correct in the first place.
 Removing the fallback does not move that boundary -- those were never fallbacks.
 """
 import json
+import os
+import time
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -66,6 +68,38 @@ RETRYABLE = ('provider_execution_failed', 'model_response_schema_invalid')
 #: instead of arriving three model calls later.
 TERMINAL = ('no_approved_prompt_or_model', 'no_provider_execution_adapter',
             'gateway_refused', 'provider_alias_unavailable', 'payload_too_large')
+
+#: Seconds to wait before the 2nd and 3rd attempt at a *provider* failure.
+#:
+#: Observed against the live CVS gateway: a valid key is intermittently rejected
+#: with 401 "Invalid token", and calls either side of the failure succeed with
+#: the same key fingerprint. Three attempts fired back-to-back inside a few
+#: hundred milliseconds all landed in the same window and the run failed anyway,
+#: which makes the retry decorative for the one failure it most needs to absorb.
+#:
+#: Deliberately not applied to a schema violation. That failure is in the
+#: model's output, not in time -- waiting changes nothing, and the correction is
+#: what makes the next attempt different. Sleeping there would only slow every
+#: repair down.
+#:
+#: ``MOJO_RETRY_BACKOFF_SECONDS`` overrides it as a comma-separated list; the
+#: test suite sets it to zeros so the retry paths stay fast to exercise.
+BACKOFF_SECONDS = (1.0, 3.0)
+
+
+def backoff(attempt):
+    """Seconds to wait before ``attempt`` (1-based). 0 for the first."""
+    raw = os.environ.get('MOJO_RETRY_BACKOFF_SECONDS')
+    delays = BACKOFF_SECONDS
+    if raw is not None:
+        try:
+            delays = tuple(float(x) for x in raw.split(',') if x.strip() != '')
+        except ValueError:
+            delays = BACKOFF_SECONDS
+    index = attempt - 2
+    if index < 0 or not delays:
+        return 0.0
+    return float(delays[min(index, len(delays) - 1)])
 
 _schemas = None
 
@@ -228,8 +262,15 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
             reason = provenance.get('reason') or 'model_unavailable'
             if not retryable(reason) or attempt >= budget:
                 raise ArtefactUnavailable(prompt_name, reason, attempt, provenance)
-            warn('Model could not answer "%s" (%s) — attempt %d of %d'
-                 % (prompt_name, reason, attempt, budget))
+            # A provider failure is temporal, so the next attempt waits. The
+            # live gateway rejects a valid key intermittently, and retrying
+            # inside the same few hundred milliseconds just fails three times.
+            pause = backoff(attempt + 1)
+            warn('Model could not answer "%s" (%s) — attempt %d of %d%s'
+                 % (prompt_name, reason, attempt, budget,
+                    ', waiting %.1fs' % pause if pause else ''))
+            if pause:
+                time.sleep(pause)
             continue
         problem = validate(answer, schema_name)
         if not problem and validator is not None:

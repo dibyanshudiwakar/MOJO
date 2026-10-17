@@ -244,6 +244,63 @@ def test_the_two_classifications_do_not_overlap():
     assert not set(RETRYABLE) & set(TERMINAL)
 
 
+# ---- the backoff ---------------------------------------------------------------------------
+
+def test_a_provider_failure_waits_before_the_next_attempt(monkeypatch):
+    """Observed live: the gateway rejects a valid key intermittently.
+
+    Calls either side of the failure succeeded with the same key fingerprint,
+    and three attempts fired inside a few hundred milliseconds all got 401 --
+    so without a wait the retry cannot absorb the one failure it most needs to.
+    Asserted on the computed delay rather than by sleeping.
+    """
+    monkeypatch.delenv('MOJO_RETRY_BACKOFF_SECONDS', raising=False)
+    assert artefact.backoff(1) == 0.0, 'the first attempt never waits'
+    assert artefact.backoff(2) == 1.0
+    assert artefact.backoff(3) == 3.0
+    # Past the end of the table the last delay repeats rather than resetting.
+    assert artefact.backoff(9) == 3.0
+
+
+def test_the_backoff_is_configurable_and_survives_a_bad_value(monkeypatch):
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', '0.5,2')
+    assert (artefact.backoff(2), artefact.backoff(3)) == (0.5, 2.0)
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', '0,0')
+    assert (artefact.backoff(2), artefact.backoff(3)) == (0.0, 0.0)
+    # A malformed value falls back to the defaults rather than crashing a run
+    # or, worse, silently disabling the wait.
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', 'soon,later')
+    assert artefact.backoff(2) == artefact.BACKOFF_SECONDS[0]
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', '')
+    assert artefact.backoff(2) == 0.0, 'empty means no wait, explicitly'
+
+
+def test_a_schema_failure_does_not_wait(repo, job, gateway, monkeypatch):
+    """The failure is in the output, not in time, so waiting changes nothing.
+
+    The correction is what makes the next attempt different. Sleeping here would
+    slow every repair down for no benefit.
+    """
+    gateway(PROMPT)
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', '30,30')
+    slept = []
+    monkeypatch.setattr(artefact.time, 'sleep', lambda s: slept.append(s))
+    provider = _Scripted({'classification': 'PROBABLY_FINE'}, VALID)
+    _, provenance = produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert provenance['attempts'] == 2
+    assert slept == [], 'a schema repair is immediate'
+
+
+def test_a_provider_failure_actually_sleeps(repo, job, gateway, monkeypatch):
+    gateway(PROMPT)
+    monkeypatch.setenv('MOJO_RETRY_BACKOFF_SECONDS', '7,11')
+    slept = []
+    monkeypatch.setattr(artefact.time, 'sleep', lambda s: slept.append(s))
+    provider = _Scripted(RuntimeError('provider_error:AuthenticationError:401'), VALID)
+    produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert slept == [7.0]
+
+
 @pytest.mark.parametrize('reason,expected', [
     ('provider_execution_failed:anything', True),
     ('model_response_schema_invalid:anything', True),

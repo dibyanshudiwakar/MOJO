@@ -11,6 +11,9 @@
 # the .db itself and *.db alone does not match them.
 *.db-shm
 *.db-wal
+# Copies taken before a migration or a governance change. Same contents, same
+# sensitivity, and the suffix means *.db does not match them.
+*.db.bak*
 
 # Pipeline workspace output — created at runtime, never committed
 workspace/
