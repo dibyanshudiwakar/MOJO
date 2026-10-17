@@ -150,10 +150,21 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
         # plain ``httpx`` package -- passing an ``httpx.Client`` raises
         # "Invalid `http_client` argument" even though the two are API-compatible.
         import httpx2
+        key = get_cvs_api_key()  # fresh on every call; keys rotate
         return anthropic.Anthropic(
-            api_key=get_cvs_api_key(),  # fresh on every call; keys rotate
+            api_key=key,
             base_url=self.base_url,
-            default_headers=GATEWAY_HEADERS,
+            # The key goes in BOTH headers on purpose. The SDK sends ``api_key``
+            # as ``x-api-key``, which is what Anthropic's own API reads, but this
+            # gateway reads ``Authorization`` only -- it answers a request
+            # carrying just ``x-api-key`` with 401 "Authorization header
+            # missing", and the message changes to "Invalid token" as soon as
+            # ``Authorization`` is present. Sending both keeps the adapter
+            # working against either endpoint rather than trading one for the
+            # other, and costs nothing: each side ignores the header it does not
+            # read. Built here rather than in GATEWAY_HEADERS because the key is
+            # fetched per call.
+            default_headers={**GATEWAY_HEADERS, 'Authorization': 'Bearer ' + key},
             http_client=httpx2.Client(trust_env=False, timeout=httpx2.Timeout(float(self.timeout))),
         )
 

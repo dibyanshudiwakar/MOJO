@@ -240,7 +240,19 @@ class ReasoningGateway:
                 answer = provider.invoke(prompt['template'], enriched_payload)
             provenance['skill_included'] = guidance is not None
             recorded = self.registry.complete_request(request['request_id'], answer)
-        except (PermissionError, ValueError, NotImplementedError) as exc:
+        except (PermissionError, ValueError, NotImplementedError, RuntimeError) as exc:
+            # RuntimeError is what every shipped adapter raises: CvscodeClaudeAdapter
+            # wraps an SDK or network failure as provider_error:<type>:<detail>, a
+            # gateway refusal as provider_refused, and an unavailable key as
+            # cvscode_api_key_unavailable. Omitting it here meant an expired token
+            # took the whole agent down with a 401 instead of degrading -- the
+            # opposite of this module's contract, and observed in practice:
+            # governance failed mid-pipeline on
+            # "provider_error:AuthenticationError:Error code: 401".
+            #
+            # Deliberately not bare ``except``: a KeyboardInterrupt or a
+            # MemoryError is not a degradation, and a programming error in an
+            # adapter should still surface rather than be recorded as a fallback.
             provenance['reason'] = 'provider_execution_failed:' + str(exc)
             _log_warn('LLM provider execution failed: %s' % str(exc)[:200])
             try:
