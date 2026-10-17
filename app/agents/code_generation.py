@@ -185,6 +185,16 @@ class CodeGenerationAgent(BaseAgent):
         plan, analysis, framework, specification = service.generation_inputs(
             context.job_id, plan_id)
         model = json.loads(analysis['semantic_model'])
+        tasks = json.loads(plan['tasks'] or '[]')
+        if not tasks:
+            # Nothing to author. Asking anyway spent 2m47s of model time on an
+            # empty semantic model and then failed the layout schema, because
+            # 'files' requires at least one entry and an honest answer to "list
+            # the files this repository needs" is that there are none. The
+            # model was right; the question should not have been asked.
+            return None, {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.LAYOUT_PROMPT,
+                          'reason': 'no_tasks_in_plan_nothing_to_author',
+                          'artefact_source': 'DETERMINISTIC'}
         skill = self._skill_for_backend(context, model)
         standards = json.loads(framework['standards'] or '{}') if framework else {}
         layout, provenance = produce(
@@ -192,7 +202,7 @@ class CodeGenerationAgent(BaseAgent):
             {'service_name': context.param('service_name'),
              'package_name': context.param('package_name'),
              'backend_type': (model.get('backend_type') or {}).get('type', ''),
-             'tasks': json.loads(plan['tasks'] or '[]'),
+             'tasks': tasks,
              'semantic_model': model, 'framework_standards': standards},
             lambda: {'files': []}, skill=skill)
         wanted = layout.get('files') or []
@@ -210,7 +220,7 @@ class CodeGenerationAgent(BaseAgent):
                              'skill_reference': item.get('skill_reference', ''),
                              'service_name': context.param('service_name'),
                              'package_name': context.param('package_name'),
-                             'tasks': json.loads(plan['tasks'] or '[]'),
+                             'tasks': tasks,
                              'semantic_model': model, 'framework_standards': standards})
              for item in wanted],
             unauthored, skill=skill)

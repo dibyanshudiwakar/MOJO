@@ -149,7 +149,13 @@ def produce(context, prompt_name, payload, fallback, *, schema_name=None, skill=
         # An answer that does not match its schema is treated exactly like no
         # answer: it is about to be hashed and bound to an approval.
         provenance['mode'] = DETERMINISTIC
-        provenance['reason'] = 'model_response_schema_invalid:' + problem
+        # The keys that did come back. complete_request persists only the
+        # response hash, so without this a schema failure is undiagnosable
+        # after the fact -- the run says a required property was missing and
+        # nothing anywhere says what the model actually answered.
+        keys = sorted(answer)[:12] if isinstance(answer, dict) else type(answer).__name__
+        provenance['reason'] = 'model_response_schema_invalid:%s; response keys: %s' % (
+            problem, keys)
         provenance['artefact_source'] = 'DETERMINISTIC'
         warn('Model response for "%s" failed its schema (%s) — computing instead'
              % (prompt_name, problem))
