@@ -135,10 +135,29 @@ class MigrationSpecificationAgent(BaseAgent):
             'mappings': [],
             'tests': {'inputSources': sorted({x.get('protocol', '') for x in model.get('interfaces', [])}),
                       'invariants': [], 'masks': [], 'tolerances': []},
-            'clarifications': ambiguities,
+            'clarifications': [self._clarification(a) for a in ambiguities],
             'governance': {'enabledGates': gates,
                            'iterationLimit': int(context.param('iteration_limit', 5)),
                            'stopConditions': STOP_CONDITIONS}}
+
+    def _clarification(self, a):
+        """Backfill a model-authored ambiguity to the shape this document requires.
+
+        ace-analysis's own response schema requires only 'question' on an
+        ambiguity (status/owner/impact/evidenceReference are all optional
+        there) -- confirmed live: a real analysis authored 84 with no
+        'status' at all. This document's schema requires all five, so an
+        ambiguity stored before enterprise_v5.ACEParser.finalise() started
+        normalising this itself would otherwise break every specification
+        built from it, including this deterministic fallback.
+        """
+        a = dict(a) if isinstance(a, dict) else {}
+        a.setdefault('status', 'OPEN')
+        a.setdefault('question', '')
+        a.setdefault('owner', 'ACE_SME')
+        a.setdefault('impact', '')
+        a.setdefault('evidenceReference', '')
+        return a
 
 
 if __name__ == '__main__':
