@@ -23,6 +23,7 @@ gateway also accepts a ``[1m]`` suffix for the 1M-context variants.
 """
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from app.agents.reasoning import ProviderExecutionAdapter
@@ -124,7 +125,25 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
     #: ``invoke`` takes ``skill=``; ReasoningGateway passes the agent's skill to adapters that say so.
     accepts_skill = True
 
-    def __init__(self, base_url='', model='', effort=None, timeout=600, max_tokens=16384,
+    #: Output budget per alias. 16384 was one number for every agent and it is
+    #: too small for the artefacts this factory asks for: the mapping catalogue
+    #: for a real flow, the migration specification and a whole generated file
+    #: all exceeded it, each surfacing as a truncated answer. The frontier
+    #: models carry a far larger output window than Haiku, so the budget follows
+    #: the alias rather than being set once -- asking Haiku for 32k would be
+    #: refused outright by the gateway.
+    #:
+    #: ``MOJO_MAX_TOKENS`` overrides every alias, for a deployment whose gateway
+    #: caps output lower (or higher) than these.
+    ALIAS_MAX_TOKENS = {
+        'reasoning-large': 32768,
+        'coding': 32768,
+        'semantic-review': 32768,
+        'reasoning-small': 16384,
+    }
+    DEFAULT_MAX_TOKENS = 16384
+
+    def __init__(self, base_url='', model='', effort=None, timeout=600, max_tokens=0,
                  alias=DEFAULT_ALIAS):
         self.base_url = base_url or os.environ.get('ANTHROPIC_BASE_URL') or DEFAULT_BASE_URL
         self.alias = alias
@@ -135,14 +154,23 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
         shape = MODEL_SHAPES.get(self.model, FALLBACK_SHAPE)
         self.effort = effort or default_effort or shape['effort']
         self.timeout = timeout
-        self.max_tokens = max_tokens
+        # An explicit argument wins, then the environment, then this alias's
+        # own budget. ``for_alias`` passes 0 so a bound copy picks up the new
+        # alias's budget instead of inheriting the one it was built with.
+        override = 0
+        try:
+            override = int(os.environ.get('MOJO_MAX_TOKENS') or 0)
+        except ValueError:
+            override = 0
+        self.max_tokens = (max_tokens or override
+                           or self.ALIAS_MAX_TOKENS.get(alias, self.DEFAULT_MAX_TOKENS))
 
     def for_alias(self, alias):
         """A copy of this adapter pinned to ``alias``'s model."""
         if not alias or alias == self.alias:
             return self
         return CvscodeClaudeAdapter(base_url=self.base_url, timeout=self.timeout,
-                                    max_tokens=self.max_tokens, alias=alias)
+                                    alias=alias)
 
     def _client(self):
         import anthropic
@@ -216,17 +244,85 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
                 'provider_response_truncated:max_tokens=%d: the answer was cut off '
                 'mid-JSON. Raise max_tokens for this agent or ask for a smaller '
                 'artefact.' % self.max_tokens)
+        if parsed is None:
+            # Named for every agent, never wrapped. ``{'answer': <raw text>}``
+            # passed an unparseable answer on to the response schema, which then
+            # reported whichever property it required as missing -- so a wrapper
+            # or length problem presented as the model returning the wrong
+            # shape, identically and unhelpfully for all 15 agents. A
+            # RuntimeError degrades (ReasoningGateway catches it) and carries
+            # enough of the answer to see what actually came back.
+            raise RuntimeError(
+                'provider_response_unparseable:%d_chars:stop_reason=%s:%s'
+                % (len(text), getattr(message, 'stop_reason', '?'),
+                   ' '.join(text.strip()[:200].split())))
         answer = parsed if isinstance(parsed, dict) else {'answer': text}
         answer.setdefault('_model', self.model)
         return answer
 
 
+def _span(text, opener, closer):
+    """The outermost balanced ``opener``...``closer`` span, or ``''``.
+
+    String-aware, so a brace inside a JSON string value does not unbalance the
+    count -- generated Java and quoted ESQL are full of them.
+    """
+    start = text.find(opener)
+    if start < 0:
+        return ''
+    depth = 0
+    in_string = escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return ''
+
+
 def _parse_json(text):
-    s = text.strip()
-    if s.startswith('```'):
-        s = s.split('\n', 1)[1] if '\n' in s else ''
-        s = s.rsplit('```', 1)[0]
-    try:
-        return json.loads(s.strip())
-    except (ValueError, TypeError):
+    """The model's JSON, however it chose to wrap it. ``None`` if unrecoverable.
+
+    The original handled a fenced block opening at character zero, which covers
+    a fenced answer and -- because ``rsplit`` on an absent fence returns the
+    whole string -- one whose closing fence was cut off. What it did not handle
+    was a fence that follows a sentence ("Here is the inventory:"), or an
+    unfenced object with prose around it: neither starts with a fence, so no
+    stripping happened and the whole thing failed to parse.
+
+    Each plausible reading is now tried in turn, ending with a balanced-span
+    extraction that finds a complete object regardless of what surrounds it. An
+    answer genuinely cut off mid-object still returns ``None``, which the caller
+    reports as unparseable rather than disguising as a schema failure.
+    """
+    if not text:
         return None
+    s = str(text).strip()
+    candidates = [s]
+    fence = re.search(r'```[A-Za-z0-9_-]*[ \t]*\r?\n', s)
+    if fence:
+        body = s[fence.end():]
+        candidates.append(body.rsplit('```', 1)[0] if '```' in body else body)
+    candidates += [_span(s, '{', '}'), _span(s, '[', ']')]
+    for candidate in candidates:
+        candidate = (candidate or '').strip()
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+    return None
