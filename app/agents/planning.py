@@ -20,7 +20,7 @@ approval cites is therefore the approver's act, not the planner's -- see
 ``docs/AGENTS_DEVELOPMENT.md``.
 """
 import json
-from app.agents.base import AgentResult, BaseAgent
+from app.agents.base import AgentResult, BaseAgent, Clarification
 from app.agents.artefact import produce
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
@@ -61,12 +61,22 @@ class PlanningAgent(BaseAgent):
                    'risk_count': len(risks),
                    'model_attempts': provenance.get('attempts', 0)}
         if catalogue['unsupported_count']:
-            # The service has already raised a clarification per unsupported
-            # construct, so the questions exist; there is simply no plan yet.
+            # The service records the gap as migration_risks/unsupported_mappings
+            # rows but does not raise clarifications itself (clarification
+            # blocking is disabled there -- see migration_lifecycle_v6.py). This
+            # agent holds clarification.create, so it turns each still-OPEN risk
+            # into an answerable question rather than leaving a human to find
+            # the gap only in the risk register.
+            clarifications = tuple(
+                Clarification(stage='PLANNING', question=r['statement'],
+                               owner=r['owner'], impact=r['response'] or r['category'],
+                               evidence_ref='migration_risk://' + r['id'])
+                for r in risks if r['status'] == 'OPEN')
             return AgentResult(
                 status='CLARIFICATION_REQUIRED',
                 outputs={'mapping': catalogue['catalogue_id'], 'risk_register': risks,
                          'task_graph': [], 'plan': ''},
+                clarifications=clarifications,
                 metrics=metrics, reasoning=provenance,
                 error='')
         plan = service.generate_plan(context.job_id, catalogue['catalogue_id'], version)

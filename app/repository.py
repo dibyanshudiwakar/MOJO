@@ -185,7 +185,10 @@ class Repository:
    # An approval is only valid for the iteration it was granted against, so
    # rework cannot be promoted on a signature given before it.
    "approvals":{"artifact_bindings":"text default '{}'","iteration":"integer default 1"},
-   "clarifications":{"answered_by":"text default ''"},
+   "clarifications":{"answered_by":"text default ''","run_id":"text default ''",
+                     "suggested_answer":"text default ''","suggestion_mode":"text default ''",
+                     "suggestion_confidence":"text default ''","suggestion_caveat":"text default ''",
+                     "suggested_at":"text default ''"},
    "differential_evidence":{"dispositioned_by":"text default ''","dispositioned_at":"text default ''","disposition_reason":"text default ''"},
    # Section 8 requires a Variance to carry its normalisation and
    # classification alongside severity and disposition.

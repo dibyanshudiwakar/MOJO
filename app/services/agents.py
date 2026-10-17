@@ -1,6 +1,8 @@
 import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
+from app.agents.artefact import ArtefactUnavailable, produce
+from app.agents.reasoning import UNAVAILABLE
 from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
@@ -174,9 +176,53 @@ class AgentRegistry:
    ev=self.evidence.register(job_id,ref.kind,ref.version,ref.uri,ref.content,agent_id,meta)
    registered.append(ev)
    _log_info('Evidence registered: %s → %s' % (ref.kind, ev['id'][:12]))
+  # Each clarification an agent raises is persisted with the run that raised
+  # it, so a pipeline step parked on CLARIFICATION_REQUIRED (see
+  # PipelineService.park_for_clarification) can look its own questions up by
+  # run_id instead of guessing at job-wide stage matching.
   opened=[]
-  # Clarification blocking is disabled — agents may still return
-  # clarifications in their result but they are not persisted or acted on.
+  with self.repo.connect() as c:
+   for cl in result.clarifications:
+    cid=uid()
+    self.repo.insert(c,'clarifications',{'id':cid,'job_id':job_id,'stage':cl.stage,'question':cl.question,'owner':cl.owner,'impact':cl.impact,'evidence_ref':cl.evidence_ref,'status':'OPEN','answer':'','created_at':now(),'answered_at':'','answered_by':'','run_id':run['id']})
+    opened.append(cid)
+    _log_info('Clarification raised: %s (%s)' % (cid[:12], cl.stage))
+  if result.clarifications:
+   # Eager, batched: one extra model call for the *whole* run proposes a
+   # draft answer for every clarification it just raised, so the operator
+   # sees a pre-filled, editable suggestion the moment the tab opens rather
+   # than a blank box -- without one round-trip per question (ace-analysis
+   # alone can raise dozens in a single run).
+   #
+   # The only produce() call in the codebase whose failure is caught. Every
+   # other one is producing an artefact a gate approves, so failing the agent
+   # is the correct outcome -- there is no deterministic fallback and a
+   # substitute would conceal a model outage. This one is producing a *draft
+   # answer for a human to edit or dismiss*: the clarifications themselves are
+   # already raised and persisted above, the agent's own artefact is already
+   # recorded, and a blank suggestion box is exactly what the operator saw
+   # before this feature existed. Taking down a completed run over a missing
+   # convenience would be the mirror of the fallback problem -- failing where
+   # nothing is actually wrong.
+   #
+   # Nothing is substituted: an unavailable suggestion is absent, not invented,
+   # and the reason is logged.
+   try:
+    answer,sugg_prov=produce(
+     context,'agent/clarification/suggested-answers',
+     {'questions':[{'question':cl.question,'impact':cl.impact,'stage':cl.stage} for cl in result.clarifications]})
+   except ArtefactUnavailable as exc:
+    answer,sugg_prov={'suggestions':[]},{'mode':UNAVAILABLE,'reason':exc.reason}
+    _log_warn('Suggested answers unavailable (%s) — the answer boxes stay empty' % exc.reason)
+   by_question={s.get('question'):s for s in (answer.get('suggestions') or []) if isinstance(s,dict)}
+   if by_question:
+    with self.repo.connect() as c:
+     for cl,cid in zip(result.clarifications,opened):
+      s=by_question.get(cl.question)
+      if not s or not str(s.get('suggested_answer') or '').strip():continue
+      c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=? where id=?',
+                (s['suggested_answer'],sugg_prov.get('mode',''),s.get('confidence',''),s.get('caveat',''),now(),cid))
+   _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened),sugg_prov.get('mode','')))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))

@@ -360,6 +360,21 @@ def _finding_triage(payload):
                                 for check in payload.get('unfixed_checks') or []]}
 
 
+def _suggested_answers(payload):
+    """A draft answer per clarification question, in the order they were asked.
+
+    The agent matches suggestions back to questions by exact text, so echoing
+    the question is not incidental -- a double that reworded them would make
+    every suggestion silently fail to attach.
+    """
+    return {'suggestions': [
+        {'question': q.get('question', ''),
+         'suggested_answer': 'Follow the standard ACE-to-Spring mapping for this construct.',
+         'confidence': 'MEDIUM',
+         'caveat': 'confirm against the live system before relying on it'}
+        for q in payload.get('questions') or []]}
+
+
 def _static_check(payload):
     """parity-check / hardcoding-check reach the gateway through ``reason``.
 
@@ -391,6 +406,7 @@ ANSWERS = {
     'agent/feedback/code-repair': _code_repair,
     'agent/feedback/finding-triage': _finding_triage,
     'agent/migration-orchestrator/next-action': _next_action,
+    'agent/clarification/suggested-answers': _suggested_answers,
 }
 
 
