@@ -238,10 +238,7 @@ def test_reasoning_provenance_is_snapshotted_onto_the_run(registry, repo, job, a
     provenance = json.loads(run['model_provenance'])
     assert run['reasoning'] == 'DETERMINISTIC_FALLBACK'
     assert provenance['prompt_name'] == 'agent/dormancy-intelligence/classification-rationale'
-    # Repository seeds prompt_registry and model_registry APPROVED on init
-    # (FACTORY_SEED_MODEL_GATEWAY), so a fresh database resolves both and the
-    # remaining reason for falling back is that no provider is configured.
-    assert provenance['reason'] == 'no_provider_execution_adapter'
+    assert provenance['reason'] == 'no_approved_prompt_or_model'
 
 
 def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo, job, ace_repo):

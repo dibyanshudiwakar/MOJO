@@ -6,6 +6,11 @@
 
 # Databases — contain credentials, password hashes and encrypted tokens
 *.db
+# WAL journalling leaves these two beside every open database. They hold
+# not-yet-checkpointed pages of the same data, so they are as sensitive as
+# the .db itself and *.db alone does not match them.
+*.db-shm
+*.db-wal
 
 # Pipeline workspace output — created at runtime, never committed
 workspace/

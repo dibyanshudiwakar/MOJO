@@ -24,9 +24,7 @@ def test_absent_signals_lower_confidence_rather_than_reading_as_negative(repo, j
 def test_without_an_approved_prompt_the_deterministic_path_answers(repo, job):
     result = DormancyIntelligenceAgent(repo).run(job['id'], params={'traffic_count': 5, 'deployed': True})
     assert result.reasoning['mode'] == DETERMINISTIC
-    # The prompts and aliases are seeded APPROVED by default now, so what is
-    # absent out of the box is the provider adapter, not the approval.
-    assert result.reasoning['reason'] == 'no_provider_execution_adapter'
+    assert result.reasoning['reason'] == 'no_approved_prompt_or_model'
     assert result.outputs['classification'] == 'ACTIVE'
 
 
