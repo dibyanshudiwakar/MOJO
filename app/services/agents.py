@@ -8,6 +8,7 @@ from app.agents.skills import SkillIntegrityError, library, skill_for, skills_re
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
 from app.services import automode
+from app.services.clarification_reuse import PriorAnswers, ACTOR as REUSE_ACTOR, origin as reuse_origin
 from app.services.agent_llm_bindings import AgentLLMBindingService
 
 #: Questions per suggested-answers request. Small enough that the answer stays
@@ -223,6 +224,36 @@ class AgentRegistry:
   if opened:
    _log_info('Clarifications raised: %d (%s)' % (
     len(opened),','.join(sorted({cl.stage for cl in result.clarifications}))))
+  # A question answered before is not asked again. Re-running an agent raises
+  # its questions afresh, worded slightly differently each time, and one job
+  # held the same four questions 4, 4, 3 and 2 times -- each copy waiting on its
+  # own answer. See app/services/clarification_reuse.py for what counts as the
+  # same question.
+  #
+  # The earlier answer always travels with the new question (as its suggestion,
+  # pointing back at the original). It is *recorded as the answer* only where
+  # auto mode would record one: for an agent that is going on anyway. A blocked
+  # agent's questions stay open for the same reason as in automode -- answering
+  # them resumes the step, which re-runs the agent, which raises them again.
+  reused={}
+  if result.clarifications:
+   prior=PriorAnswers(self.repo,job_id)
+   for i,cl in enumerate(result.clarifications):
+    hit=prior.match(cl.stage,cl.question)
+    if hit:reused[i]=hit
+  taken=0
+  if reused:
+   take=automode.enabled() and not automode.blocks(result.status)
+   with self.repo.connect() as c:
+    for i,hit in reused.items():
+     c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=?,reused_from=? where id=?',
+               (hit['answer'],'PRIOR_ANSWER','HIGH','Answered earlier by %s' % (hit['answered_by'] or 'a person'),now(),reuse_origin(hit),opened[i]))
+     if take:
+      c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
+                (hit['answer'],now(),REUSE_ACTOR,opened[i]))
+      taken+=1
+   _log_info('Reused an earlier answer for %d of %d clarification(s)%s' % (
+    len(reused),len(opened),'' if take else ' — offered as suggestions, not recorded'))
   if result.clarifications:
    # Eager, batched: one extra model call for the *whole* run proposes a
    # draft answer for every clarification it just raised, so the operator
@@ -252,7 +283,8 @@ class AgentRegistry:
    # also fails on its own, so one bad batch costs its own suggestions only.
    suggestions=[]
    sugg_prov={'mode':UNAVAILABLE,'reason':''}
-   questions=[{'question':cl.question,'impact':cl.impact,'stage':cl.stage} for cl in result.clarifications]
+   questions=[{'question':cl.question,'impact':cl.impact,'stage':cl.stage}
+              for i,cl in enumerate(result.clarifications) if i not in reused]
    for start in range(0,len(questions),SUGGESTION_BATCH):
     batch=questions[start:start+SUGGESTION_BATCH]
     try:
@@ -281,7 +313,8 @@ class AgentRegistry:
    decided=0
    if by_question:
     with self.repo.connect() as c:
-     for cl,cid in zip(result.clarifications,opened):
+     for i,(cl,cid) in enumerate(zip(result.clarifications,opened)):
+      if i in reused:continue
       s=by_question.get(cl.question)
       if not s or not str(s.get('suggested_answer') or '').strip():continue
       c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_severity=?,suggestion_caveat=?,suggested_at=? where id=?',
@@ -290,12 +323,12 @@ class AgentRegistry:
        c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
                  (s['suggested_answer'],now(),automode.ACTOR,cid))
        decided+=1
-   _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened),sugg_prov.get('mode','')))
+   _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened)-len(reused),sugg_prov.get('mode','')))
    if decided:
     # One ledger entry for the batch rather than one per decision: the
     # clarification rows carry the per-question detail, and 95 ledger entries
     # for one run buries the chain it is supposed to make readable.
-    detail={'run_id':run['id'],'agent_id':agent_id,'decided':decided,'of':len(opened),
+    detail={'run_id':run['id'],'agent_id':agent_id,'decided':decided,'of':len(opened)-taken,
             'actor':automode.ACTOR,
             'by_confidence':{k:sum(1 for s in by_question.values()
                                    if str(s.get('confidence') or '').upper()==k)
@@ -304,12 +337,12 @@ class AgentRegistry:
      self.repo.event(c,job_id,identity,'CLARIFICATIONS_AUTO_ANSWERED',details=detail,correlation=run['correlation_id'])
      self.ledger.append(job_id,automode.ACTOR,'CLARIFICATIONS_AUTO_ANSWERED',detail,cursor=c)
     _log_warn('Auto mode decided %d of %d clarification(s) — %s' % (
-     decided,len(opened),
+     decided,len(opened)-taken,
      ', '.join('%s %s'%(v,k.lower()) for k,v in detail['by_confidence'].items() if v)))
-    if decided<len(opened):
+    if decided<len(opened)-taken:
      # Said outright so the operator is not left to infer it from the Logs and
      # the Clarifications page: these are the ones a person is being asked.
-     _log_warn('%d clarification(s) left for you — high severity and not confidently answered' % (len(opened)-decided))
+     _log_warn('%d clarification(s) left for you — high severity and not confidently answered' % (len(opened)-taken-decided))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))
