@@ -111,6 +111,33 @@ def test_the_clarifications_and_their_log_line_both_land(repo, job, bare_framewo
     assert sum(1 for m in messages if 'Clarifications raised' in m) == 1
 
 
+def test_suggestions_are_asked_in_bounded_batches(repo, job, bare_framework, step_logger, monkeypatch):
+    """95 questions in one request overran max_tokens and came back cut off.
+
+    Truncation repeats identically on retry, so the request has to be bounded.
+    Batch size 1 makes every question its own call; each must still land.
+    """
+    from app.services import agents as agents_module
+    asked = []
+    real = agents_module.produce
+
+    def spy(context, prompt, payload, **kw):
+        if prompt == 'agent/clarification/suggested-answers':
+            asked.append(len(payload['questions']))
+        return real(context, prompt, payload, **kw)
+
+    monkeypatch.setattr(agents_module, 'SUGGESTION_BATCH', 1)
+    monkeypatch.setattr(agents_module, 'produce', spy)
+    outcome = AgentRegistry(repo).dispatch(
+        job['id'], 'framework-baseline', '1.0.0',
+        ('FRAMEWORK_ANALYST',), 'tester@example.com',
+        {'path': str(bare_framework)}, logger=step_logger)
+    assert len(outcome['clarification_ids']) > 1
+    assert asked == [1] * len(outcome['clarification_ids'])
+    rows = repo.rows('select suggested_answer from clarifications where job_id=?', (job['id'],))
+    assert all(r['suggested_answer'] for r in rows)
+
+
 def test_a_suggested_answer_is_attached_to_each_question(repo, job, bare_framework, step_logger):
     """The batched suggestion call runs outside the transaction too.
 

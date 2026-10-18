@@ -9,6 +9,10 @@ from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
 from app.services import automode
 from app.services.agent_llm_bindings import AgentLLMBindingService
+
+#: Questions per suggested-answers request. Small enough that the answer stays
+#: well inside any alias's max_tokens however many clarifications a run raises.
+SUGGESTION_BATCH = 12
 class AgentRegistry:
  def __init__(self,repo): self.repo=repo;self.evidence=EvidenceService(repo);self.ledger=AuditLedger(repo);self.bindings=AgentLLMBindingService(repo)
  def contract(self,agent_id,version):
@@ -239,14 +243,28 @@ class AgentRegistry:
    #
    # Nothing is substituted: an unavailable suggestion is absent, not invented,
    # and the reason is logged.
-   try:
-    answer,sugg_prov=produce(
-     context,'agent/clarification/suggested-answers',
-     {'questions':[{'question':cl.question,'impact':cl.impact,'stage':cl.stage} for cl in result.clarifications]})
-   except ArtefactUnavailable as exc:
-    answer,sugg_prov={'suggestions':[]},{'mode':UNAVAILABLE,'reason':exc.reason}
-    _log_warn('Suggested answers unavailable (%s) — the answer boxes stay empty' % exc.reason)
-   by_question={s.get('question'):s for s in (answer.get('suggestions') or []) if isinstance(s,dict)}
+   #
+   # Asked in batches of SUGGESTION_BATCH, not all at once. The answer grows
+   # with the number of questions while max_tokens does not: 95 questions from
+   # one ace-analysis overran 32768 tokens and the response was cut mid-JSON.
+   # That is not a transient failure -- the same request truncates identically
+   # on every retry -- so the request itself has to be bounded. Each batch
+   # also fails on its own, so one bad batch costs its own suggestions only.
+   suggestions=[]
+   sugg_prov={'mode':UNAVAILABLE,'reason':''}
+   questions=[{'question':cl.question,'impact':cl.impact,'stage':cl.stage} for cl in result.clarifications]
+   for start in range(0,len(questions),SUGGESTION_BATCH):
+    batch=questions[start:start+SUGGESTION_BATCH]
+    try:
+     answer,prov=produce(context,'agent/clarification/suggested-answers',{'questions':batch})
+    except ArtefactUnavailable as exc:
+     sugg_prov['reason']=exc.reason
+     _log_warn('Suggested answers unavailable for questions %d-%d (%s) — those answer boxes stay empty' % (
+      start+1,start+len(batch),exc.reason))
+     continue
+    suggestions.extend(answer.get('suggestions') or [])
+    sugg_prov={**prov,'mode':prov.get('mode',sugg_prov['mode'])}
+   by_question={s.get('question'):s for s in suggestions if isinstance(s,dict)}
    # In auto mode a suggestion for an agent that is *going on anyway* is not a
    # proposal awaiting review -- it is the decision. Accepted here, attributed
    # to AUTO_MODE so the audit trail never implies a person reviewed it, and
