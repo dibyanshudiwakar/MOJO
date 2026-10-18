@@ -180,13 +180,28 @@ class AgentRegistry:
   # it, so a pipeline step parked on CLARIFICATION_REQUIRED (see
   # PipelineService.park_for_clarification) can look its own questions up by
   # run_id instead of guessing at job-wide stage matching.
+  #
+  # Nothing in this loop may log. StepLogger._write opens its *own* connection
+  # to append to pipeline_step_logs, and SQLite permits a single writer: the
+  # connection below takes the write lock on the first insert, the logger's
+  # connection then waits out busy_timeout (30s) and raises "database is
+  # locked". A self-deadlock, not contention -- it needs no second process and
+  # it fired on the first clarification of the run.
+  #
+  # Observed on a real ace-analysis of IDCardProfile, which raised 95
+  # clarifications: evidence registered at 04:12:10, step failed at 04:12:46.
+  # One summary line after the transaction says as much as 95 lines inside it
+  # did, and costs one write instead of 95.
+  # tests/test_no_logging_inside_a_transaction.py pins this for the codebase.
   opened=[]
   with self.repo.connect() as c:
    for cl in result.clarifications:
     cid=uid()
     self.repo.insert(c,'clarifications',{'id':cid,'job_id':job_id,'stage':cl.stage,'question':cl.question,'owner':cl.owner,'impact':cl.impact,'evidence_ref':cl.evidence_ref,'status':'OPEN','answer':'','created_at':now(),'answered_at':'','answered_by':'','run_id':run['id']})
     opened.append(cid)
-    _log_info('Clarification raised: %s (%s)' % (cid[:12], cl.stage))
+  if opened:
+   _log_info('Clarifications raised: %d (%s)' % (
+    len(opened),','.join(sorted({cl.stage for cl in result.clarifications}))))
   if result.clarifications:
    # Eager, batched: one extra model call for the *whole* run proposes a
    # draft answer for every clarification it just raised, so the operator
