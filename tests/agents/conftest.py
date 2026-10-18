@@ -95,6 +95,18 @@ class SkillAwareArtefactProvider(ArtefactProvider):
 
 
 @pytest.fixture
+def auto_mode_off(monkeypatch):
+    """Keep clarifications OPEN and parking the step.
+
+    Auto mode is on by default, so an agent whose artefact is complete resolves
+    its own questions and reports COMPLETED. A test whose subject is that a
+    conflict *becomes a question* at all needs the other setting -- the
+    behaviour is unchanged, it is just no longer the default.
+    """
+    monkeypatch.setenv('FACTORY_AUTO_MODE', '0')
+
+
+@pytest.fixture
 def repo(tmp_path, _registry_seeding):
     """A database whose governed prompt and model registries are seeded.
 

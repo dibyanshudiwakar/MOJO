@@ -18,7 +18,8 @@ def test_analysis_builds_a_semantic_model_bindable_at_g2(repo, job, ace_repo):
     assert result.outputs['semantic_model'] == row['content_hash']
 
 
-def test_an_unsupported_node_is_recorded_and_the_agent_raises_the_clarification(repo, job, tmp_path):
+def test_an_unsupported_node_is_recorded_and_the_agent_raises_the_clarification(
+        repo, job, tmp_path, auto_mode_off):
     root = tmp_path / 'vendor'
     root.mkdir()
     (root / 'V.msgflow').write_text('<flow><node id="n1" type="VendorCustomNode"/></flow>')

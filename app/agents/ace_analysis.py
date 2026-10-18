@@ -24,6 +24,7 @@ visible only inside the semantic model's own JSON.
 """
 import json
 from app.agents.artefact import produce_many
+from app.services import automode
 from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.services.priority1 import PriorityOneService
 
@@ -124,8 +125,18 @@ class ACEAnalysisAgent(BaseAgent):
                           owner=a.get('owner', 'ACE_SME'), impact=a.get('impact', 'unassessed'),
                           evidence_ref=a.get('evidenceReference', '') or 'analysis://' + result['analysis_id'])
             for a in ambiguities if isinstance(a, dict) and a.get('status', 'OPEN') == 'OPEN')
+        # The analysis itself is complete -- analysis_document and the semantic
+        # model's hash are both below -- so in auto mode the ambiguities are
+        # recorded as decisions rather than used to park the step. One real
+        # application raised 95 of them, which stopped the migration before
+        # anything downstream could run.
+        #
+        # The clarifications are still returned: dispatch persists them and, in
+        # auto mode, answers each one through the model and attributes it to
+        # AUTO_MODE. Nothing is discarded; what changes is that a reviewer reads
+        # decisions instead of blocking questions.
         return AgentResult(
-            status='CLARIFICATION_REQUIRED' if ambiguities else 'COMPLETED',
+            status='CLARIFICATION_REQUIRED' if ambiguities and not automode.enabled() else 'COMPLETED',
             outputs={'analysis_document': result['analysis_id'],
                      'semantic_model': row['content_hash'],
                      'ambiguities': ambiguities},

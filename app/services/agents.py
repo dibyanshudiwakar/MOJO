@@ -7,6 +7,7 @@ from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
+from app.services import automode
 from app.services.agent_llm_bindings import AgentLLMBindingService
 class AgentRegistry:
  def __init__(self,repo): self.repo=repo;self.evidence=EvidenceService(repo);self.ledger=AuditLedger(repo);self.bindings=AgentLLMBindingService(repo)
@@ -246,6 +247,20 @@ class AgentRegistry:
     answer,sugg_prov={'suggestions':[]},{'mode':UNAVAILABLE,'reason':exc.reason}
     _log_warn('Suggested answers unavailable (%s) — the answer boxes stay empty' % exc.reason)
    by_question={s.get('question'):s for s in (answer.get('suggestions') or []) if isinstance(s,dict)}
+   # In auto mode a suggestion for an agent that is *going on anyway* is not a
+   # proposal awaiting review -- it is the decision. Accepted here, attributed
+   # to AUTO_MODE so the audit trail never implies a person reviewed it, and
+   # carrying the model's own confidence and caveat so the LOW ones can be read
+   # off as a review queue.
+   #
+   # Not accepted for an agent that stopped. ``automode.blocks`` reads the
+   # agent's own status, and a blocked agent produced no artefact: answering
+   # its questions would resume the step, re-run the agent, raise the same
+   # questions and park again -- a loop of whole agent runs, because no agent
+   # reads these answers and resuming means re-running. See
+   # app/services/automode.py.
+   auto=automode.enabled() and not automode.blocks(result.status)
+   decided=0
    if by_question:
     with self.repo.connect() as c:
      for cl,cid in zip(result.clarifications,opened):
@@ -253,7 +268,26 @@ class AgentRegistry:
       if not s or not str(s.get('suggested_answer') or '').strip():continue
       c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=? where id=?',
                 (s['suggested_answer'],sugg_prov.get('mode',''),s.get('confidence',''),s.get('caveat',''),now(),cid))
+      if auto and automode.accepts(s.get('confidence')):
+       c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
+                 (s['suggested_answer'],now(),automode.ACTOR,cid))
+       decided+=1
    _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened),sugg_prov.get('mode','')))
+   if decided:
+    # One ledger entry for the batch rather than one per decision: the
+    # clarification rows carry the per-question detail, and 95 ledger entries
+    # for one run buries the chain it is supposed to make readable.
+    detail={'run_id':run['id'],'agent_id':agent_id,'decided':decided,'of':len(opened),
+            'actor':automode.ACTOR,
+            'by_confidence':{k:sum(1 for s in by_question.values()
+                                   if str(s.get('confidence') or '').upper()==k)
+                             for k in ('HIGH','MEDIUM','LOW')}}
+    with self.repo.connect() as c:
+     self.repo.event(c,job_id,identity,'CLARIFICATIONS_AUTO_ANSWERED',details=detail,correlation=run['correlation_id'])
+     self.ledger.append(job_id,automode.ACTOR,'CLARIFICATIONS_AUTO_ANSWERED',detail,cursor=c)
+    _log_warn('Auto mode decided %d of %d clarification(s) — %s' % (
+     decided,len(opened),
+     ', '.join('%s %s'%(v,k.lower()) for k,v in detail['by_confidence'].items() if v)))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))

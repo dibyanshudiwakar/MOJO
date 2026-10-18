@@ -72,8 +72,13 @@ def test_dispatch_completes_while_writing_step_logs(repo, job, bare_framework, s
         job['id'], 'framework-baseline', '1.0.0',
         ('FRAMEWORK_ANALYST',), 'tester@example.com',
         {'path': str(bare_framework)}, logger=step_logger)
-    assert outcome['status'] == 'CLARIFICATION_REQUIRED', 'the conflicts must raise questions'
-    assert outcome['clarification_ids'], 'and those questions must be persisted'
+    # Deliberately not asserting the step's status. The subject here is the
+    # write pattern -- clarifications inserted inside a transaction while the
+    # logger wrote on its own connection -- and auto mode makes dispatch write
+    # *more* (an insert and then an answer per question), so it exercises the
+    # deadlock path harder than parking did. What matters is that the questions
+    # were raised and persisted at all.
+    assert outcome['clarification_ids'], 'the conflicts must raise persisted questions'
 
 
 def test_the_clarifications_and_their_log_line_both_land(repo, job, bare_framework, step_logger):
@@ -89,7 +94,11 @@ def test_the_clarifications_and_their_log_line_both_land(repo, job, bare_framewo
     raised = repo.rows('select stage,question,status,run_id from clarifications where job_id=?',
                        (job['id'],))
     assert len(raised) == len(outcome['clarification_ids'])
-    assert {r['status'] for r in raised} == {'OPEN'}
+    # Status is auto mode's business, not this test's: under the default every
+    # question is ANSWERED by AUTO_MODE, and with FACTORY_AUTO_MODE=0 every one
+    # stays OPEN. Either way they were written, which is what deadlocked.
+    assert {r['status'] for r in raised} <= {'OPEN', 'ANSWERED'}
+    assert all(r['question'] for r in raised)
     # Tied to the run that raised them, which is how park_for_clarification
     # finds its own questions rather than guessing by stage.
     assert {r['run_id'] for r in raised} == {outcome['run_id']}

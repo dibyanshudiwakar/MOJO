@@ -275,6 +275,87 @@ def test_the_backoff_is_configurable_and_survives_a_bad_value(monkeypatch):
     assert artefact.backoff(2) == 0.0, 'empty means no wait, explicitly'
 
 
+# ---- diagnosing a dead credential ----------------------------------------------------------
+
+AUTH_401 = ("provider_error:AuthenticationError:Error code: 401 - "
+            "{'detail': 'Invalid token. Please check the token and try again.'}")
+
+
+def test_a_401_on_every_attempt_says_the_credential_is_the_problem(repo, job, gateway):
+    """The retry works and still cannot win, so the error has to say why.
+
+    Observed live: two source files authored at 07:34 and 07:35, then every
+    call from 07:36:03 onward returning "Invalid token" across a 47-second
+    retry window. The token expired mid-run, ``get_cvs_api_key`` re-read the
+    same expired one on each attempt, and the error reported the raw SDK text
+    three times -- which reads as a flaky call rather than a dead credential,
+    and is exactly how a correctly-retrying run got read as one that never
+    retried.
+    """
+    gateway(PROMPT)
+    provider = _Scripted(RuntimeError(AUTH_401))
+    with pytest.raises(ArtefactUnavailable) as raised:
+        produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert raised.value.attempts == 3, 'the retry still happens -- the first 401 may be transient'
+    assert len(provider.payloads) == 3, 'three real attempts were made'
+    message = raised.value.reason
+    # The prefix is untouched, so classification and every test matching on it
+    # still work.
+    assert message.startswith('provider_execution_failed:')
+    assert retryable(message) is True
+    # And the operator is told the thing they cannot see from three identical
+    # 401s: that this one is not worth retrying, and what to do instead.
+    assert 'all 3 attempts failed authentication' in message
+    assert 're-authenticate' in message
+
+
+def test_one_401_among_other_failures_is_not_diagnosed_as_a_dead_credential(repo, job, gateway):
+    """A credential that worked once in the window is flaky, not dead.
+
+    Claiming otherwise would send an operator to re-authenticate a perfectly
+    good token while the real fault was the network.
+    """
+    gateway(PROMPT)
+    provider = _Scripted(RuntimeError('provider_error:APITimeoutError:read timed out'),
+                         RuntimeError(AUTH_401),
+                         RuntimeError(AUTH_401))
+    with pytest.raises(ArtefactUnavailable) as raised:
+        produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert 'failed authentication' not in raised.value.reason
+
+
+def test_a_401_that_clears_is_never_diagnosed_at_all(repo, job, gateway):
+    """The transient kind, which is the common one: one in thirty-seven calls."""
+    gateway(PROMPT)
+    provider = _Scripted(RuntimeError(AUTH_401), VALID)
+    _, provenance = produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert provenance['attempts'] == 2
+    assert provenance['mode'] == 'MODEL_GATEWAY'
+
+
+def test_the_retry_is_announced_before_it_happens(repo, job, gateway):
+    """Three identical invocation lines are indistinguishable from one.
+
+    Which is why a run that retried correctly was reported as a run that never
+    retried: the only evidence was a count in the final error.
+    """
+    class _Recording:
+        def __init__(self):
+            self.lines = []
+        info = property(lambda self: self.lines.append)
+
+        def warn(self, message):
+            self.lines.append(message)
+
+    gateway(PROMPT)
+    logger = _Recording()
+    provider = _Scripted(RuntimeError(AUTH_401), VALID)
+    context = _context(repo, job, provider)
+    context.logger = logger
+    produce(context, PROMPT, {'traffic_count': 1})
+    assert any('attempt 2 of 3' in str(line) for line in logger.lines), logger.lines
+
+
 def test_a_schema_failure_does_not_wait(repo, job, gateway, monkeypatch):
     """The failure is in the output, not in time, so waiting changes nothing.
 

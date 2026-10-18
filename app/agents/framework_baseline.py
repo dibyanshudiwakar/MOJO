@@ -14,6 +14,7 @@ rather than discovered after generation.
 """
 from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.agents.artefact import produce
+from app.services import automode
 from app.services.priority1 import PriorityOneService
 
 OWNER = 'JAVA_ARCHITECT'
@@ -62,7 +63,13 @@ class FrameworkBaselineAgent(BaseAgent):
                           'framework://' + result['framework_id'])
             for x in conflicts)
         return AgentResult(
-            status='CLARIFICATION_REQUIRED' if conflicts else 'COMPLETED',
+            # The baseline is recorded and its template hashed before this
+            # point, so an unresolved convention conflict does not make the
+            # artefact incomplete -- it makes it annotated. In auto mode the
+            # conflicts become recorded decisions and the step proceeds; see
+            # app/services/automode.py for why that rule is "complete artefact"
+            # rather than "any clarification".
+            status='CLARIFICATION_REQUIRED' if conflicts and not automode.enabled() else 'COMPLETED',
             outputs={'framework_template': result['framework_id'], 'conflicts': conflicts},
             # content_hash of a framework baseline is the digest of its template
             # markdown, so this evidence id and the artefact share a hash and one

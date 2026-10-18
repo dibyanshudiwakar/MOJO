@@ -69,6 +69,30 @@ RETRYABLE = ('provider_execution_failed', 'model_response_schema_invalid')
 TERMINAL = ('no_approved_prompt_or_model', 'no_provider_execution_adapter',
             'gateway_refused', 'provider_alias_unavailable', 'payload_too_large')
 
+#: Substrings that identify a credential failure in a provider's error text.
+#:
+#: A 401 is worth retrying once -- the CVS gateway rejects a valid key
+#: intermittently, measured at roughly one call in thirty-seven. But a 401 on
+#: *every* attempt is a different fact: the credential is dead, not flaky, and
+#: no further attempt will fix it. Observed exactly that way -- two source files
+#: authored successfully at 07:34 and 07:35, then every call from 07:36:03
+#: onward returning "Invalid token" across a 47-second retry window, because
+#: the token expired mid-run and ``get_cvs_api_key`` kept re-fetching the same
+#: expired one.
+#:
+#: The retry is still spent, because the first 401 is indistinguishable from the
+#: transient kind. What changes is the error: it names the credential as the
+#: cause and says what to do, instead of handing the operator the raw SDK text
+#: three times over.
+AUTH_MARKERS = ('authenticationerror', '401', 'invalid token', 'unauthorized',
+                'authorization header missing', 'api_key_unavailable')
+
+
+def _is_auth_failure(reason):
+    text = str(reason or '').lower()
+    return any(marker in text for marker in AUTH_MARKERS)
+
+
 #: Seconds to wait before the 2nd and 3rd attempt at a *provider* failure.
 #:
 #: Observed against the live CVS gateway: a valid key is intermittently rejected
@@ -257,6 +281,26 @@ def _correction(problem, answer):
             'prose around it.' % (problem, keys))
 
 
+def _diagnose(reason, failures, budget):
+    """The reason, plus what repeating it across every attempt tells us.
+
+    A single 401 is ambiguous: the gateway rejects a valid key often enough that
+    the first one is probably transient. A 401 on every attempt is not
+    ambiguous, and the operator needs to be told the difference -- the raw SDK
+    text repeated three times reads as a flaky call, when what happened is that
+    the credential died and no retry could have helped.
+
+    Only ever adds to the message. The reason keeps its prefix, so
+    ``retryable``, ``TERMINAL`` and every test that matches on it are unaffected.
+    """
+    if len(failures) < max(2, budget) or not all(_is_auth_failure(f) for f in failures):
+        return reason
+    return ('%s [all %d attempts failed authentication: the gateway credential '
+            'is rejected, not flaky. get_cvs_api_key() re-reads it on every '
+            'attempt, so retrying cannot help -- re-authenticate (cvscode auth) '
+            'and run the step again.]' % (reason, len(failures)))
+
+
 def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
             attempts=ATTEMPTS, validator=None):
     """The artefact, authored by the model. No substitute, no silent degradation.
@@ -292,6 +336,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     gateway = ReasoningGateway(context.repo)
     budget = max(1, int(attempts or 1))
     corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name}
+    failures = []
     for attempt in range(1, budget + 1):
         # Checked before each attempt, not only before the first: a retry with
         # its backoff can add seconds after the operator pressed Stop, and
@@ -299,6 +344,12 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         # exists to prevent.
         if _stopping(context):
             raise StepCancelled(prompt_name)
+        # Logged before the call, with the attempt number. Three identical
+        # "LLM invoking provider" lines are indistinguishable from one, which is
+        # how a run that retried correctly got read as a run that never
+        # retried -- the only clue was a count in the final error.
+        if attempt > 1:
+            info('Retrying "%s" — attempt %d of %d' % (prompt_name, attempt, budget))
         # The correction rides in the payload rather than the template: the
         # template is the approved prompt and must not be rewritten per attempt.
         request = dict(cleared, _correction=corrections[-1]) if corrections else cleared
@@ -309,8 +360,10 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         if answer is None:
             # reason() already recorded and logged why.
             reason = provenance.get('reason') or 'model_unavailable'
+            failures.append(reason)
             if not retryable(reason) or attempt >= budget:
-                raise ArtefactUnavailable(prompt_name, reason, attempt, provenance)
+                raise ArtefactUnavailable(prompt_name, _diagnose(reason, failures, budget),
+                                          attempt, provenance)
             # A provider failure is temporal, so the next attempt waits. The
             # live gateway rejects a valid key intermittently, and retrying
             # inside the same few hundred milliseconds just fails three times.
