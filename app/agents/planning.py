@@ -110,9 +110,12 @@ class PlanningAgent(BaseAgent):
 
     #: Constructs that need a mapping, in the order they are grouped.
     KINDS = ('flows', 'subflows', 'esql', 'maps', 'schemas', 'policies')
-    #: Characters of constructs per request, well under the gateway's payload
-    #: limit once standards and context are added.
-    GROUP_CHARS = 60000
+    #: Characters of constructs per request. This bounds the *answer* as much as
+    #: the request: at 60000 a whole service's 26 constructs went in one request
+    #: and the mapping reply ran past 32768 tokens on every attempt, ten minutes
+    #: each. Small groups keep each reply a fraction of the limit and make a
+    #: failure cost one group, not the whole catalogue.
+    GROUP_CHARS = 8000
     #: Carried into every group unchanged: they inform a mapping but are not
     #: themselves mapped.
     CONTEXT = ('interfaces', 'behaviour', 'backend_type')

@@ -39,6 +39,7 @@ def test_a_cut_off_document_is_reported_as_truncated_not_as_a_bad_shape():
     with pytest.raises(RuntimeError) as raised:
         _adapter(DOCUMENT, 'max_tokens').invoke('t', {})
     assert str(raised.value).startswith('provider_response_truncated:')
+    assert "Ended:" in str(raised.value), "the tail of the reply is kept for diagnosis"
 
 
 def test_a_malformed_document_that_was_not_cut_off_is_reported_as_unparseable():

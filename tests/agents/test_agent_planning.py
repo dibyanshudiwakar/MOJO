@@ -73,7 +73,7 @@ def _model(flows, esql):
 
 
 def test_a_large_model_is_split_into_groups_under_the_budget():
-    groups = PlanningAgent(None)._groups(_model((2, 3), (4, 20000)))
+    groups = PlanningAgent(None)._groups(_model((2, 3), (6, 5000)))
     assert len(groups) > 1
     assert all(len(json.dumps(g)) < PlanningAgent.GROUP_CHARS * 2 for g in groups)
 

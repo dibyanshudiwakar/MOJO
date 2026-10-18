@@ -194,7 +194,15 @@ def retryable(reason):
     ``tests/agents/test_artefact_retry.py`` asserts every reason the gateway can
     actually emit is classified here, so that default never fires in practice.
     """
-    return str(reason or '').split(':', 1)[0] in RETRYABLE
+    text = str(reason or '')
+    # A reply cut off at max_tokens is the one provider failure that repeats:
+    # the request is unchanged, so the model writes the same length again.
+    # Observed twice (the specification, then the mapping catalogue), three
+    # attempts of about ten minutes each and the same result every time. The
+    # fix is a smaller request or a more compact answer, never another try.
+    if 'provider_response_truncated' in text:
+        return False
+    return text.split(':', 1)[0] in RETRYABLE
 
 
 def scrub(value):

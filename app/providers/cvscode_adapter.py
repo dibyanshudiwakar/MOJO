@@ -245,10 +245,16 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             # fails the response schema and the run blames the model's shape for
             # what is really a length limit. Seen on the specification document,
             # which is the largest artefact any agent returns.
+            # The head and tail are included because the raw reply is not
+            # stored, and what a runaway answer is *made of* (a long rationale,
+            # an entry per statement, a repeated block) is the only thing that
+            # says how to shorten it.
+            flat = ' '.join(text.split())
             raise RuntimeError(
                 'provider_response_truncated:max_tokens=%d: the answer was cut off '
-                'mid-JSON. Raise max_tokens for this agent or ask for a smaller '
-                'artefact.' % self.max_tokens)
+                'mid-JSON (%d chars). Raise max_tokens for this agent or ask for a '
+                'smaller artefact. Began: %s ... Ended: %s'
+                % (self.max_tokens, len(text), flat[:200], flat[-300:]))
         if parsed is None:
             # Named for every agent, never wrapped. ``{'answer': <raw text>}``
             # passed an unparseable answer on to the response schema, which then

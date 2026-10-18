@@ -82,12 +82,20 @@ def test_a_failure_that_clears_on_the_second_attempt_succeeds(repo, job, gateway
     assert provenance['mode'] == 'MODEL_GATEWAY'
 
 
-def test_a_truncated_answer_is_retried(repo, job, gateway):
-    """What CvscodeClaudeAdapter raises when max_tokens cut the JSON short."""
+def test_a_truncated_answer_is_not_retried(repo, job, gateway):
+    """What CvscodeClaudeAdapter raises when max_tokens cut the JSON short.
+
+    Observed on the specification and then the mapping catalogue: three
+    attempts of about ten minutes each, truncated identically every time. The
+    request does not change between attempts, so neither does the length.
+    """
     gateway(PROMPT)
     provider = _Scripted(RuntimeError('provider_response_truncated:max_tokens=32768'), VALID)
-    _, provenance = produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
-    assert provenance['attempts'] == 2
+    with pytest.raises(ArtefactUnavailable) as raised:
+        produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1})
+    assert raised.value.attempts == 1
+    assert len(provider.payloads) == 1, 'VALID was never reached; a second try is a wasted ten minutes'
+    assert retryable('provider_execution_failed:provider_response_truncated:max_tokens=32768') is False
 
 
 # ---- terminal ------------------------------------------------------------------------------
