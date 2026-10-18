@@ -36,6 +36,7 @@ auditor can see which model and prompt version shaped a stored artefact, and
 which runs never reached one.
 """
 import json
+import re
 from pathlib import Path
 from app.services.platform_v7 import AIRegistryService
 from app.agents.skills import skill_for, SkillIntegrityError
@@ -52,6 +53,16 @@ UNAVAILABLE = 'MODEL_UNAVAILABLE'
 #: list). Distinct from UNAVAILABLE: nothing is wrong, and distinct from
 #: MODEL_GATEWAY: the artefact is not model-authored.
 NOT_CONSULTED = 'MODEL_NOT_CONSULTED'
+
+
+def version_key(version):
+    """A sortable key for a version string: ``'v1'``, ``'1'`` and ``'2.10'`` all work.
+
+    Numbers compare as numbers, so 10 outranks 9, and a leading ``v`` is
+    ignored, so a legacy ``'v1'`` ties with ``'1'`` instead of beating ``'4'``.
+    A version with no digits sorts lowest.
+    """
+    return tuple(int(n) for n in re.findall(r'\d+', str(version or ''))) or (-1,)
 
 
 def prompt_catalogue():
@@ -89,9 +100,17 @@ class ReasoningGateway:
         self.registry = AIRegistryService(repo)
 
     def _approved(self, prompt_name, model_alias=None):
-        prompt = self.repo.one(
-            "select * from prompt_registry where name=? and status='APPROVED'"
-            ' order by version desc limit 1', (prompt_name,))
+        # The newest approved version, compared as numbers. This was
+        # ``order by version desc``, which compares text: a legacy seed row
+        # versioned 'v1' sorted above '2', '3' and '4', so for 32 prompts every
+        # later version was registered, approved and never used -- planning ran
+        # on its original prompt through four revisions of it, and '10' would
+        # have lost to '9' the same way.
+        prompt = max(
+            self.repo.rows("select * from prompt_registry where name=? and status='APPROVED'",
+                           (prompt_name,)),
+            key=lambda row: (version_key(row['version']), row['created_at'] or ''),
+            default=None)
         if model_alias:
             model = self.repo.one(
                 "select * from model_registry where name=? and status='APPROVED'"
