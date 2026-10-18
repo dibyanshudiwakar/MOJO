@@ -234,6 +234,11 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             raise RuntimeError('provider_refused:' + str(getattr(message, 'stop_details', '')))
         text = ''.join(b.text for b in message.content if getattr(b, 'type', '') == 'text')
         parsed = _parse_json(text)
+        brace, bracket = text.find('{'), text.find('[')
+        if not isinstance(parsed, dict) and brace >= 0 and (bracket < 0 or brace < bracket):
+            # The reply opens like an object but did not parse as one. A scalar
+            # or array recovered from inside it is a fragment, not the answer.
+            parsed = None
         if parsed is None and getattr(message, 'stop_reason', '') == 'max_tokens':
             # The answer was cut off mid-JSON, so it cannot parse. Reported as
             # itself rather than wrapped as {'answer': <raw>}: that wrapper then
@@ -316,7 +321,16 @@ def _parse_json(text):
     if fence:
         body = s[fence.end():]
         candidates.append(body.rsplit('```', 1)[0] if '```' in body else body)
-    candidates += [_span(s, '{', '}'), _span(s, '[', ']')]
+    # Only the outermost structure: whichever opener comes first in the text.
+    # Trying '[' after '{' failed let an *inner* array of a document that did
+    # not parse as a whole (cut off, or malformed) parse on its own, return as
+    # the answer, and defeat both the max_tokens check and the unparseable
+    # error below -- the run then reported a schema failure on {'answer': ...}
+    # for what was a truncated specification.
+    openers = [(s.find(o), o, c) for o, c in (('{', '}'), ('[', ']')) if o in s]
+    if openers:
+        _, opener, closer = min(openers)
+        candidates.append(_span(s, opener, closer))
     for candidate in candidates:
         candidate = (candidate or '').strip()
         if not candidate:
