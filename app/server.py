@@ -546,7 +546,7 @@ class H(BaseHTTPRequestHandler):
             pr=self.principal();user=self.current_user(pr)
             if not user: return self.stale_session()
             return self.sendj(200,{'count':notify7.unread_count(user['email'])})
-        if p=='/api/v7/approval-inbox': return self.sendj(200,{'items':approvals7.inbox_for(self.principal())})
+        if p=='/api/v7/approval-inbox': return self.sendj(200,{'items':approvals7.inbox_for(self.principal()),'withheld':approvals7.withheld_for(self.principal())})
         if p=='/api/v7/gates': return self.sendj(200,{'items':approvals7.gates(),'source':'live_database','generated_at':now()})
         if p=='/api/v7/knowledge/search': return self.sendj(200,{'items':knowledge7.search((q.get('q') or [''])[0],(q.get('job_id') or [''])[0])})
         if p=='/api/v7/observability/summary': return self.sendj(200,observe7.summary())
