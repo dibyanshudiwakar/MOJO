@@ -77,3 +77,63 @@ def test_specification_requires_an_analysis_that_exists(repo, job):
         MigrationSpecificationAgent(repo).run(job['id'])
     with pytest.raises(ValueError, match='analysis_not_found'):
         MigrationSpecificationAgent(repo).run(job['id'], params={'analysis_id': 'nope'})
+
+
+# ---- authored a section at a time ----------------------------------------------------------
+#
+# The whole document in one reply overran the gateway's 32768-token output limit
+# on a real service (34 interfaces, 95 clarifications), on all three attempts.
+
+class _Recording:
+    """Wraps the suite's model double and records what was asked."""
+
+    accepts_skill = True
+
+    def __init__(self, inner, wrong_section_once=False):
+        self.inner, self.payloads, self._wrong = inner, [], wrong_section_once
+
+    def invoke(self, template, payload, skill=None):
+        self.payloads.append(payload)
+        answer = self.inner.invoke(template, payload, skill=skill)
+        if self._wrong:
+            self._wrong = False
+            return {**answer, 'section': 'tests' if answer.get('section') != 'tests' else 'source'}
+        return answer
+
+
+def _agent_with(repo, job, analysis, wrong_section_once=False):
+    from app.services.agents import default_provider
+    recorder = _Recording(default_provider(), wrong_section_once)
+    agent = MigrationSpecificationAgent(repo)
+    result = agent.run(job['id'], params={'analysis_id': analysis}, provider=recorder)
+    return recorder, result
+
+
+def test_it_asks_one_request_per_section(repo, job, analysis):
+    from app.agents.migration_specification import SECTIONS
+    recorder, _ = _agent_with(repo, job, analysis)
+    assert [p['section'] for p in recorder.payloads] == list(SECTIONS)
+
+
+def test_recorded_facts_are_attached_not_sent_to_the_model_to_retype(repo, job, analysis):
+    """95 clarifications re-typed through a model is where the length went."""
+    recorder, result = _agent_with(repo, job, analysis)
+    assert all('clarifications' not in p and 'governance' not in p for p in recorder.payloads)
+    spec = yaml.safe_load(repo.one('select yaml_text from migration_specs where id=?',
+                                   (result.outputs['migration_specification_yaml'],))['yaml_text'])
+    ambiguities = json_loads(repo.one('select ambiguities from ace_analyses where id=?',
+                                      (analysis,))['ambiguities'] or '[]')
+    assert [c['question'] for c in spec['clarifications']] == [a.get('question', '') for a in ambiguities]
+    assert spec['governance']['stopConditions']
+
+
+def test_an_answer_for_the_wrong_section_is_corrected_not_accepted(repo, job, analysis):
+    recorder, result = _agent_with(repo, job, analysis, wrong_section_once=True)
+    # The first section was answered as another one, so it was asked again.
+    assert len(recorder.payloads) == 7
+    assert recorder.payloads[1]['section'] == recorder.payloads[0]['section']
+    assert '_correction' in recorder.payloads[1] and 'section must be' in recorder.payloads[1]['_correction']
+    assert result.status == 'COMPLETED'
+
+
+from json import loads as json_loads  # noqa: E402

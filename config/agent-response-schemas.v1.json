@@ -615,6 +615,20 @@
         }
       ]
     },
+    "agent/migration-specification/section": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "One section of the migration specification",
+      "description": "The full document overran the gateway's output limit when authored in one reply, so it is authored a section at a time. The section's own shape is checked by the agent against its slice of schemas/migration-specification.schema.json inside the retry loop; this schema only has to catch an answer that is not a section at all.",
+      "type": "object",
+      "properties": {
+        "section": {
+          "type": "string",
+          "enum": ["source", "interfaces", "behaviour", "target", "mappings", "tests"]
+        },
+        "content": {}
+      },
+      "required": ["section", "content"]
+    },
     "agent/planning/mapping-catalogue": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ACE construct to Spring pattern mappings",

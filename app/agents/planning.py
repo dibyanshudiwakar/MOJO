@@ -20,8 +20,9 @@ approval cites is therefore the approver's act, not the planner's -- see
 ``docs/AGENTS_DEVELOPMENT.md``.
 """
 import json
+import yaml
 from app.agents.base import AgentResult, BaseAgent, Clarification
-from app.agents.artefact import produce
+from app.agents.artefact import produce_many
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 
@@ -46,11 +47,22 @@ class PlanningAgent(BaseAgent):
         framework, analysis, specification = service.planning_inputs(
             context.job_id, framework_id, analysis_id, specification_id)
         model = json.loads(analysis['semantic_model'])
-        mapped, provenance = produce(
+        standards = json.loads(framework['standards']) if framework else {}
+        # What the specification contributes to a mapping decision is the target
+        # it fixed, not the document: the rest repeats the semantic model (and,
+        # for a real service, 95 clarifications).
+        spec = yaml.safe_load(specification['yaml_text']) or {}
+        brief = {k: spec.get(k) for k in ('metadata', 'target') if k in spec}
+        # Mapped in groups, not in one request. The whole model plus the whole
+        # specification came to 245,531 characters against a 180,000 limit, so
+        # planning failed before it reached the model -- and no retry can shrink
+        # a request. The same bound that keeps ace-analysis per file.
+        groups = self._groups(model)
+        pieces, provenance = produce_many(
             context, self.PROMPT,
-            {'semantic_model': model,
-             'framework_standards': json.loads(framework['standards']) if framework else {},
-             'specification': specification['yaml_text']})
+            [(i, {'semantic_model': g, 'framework_standards': standards, 'specification': brief})
+             for i, g in enumerate(groups)])
+        mapped = self._merge(pieces[i] for i in sorted(pieces))
         catalogue = service.record_mapping_catalogue(
             context.job_id, framework_id, analysis_id, specification_id, mapped, version)
         risks = self.repo.rows(
@@ -95,6 +107,47 @@ class PlanningAgent(BaseAgent):
                      'g3_package_id': package['package_id'],
                      'implementation_sequence': plan['implementation_sequence']},
             reasoning=provenance)
+
+    #: Constructs that need a mapping, in the order they are grouped.
+    KINDS = ('flows', 'subflows', 'esql', 'maps', 'schemas', 'policies')
+    #: Characters of constructs per request, well under the gateway's payload
+    #: limit once standards and context are added.
+    GROUP_CHARS = 60000
+    #: Carried into every group unchanged: they inform a mapping but are not
+    #: themselves mapped.
+    CONTEXT = ('interfaces', 'behaviour', 'backend_type')
+
+    def _groups(self, model):
+        """The model split into requests of bounded size, one construct never split."""
+        context = {k: model[k] for k in self.CONTEXT if k in model}
+        groups, current, size = [], {}, 0
+        for kind in self.KINDS:
+            for item in model.get(kind) or []:
+                length = len(json.dumps(item))
+                if current and size + length > self.GROUP_CHARS:
+                    groups.append({**context, **current})
+                    current, size = {}, 0
+                current.setdefault(kind, []).append(item)
+                size += length
+        if current:
+            groups.append({**context, **current})
+        return groups
+
+    @staticmethod
+    def _merge(pieces):
+        """One catalogue from the groups' answers, each construct once."""
+        merged = {'mappings': [], 'unsupported': [], 'risks': []}
+        seen = set()
+        for piece in pieces:
+            for m in piece.get('mappings') or []:
+                key = (m.get('source_reference'), m.get('ace_construct'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged['mappings'].append(m)
+            merged['unsupported'] += piece.get('unsupported') or []
+            merged['risks'] += piece.get('risks') or []
+        return merged
 
 
 if __name__ == '__main__':

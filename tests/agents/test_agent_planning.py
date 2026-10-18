@@ -55,3 +55,45 @@ def test_an_unmappable_construct_stops_at_the_catalogue(repo, job, dispatch, app
     assert result.metrics['unsupported_count'] == 1
     assert result.evidence == ()
     assert any(x['severity'] == 'HIGH' for x in result.outputs['risk_register'])
+
+
+# ---- mapped in bounded groups --------------------------------------------------------------
+#
+# The whole semantic model plus the whole specification came to 245,531
+# characters against the gateway's 180,000 limit on a real service, so planning
+# failed before reaching the model, with no retry possible.
+
+def _model(flows, esql):
+    return {'flows': [{'path': 'F%d.msgflow' % i,
+                       'nodes': [{'id': 'n%d' % j, 'type': 'ComputeNode'} for j in range(flows[1])]}
+                      for i in range(flows[0])],
+            'esql': [{'path': 'E%d.esql' % i, 'body': 'x' * esql[1]} for i in range(esql[0])],
+            'interfaces': [{'name': 'i'}], 'behaviour': {'k': 'v'},
+            'ambiguities': [{'question': 'q' * 1000}] * 100}
+
+
+def test_a_large_model_is_split_into_groups_under_the_budget():
+    groups = PlanningAgent(None)._groups(_model((2, 3), (4, 20000)))
+    assert len(groups) > 1
+    assert all(len(json.dumps(g)) < PlanningAgent.GROUP_CHARS * 2 for g in groups)
+
+
+def test_every_construct_lands_in_exactly_one_group():
+    model = _model((3, 2), (4, 20000))
+    groups = PlanningAgent(None)._groups(model)
+    assert sorted(f['path'] for g in groups for f in g.get('flows', [])) == [f['path'] for f in model['flows']]
+    assert sorted(e['path'] for g in groups for e in g.get('esql', [])) == [e['path'] for e in model['esql']]
+
+
+def test_context_travels_with_every_group_and_ambiguities_do_not():
+    for group in PlanningAgent(None)._groups(_model((1, 1), (4, 20000))):
+        assert group['interfaces'] and group['behaviour']
+        assert 'ambiguities' not in group
+
+
+def test_the_merge_keeps_each_construct_once():
+    m = {'source_reference': 'F#n', 'ace_construct': 'ComputeNode'}
+    merged = PlanningAgent._merge([{'mappings': [m], 'risks': [{'a': 1}]},
+                                   {'mappings': [m, {**m, 'source_reference': 'G#n'}]}])
+    assert [x['source_reference'] for x in merged['mappings']] == ['F#n', 'G#n']
+    assert merged['risks'] == [{'a': 1}] and merged['unsupported'] == []

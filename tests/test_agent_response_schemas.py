@@ -54,6 +54,8 @@ SAMPLES = {
     'agent/migration-specification/authoring': {
         'springModules': ['web'], 'approvedDependencies': ['spring-boot-starter-web'],
         'notes': []},
+    'agent/migration-specification/section': {
+        'section': 'target', 'content': {'springModules': ['web'], 'approvedDependencies': []}},
     'agent/planning/mapping-catalogue': {
         'mappings': [{'source_reference': 'Orders.msgflow#in',
                       'ace_construct': 'ComIbmWSInput.msgnode',

@@ -28,8 +28,9 @@ supply them is gone.
 import json
 from pathlib import Path
 import yaml
+from jsonschema import Draft202012Validator
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.artefact import produce
+from app.agents.artefact import produce_many
 from app.services.specification import SpecificationService
 
 SCHEMA = Path(__file__).resolve().parents[2] / 'schemas' / 'migration-specification.schema.json'
@@ -37,6 +38,9 @@ SCHEMA = Path(__file__).resolve().parents[2] / 'schemas' / 'migration-specificat
 #: conditions are a governance fact, not something a model may invent, and the
 #: document schema requires them.
 STOP_CONDITIONS = ['iteration-limit', 'unresolved-clarification', 'failed-gate']
+#: The sections the model authors, one request each. The rest of the document
+#: (metadata, governance, clarifications) is recorded fact attached by execute().
+SECTIONS = ('source', 'interfaces', 'behaviour', 'target', 'mappings', 'tests')
 
 
 class MigrationSpecificationAgent(BaseAgent):
@@ -44,7 +48,9 @@ class MigrationSpecificationAgent(BaseAgent):
     SKILL = 'iib-to-ms-migration-specification'
     TOOLS = ('evidence.read', 'schema.validate', 'evidence.write')
     OUTPUTS = ('migration_specification_yaml',)
-    PROMPT = 'agent/migration-specification/authoring'
+    #: ``.../authoring`` (the whole document in one reply) stays registered but is
+    #: no longer asked for; see the comment in execute().
+    PROMPT = 'agent/migration-specification/section'
 
     def execute(self, context):
         job = context.job()
@@ -66,47 +72,53 @@ class MigrationSpecificationAgent(BaseAgent):
             dependencies = sorted(json.loads(framework['standards'] or '{}').get('dependencies') or [])
         service = SpecificationService(self.repo, SCHEMA)
 
-        def document_valid(answer):
-            """The specification's own schema, checked inside the retry loop.
+        metadata = {'service': job['service'],
+                    'sourceCommit': job['source_revision'],
+                    'analysisVersion': analysis['version'],
+                    'frameworkTemplateVersion': framework['version'] if framework else version}
+        governance = {'enabledGates': gates,
+                      'iterationLimit': int(context.param('iteration_limit', 5)),
+                      'stopConditions': STOP_CONDITIONS}
+        slices = service.schema.get('properties', {})
 
-            ``schemas/migration-specification.schema.json`` is a separate
-            document with rules the response schema cannot express, and an
-            invalid specification blocks G2. This used to substitute a composed
-            one; now the violation goes back to the model as a correction, which
-            is the only path that can actually produce a valid document.
+        def section_valid(section, answer):
+            """One section against its slice of the document schema, in the retry loop.
+
+            ``schemas/migration-specification.schema.json`` has rules the
+            response schema cannot express, and an invalid specification blocks
+            G2. A violation goes back to the model as a correction, which is the
+            only path that can produce a valid section.
             """
-            spec = (answer or {}).get('specification')
-            if not isinstance(spec, dict):
-                return 'specification missing or not an object'
-            errors = service.validate(yaml.safe_dump(spec))[1]
-            return ('specification failed its document schema: '
-                    + json.dumps(errors)[:300]) if errors else ''
+            if (answer or {}).get('section') != section:
+                return 'section must be %r, got %r' % (section, (answer or {}).get('section'))
+            errors = [e.message for e in Draft202012Validator(slices[section]).iter_errors(answer.get('content'))]
+            return ('section %r failed its document schema: %s' % (section, json.dumps(errors)[:300])) if errors else ''
 
-        # The payload carries every fact the document requires that is not in
-        # the semantic model. It used to carry only the model, the standards and
-        # the schema -- enough to comment on a specification, not enough to
-        # author one: metadata.service, sourceCommit, analysisVersion and the
-        # whole governance block were supplied by the deterministic composer,
-        # which the model has no way to guess. Asking it to author the document
-        # without them would have produced an answer that fails the document
-        # schema on every attempt.
-        authored, provenance = produce(
+        # Authored a section at a time. The whole document in one reply overran
+        # the gateway's 32768-token output limit on a real service (34
+        # interfaces, 95 clarifications): the reply was cut off mid-JSON on all
+        # three attempts, about four minutes each. A retry cannot fix a length
+        # limit, so the request itself is bounded.
+        #
+        # The model writes the sections that are judgement over the semantic
+        # model. metadata, governance and clarifications are recorded facts the
+        # document must carry verbatim -- the service name, source commit and
+        # enabled gates, and the analysis's own ambiguities -- so they are
+        # attached here rather than asked for. Re-typing 95 clarifications
+        # through a model is where most of the length went, and a transcription
+        # a model can only get wrong.
+        base = {'semantic_model': model,
+                'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
+                'metadata': metadata,
+                'ace_version': str(context.param('ace_version', '12')),
+                'approved_dependencies': dependencies}
+        authored, provenance = produce_many(
             context, self.PROMPT,
-            {'semantic_model': model,
-             'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
-             'schema': service.schema,
-             'metadata': {'service': job['service'],
-                          'sourceCommit': job['source_revision'],
-                          'analysisVersion': analysis['version'],
-                          'frameworkTemplateVersion': framework['version'] if framework else version},
-             'ace_version': str(context.param('ace_version', '12')),
-             'approved_dependencies': dependencies,
-             'clarifications': [self._clarification(a) for a in ambiguities],
-             'governance': {'enabledGates': gates,
-                            'iterationLimit': int(context.param('iteration_limit', 5)),
-                            'stopConditions': STOP_CONDITIONS}},
-            validator=document_valid)
-        spec = authored['specification']
+            [(s, {**base, 'section': s, 'section_schema': slices[s]}) for s in SECTIONS],
+            validator=section_valid)
+        spec = {s: authored[s]['content'] for s in SECTIONS}
+        spec.update({'metadata': metadata, 'governance': governance,
+                     'clarifications': [self._clarification(a) for a in ambiguities]})
         text = yaml.safe_dump(spec, sort_keys=True, default_flow_style=False)
         saved = service.save(context.job_id, version, text)
         if saved['status'] != 'VALID':

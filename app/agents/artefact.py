@@ -402,7 +402,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
 
 
 def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
-                 attempts=ATTEMPTS):
+                 attempts=ATTEMPTS, validator=None):
     """One request per item, all of them or none.
 
     This is how reading source stays inside the gateway's response limit: a
@@ -417,6 +417,9 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
 
     ``items`` is a sequence of ``(key, payload)``. Returns
     ``(dict keyed as given, provenance)``.
+
+    ``validator``, if given, is called as ``validator(key, answer)`` and travels
+    the same retry-with-correction path as ``produce``'s.
     """
     info, warn = _log(context)
     produced, provenance = {}, {}
@@ -433,7 +436,8 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
             raise StepCancelled(prompt_name, index, len(pending))
         artefact, provenance = produce(context, prompt_name, payload,
                                        schema_name=schema_name, skill=skill,
-                                       attempts=attempts)
+                                       attempts=attempts,
+                                       validator=(lambda a, k=key: validator(k, a)) if validator else None)
         produced[key] = artefact
     if not produced:
         # Not a failure. Nothing was asked because there was nothing to ask

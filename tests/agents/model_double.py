@@ -188,8 +188,7 @@ def _specification(payload):
     keys = {mapping_key(x, DEFAULT_MAPPINGS) for x in constructs}
     modules = sorted({DEFAULT_MAPPINGS[k]['module'] for k in keys if k})
     service = (payload.get('metadata') or {}).get('service', '')
-    return {'specification': {
-        'metadata': payload.get('metadata') or {},
+    sections = {
         'source': {'aceVersion': str(payload.get('ace_version', '12')),
                    'applications': [service] if service else [],
                    'libraries': [], 'flows': _paths(model.get('flows')),
@@ -207,9 +206,11 @@ def _specification(payload):
         'mappings': [],
         'tests': {'inputSources': sorted({x.get('protocol', '')
                                           for x in model.get('interfaces') or []}),
-                  'invariants': [], 'masks': [], 'tolerances': []},
-        'clarifications': payload.get('clarifications') or [],
-        'governance': payload.get('governance') or {}}}
+                  'invariants': [], 'masks': [], 'tolerances': []}}
+    # One section per request, which is how the agent now asks: the whole
+    # document in a single reply overran the gateway's output limit.
+    section = payload.get('section')
+    return {'section': section, 'content': sections[section]}
 
 
 def _project_layout(payload):
@@ -389,7 +390,7 @@ ANSWERS = {
     'agent/repository-intake/inventory': _inventory,
     'agent/ace-analysis/semantic-model': _semantic_fragment,
     'agent/framework-baseline/standards': _standards,
-    'agent/migration-specification/authoring': _specification,
+    'agent/migration-specification/section': _specification,
     'agent/planning/mapping-catalogue': _mapping_catalogue,
     'agent/code-generation/project-layout': _project_layout,
     'agent/code-generation/file-synthesis': _file_synthesis,
