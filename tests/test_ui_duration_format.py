@@ -65,11 +65,18 @@ CASES = [
     ("spanMs('2026-10-17T10:00:00Z','2026-10-17T10:14:07Z')", '847000'),
     # An empty finish stamp means "until now", which is what makes the chip live.
     ("spanMs('2026-10-17T10:00:00Z','',Date.parse('2026-10-17T10:02:30Z'))", '150000'),
-    # Clamped at zero: the server stamps UTC from its own clock, and a browser a
-    # few seconds behind it would otherwise compute a negative span for a step
-    # that just started -- which fmtDur blanks, so the counter would disappear
-    # for the first seconds of every run.
+    # Clamped against the *browser's* clock only: the server stamps started_at
+    # in UTC from its own clock, and a browser a few seconds behind would
+    # otherwise compute a negative span for a step that just started, blanking
+    # the live counter for the first seconds of every run.
     ("spanMs('2026-10-17T10:00:10Z','',Date.parse('2026-10-17T10:00:00Z'))", '0'),
+    # Two server stamps in the wrong order are NOT clamped. That is
+    # contradictory data, not skew, and there is no honest duration for it.
+    # Clamping it to zero rendered every retried step as "<1s", because a
+    # retried step kept the finish time of the attempt that failed and was then
+    # given a newer start -- a blank gets investigated, "<1s" does not.
+    ("spanMs('2026-10-17T10:05:00Z','2026-10-17T10:00:00Z')", 'NaN'),
+    ("fmtSpan('2026-10-17T10:05:00Z','2026-10-17T10:00:00Z')", ''),
     ("spanMs('','2026-10-17T10:14:07Z')", 'NaN'),
     ("spanMs('not-a-date','2026-10-17T10:14:07Z')", 'NaN'),
     ("spanMs('2026-10-17T10:00:00Z','not-a-date')", 'NaN'),
@@ -169,6 +176,69 @@ def test_the_detail_payload_carries_the_pipelines_own_run_window(env):
     assert running['started_at'], 'no start stamp means no elapsed counter'
     # Still open, which is what the UI reads as "tick this one".
     assert running['completed_at'] == ''
+
+
+def test_a_retried_step_does_not_keep_the_failed_attempts_finish_time(env):
+    """The bug behind "retried agent shows <1s".
+
+    ``retry_step`` sent the step back to PENDING but left ``completed_at`` from
+    the attempt that failed. ``mark_step`` then stamped a *newer*
+    ``started_at``, so the step carried a window that ended before it began and
+    every retried step rendered as "<1s".
+
+    Asserted as an ordering invariant rather than against a formatted string:
+    any arithmetic over these two columns is wrong while they contradict each
+    other, and the UI is only one consumer.
+    """
+    repo, job, pipelines, workflow = env
+    p = pipelines.create(job['id'], 'workspace/orders', {}, ['repository-intake'],
+                         'tester@example.com')
+    pipelines.confirm(p['id'])
+    pipelines.run(p['id'], workflow)
+    step = pipelines.detail(p['id'])['steps'][0]
+
+    pipelines.mark_step(step['id'], 'RUNNING')
+    pipelines.mark_step(step['id'], 'FAILED', error='boom')
+    failed = pipelines.detail(p['id'])['steps'][0]
+    assert failed['started_at'] and failed['completed_at']
+
+    pipelines.retry_step(step['id'])
+    requeued = pipelines.detail(p['id'])['steps'][0]
+    assert requeued['status'] == 'PENDING'
+    assert requeued['completed_at'] == '', 'a step about to run again has not finished'
+    # started_at survives: _release_disabled_gate reads it to tell a step that
+    # has run from one that never has.
+    assert requeued['started_at'] == failed['started_at']
+
+    pipelines.mark_step(step['id'], 'RUNNING')
+    running = pipelines.detail(p['id'])['steps'][0]
+    assert running['completed_at'] == '', 'still no finish time while it runs'
+    pipelines.mark_step(step['id'], 'COMPLETED', outputs={'ok': True})
+    done = pipelines.detail(p['id'])['steps'][0]
+    assert done['completed_at'] >= done['started_at'], 'the window cannot end before it begins'
+
+
+def test_every_requeue_clears_the_finish_time(env):
+    """Not only retry: pause, clarification and gate release all re-queue.
+
+    They each used their own UPDATE and only ``retry_step`` was reported, so
+    the fix is one helper rather than one patched statement -- and this pins
+    that the helper is what they all use.
+    """
+    repo, job, pipelines, workflow = env
+    p = pipelines.create(job['id'], 'workspace/orders', {}, ['repository-intake'],
+                         'tester@example.com')
+    pipelines.confirm(p['id'])
+    pipelines.run(p['id'], workflow)
+    step = pipelines.detail(p['id'])['steps'][0]
+    pipelines.mark_step(step['id'], 'RUNNING')
+    pipelines.mark_step(step['id'], 'COMPLETED', outputs={'ok': True})
+    assert pipelines.detail(p['id'])['steps'][0]['completed_at']
+    with repo.connect() as c:
+        pipelines._requeue(c, step['id'])
+    after = pipelines.detail(p['id'])['steps'][0]
+    assert (after['status'], after['completed_at'], after['error'], after['queue_id']) == \
+        ('PENDING', '', '', '')
 
 
 def test_a_step_reports_the_window_the_card_shows(env):

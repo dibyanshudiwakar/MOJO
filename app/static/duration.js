@@ -32,17 +32,24 @@ function spanMs(from, to, now) {
  if (!from) return NaN;
  const start = new Date(from).getTime();
  if (isNaN(start)) return NaN;
- let end;
  if (to) {
-  end = new Date(to).getTime();
+  const end = new Date(to).getTime();
   if (isNaN(end)) return NaN;
- } else {
-  end = typeof now === 'number' ? now : Date.now();
+  // NOT clamped. Both stamps come from the server's own clock, so one before
+  // the other is not skew -- it is contradictory data, and there is no honest
+  // duration to show. NaN blanks the chip.
+  //
+  // Clamping here hid a real bug: a retried step kept the finish time of the
+  // attempt that failed, so its new start was *after* its recorded finish, and
+  // every retried step displayed "<1s". A blank would have been read as
+  // missing data and investigated; "<1s" read as a fast step.
+  return end < start ? NaN : end - start;
  }
- // Clamped at zero on purpose. The server stamps these from its own clock in
- // UTC; a browser running a few seconds behind it would otherwise compute a
- // negative span for a step that just started, which fmtDur blanks -- so the
- // counter would vanish for the first few seconds of every run.
+ // Clamped only against the browser's clock, which is the one case where a
+ // small negative is expected rather than wrong: the server stamps started_at
+ // in UTC from its clock, and a browser a few seconds behind would otherwise
+ // blank the live counter for the first seconds of every run.
+ const end = typeof now === 'number' ? now : Date.now();
  return Math.max(0, end - start);
 }
 

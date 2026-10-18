@@ -1647,7 +1647,11 @@ async function pipelineDetail(id){
  if(p.status==='RUNNING'||p.status==='WAITING_APPROVAL'){const pauseBtn=$('#pPause');if(pauseBtn)pauseBtn.onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/pause',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};}
  if(p.status==='PAUSED')$('#pResume').onclick=async()=>{try{await api('/api/v2/pipelines/'+id+'/resume',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};
  if(p.status==='RUNNING'||p.status==='PAUSED'||p.status==='WAITING_APPROVAL'){const cancelBtn=$('#pCancel');if(cancelBtn)cancelBtn.onclick=async()=>{
-  if(!confirm('Stop this pipeline? Steps that have not started will be cancelled; a step already running will finish but no longer affects the outcome.'))return;
+  // The old wording said a running step "will finish but no longer affects the
+  // outcome", which was true and is not any more: cancel now stops the running
+  // agent too. It stops at the agent's next checkpoint, between model calls,
+  // so the honest promise is "shortly" rather than "instantly".
+  if(!confirm('Stop this pipeline? Steps that have not started are cancelled, and the agent currently running is asked to stop — it finishes its current model call first, so this can take a minute. Work it had partly done is discarded.'))return;
   try{await api('/api/v2/pipelines/'+id+'/cancel',{method:'POST'});pipelineDetail(id)}catch(e){notice(e.message,true)}};};
  document.querySelectorAll('[data-step]').forEach(el=>{
   const step=p.steps.find(s=>s.id===el.dataset.step);

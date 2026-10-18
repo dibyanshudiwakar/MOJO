@@ -104,6 +104,31 @@ def backoff(attempt):
 _schemas = None
 
 
+class StepCancelled(RuntimeError):
+    """Someone asked this run to stop, and it stopped at a safe point.
+
+    Not a failure and not an outage: the operator cancelled the pipeline. It is
+    a distinct exception from ``ArtefactUnavailable`` precisely so the worker
+    can tell "nobody wants this any more" from "the model could not answer" --
+    the first is a CANCELLED step and the second is a FAILED one, and recording
+    a cancellation as a failure would put a fault on the record where there was
+    a decision.
+
+    Whatever the run had produced so far is discarded. ``produce_many`` is
+    all-or-nothing, so there is no valid partial artefact to keep: a semantic
+    model covering 15 of 17 source files cannot be told from a complete one by
+    anything downstream, which is the same reason ``PARTIAL_MODEL_GATEWAY`` was
+    removed.
+    """
+
+    def __init__(self, prompt_name, produced=0, total=0):
+        self.prompt_name = prompt_name
+        self.produced = produced
+        self.total = total
+        super().__init__('step_cancelled:%s:%d_of_%d_produced_and_discarded' % (
+            prompt_name, produced, total))
+
+
 class ArtefactUnavailable(RuntimeError):
     """The model could not produce this artefact, and nothing may stand in.
 
@@ -199,6 +224,24 @@ def _log(context):
             logger.warn if logger else (lambda m: None))
 
 
+def _stopping(context):
+    """Whether this run has been cancelled. False when nothing supplied a check.
+
+    Deliberately forgiving: a context without ``cancelled`` -- a direct
+    ``run()``, an older caller, a test double -- is simply never cancelled. A
+    predicate that raises is treated the same way rather than failing the agent,
+    because a broken cancellation check must not be able to stop work that is
+    otherwise fine.
+    """
+    check = getattr(context, 'cancelled', None)
+    if not callable(check):
+        return False
+    try:
+        return bool(check())
+    except Exception:
+        return False
+
+
 def _correction(problem, answer):
     """What to tell the model about the response it just got wrong.
 
@@ -250,6 +293,12 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     budget = max(1, int(attempts or 1))
     corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name}
     for attempt in range(1, budget + 1):
+        # Checked before each attempt, not only before the first: a retry with
+        # its backoff can add seconds after the operator pressed Stop, and
+        # spending another model call on work nobody wants is the thing this
+        # exists to prevent.
+        if _stopping(context):
+            raise StepCancelled(prompt_name)
         # The correction rides in the payload rather than the template: the
         # template is the approved prompt and must not be rewritten per attempt.
         request = dict(cleared, _correction=corrections[-1]) if corrections else cleared
@@ -316,9 +365,19 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
     ``items`` is a sequence of ``(key, payload)``. Returns
     ``(dict keyed as given, provenance)``.
     """
-    info, _ = _log(context)
+    info, warn = _log(context)
     produced, provenance = {}, {}
-    for key, payload in items:
+    pending = list(items)
+    for index, (key, payload) in enumerate(pending):
+        # The checkpoint that matters. This loop is where a long agent spends
+        # its time -- ace-analysis sends one request per source file and a real
+        # repository takes half an hour -- so checking between items is what
+        # makes cancelling a pipeline reach an agent already in flight. It lands
+        # within one model call, because the call itself is not interrupted.
+        if _stopping(context):
+            warn('Cancelled after %d of %d artefact(s) for "%s" — discarding them'
+                 % (index, len(pending), prompt_name))
+            raise StepCancelled(prompt_name, index, len(pending))
         artefact, provenance = produce(context, prompt_name, payload,
                                        schema_name=schema_name, skill=skill,
                                        attempts=attempts)

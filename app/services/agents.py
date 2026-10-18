@@ -1,7 +1,7 @@
 import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
-from app.agents.artefact import ArtefactUnavailable, produce
+from app.agents.artefact import ArtefactUnavailable, StepCancelled, produce
 from app.agents.reasoning import UNAVAILABLE
 from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
@@ -33,7 +33,7 @@ class AgentRegistry:
    # governance upgrade added run ownership and provenance columns.
    self.repo.insert(c,'agent_runs',{'id':run,'job_id':job_id,'agent_name':a['name'],'agent_version':version,'status':'RUNNING','input_evidence':json.dumps(ids),'output_evidence':'[]','correlation_id':corr,'error':'','started_at':now(),'completed_at':'','agent_id':agent_id,'operator_identity':identity or '','requested_tools':json.dumps(sorted(requested)),'iteration':int((job or {}).get('iteration') or 1)})
   return {'id':run,'agent_id':agent_id,'correlation_id':corr,'status':'RUNNING','allowed_tools':sorted(allowed)}
- def complete(self,run_id,output_evidence,error='',identity=None,outputs=None,provenance=None,reasoning=''):
+ def complete(self,run_id,output_evidence,error='',identity=None,outputs=None,provenance=None,reasoning='',status=''):
   r=self.repo.one('select * from agent_runs where id=?',(run_id,))
   if not r: raise ValueError('agent_run_not_found')
   if r['status']!='RUNNING': raise ValueError('agent_run_not_running:'+str(r['status']))
@@ -42,7 +42,13 @@ class AgentRegistry:
   # output evidence to it.
   owner=r.get('operator_identity') or ''
   if identity is not None and owner and identity!=owner: raise PermissionError('agent_run_not_owned')
-  status='FAILED' if error else 'COMPLETED'
+  # ``status`` is only ever passed for a cancellation. Derived from ``error``
+  # otherwise, which is every other caller: a run that reported an error
+  # FAILED, one that did not COMPLETED. A cancellation carries a message *and*
+  # is not a failure, so it is the one case the two-way derivation cannot
+  # express -- and recording it as FAILED would put a fault on the agent's
+  # health record for something an operator chose.
+  status=status or ('FAILED' if error else 'COMPLETED')
   with self.repo.connect() as c:c.execute('update agent_runs set status=?,output_evidence=?,error=?,completed_at=?,outputs=?,model_provenance=?,reasoning=? where id=?',(status,json.dumps(output_evidence),error,now(),json.dumps(outputs or {},default=str),json.dumps(provenance or {},default=str),reasoning,run_id))
   return {'id':run_id,'status':status}
  def dependency_status(self,job_id,agent_id):
@@ -94,7 +100,7 @@ class AgentRegistry:
  def implementations(self):
   report=self.conformance()
   return {'status':'UP' if all(x['status']=='CONFORMANT' for x in report) else 'DEGRADED','agents':report}
- def dispatch(self,job_id,agent_id,version,roles,identity,params=None,input_evidence=None,provider=None,channel='API',logger=None):
+ def dispatch(self,job_id,agent_id,version,roles,identity,params=None,input_evidence=None,provider=None,channel='API',logger=None,cancelled=None):
   """Run an agent under its approved contract and record everything it produced.
 
   This is the worker flow ``docs/AGENTS_DEVELOPMENT.md`` specifies: authenticate
@@ -152,9 +158,19 @@ class AgentRegistry:
   with self.repo.connect() as c:
    c.execute('update agent_runs set effective_model_alias=?,binding_source=? where id=?',(effective_alias,binding_source,run['id']))
   if provider is None: provider=default_provider()
-  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source,logger=logger,agent_id=agent_id)
+  context=impl.context(job_id,identity=identity,roles=roles,params=params or {},correlation_id=run['correlation_id'],iteration=int((job or {}).get('iteration') or 1),provider=provider,channel=channel,default_model_alias=a.get('default_model_alias') or '',effective_model_alias=effective_alias,binding_source=binding_source,logger=logger,agent_id=agent_id,cancelled=cancelled)
   _log_info('Executing agent %s…' % agent_id)
   try:result=impl.execute(context)
+  except StepCancelled as e:
+   # A decision, not a fault. Recorded CANCELLED rather than FAILED so the run
+   # history distinguishes "the operator stopped this" from "this broke", and
+   # so agent health does not count a cancellation against the agent. The run
+   # row is closed either way -- leaving it RUNNING is what produced rows
+   # claiming work was in progress that nothing was doing.
+   self.complete(run['id'],[],str(e),identity,status='CANCELLED')
+   with self.repo.connect() as c:self.repo.event(c,job_id,identity,'AGENT_RUN_CANCELLED',details={'run_id':run['id'],'agent_id':agent_id,'version':version,'reason':str(e)},correlation=run['correlation_id'])
+   _log_warn('Agent %s cancelled: %s' % (agent_id, e))
+   raise
   except Exception as e:
    self.complete(run['id'],[],type(e).__name__+':'+str(e),identity)
    with self.repo.connect() as c:self.repo.event(c,job_id,identity,'AGENT_RUN_FAILED',details={'run_id':run['id'],'agent_id':agent_id,'version':version,'error':type(e).__name__+':'+str(e)},correlation=run['correlation_id'])

@@ -96,7 +96,7 @@ class AgentContext:
     def __init__(self, repo, job_id, identity='system', roles=(), params=None,
                  correlation_id='', iteration=1, provider=None, channel='API',
                  default_model_alias='', effective_model_alias='', binding_source='DEFAULT',
-                 logger=None, agent_id=''):
+                 logger=None, agent_id='', cancelled=None):
         self.repo = repo
         # Which catalogue agent this invocation is for. Only used to look up the
         # agent's skill; it confers no capability and is not read from a request.
@@ -125,6 +125,23 @@ class AgentContext:
         # The catalogue agent_id, used by ReasoningGateway to load the
         # agent's skill from agent-skills/.
         self.agent_id = agent_id
+        # Has someone asked for this run to stop? A zero-argument predicate the
+        # caller supplies; ``app/worker.py`` builds one that reads the pipeline
+        # step's status, so cancelling a pipeline reaches an agent already
+        # running inside a model call.
+        #
+        # Cooperative on purpose. An agent spends almost all of its time waiting
+        # on one gateway request, and that request is not interrupted -- the
+        # checkpoints are *between* calls (``artefact.produce_many`` between
+        # items, ``produce`` between retries), so cancelling lands within one
+        # model call rather than instantly. The alternative was killing the
+        # worker, which is how the orphaned RUNNING rows this fixes were
+        # created: every other step in that process dies too and the rows are
+        # left saying work is in progress that nothing is doing.
+        #
+        # Defaults to "never cancelled", so a direct ``run()`` and every
+        # existing caller behave exactly as before.
+        self.cancelled = cancelled if callable(cancelled) else (lambda: False)
 
     def param(self, name, default=_REQUIRED):
         value = self.params.get(name, default)
