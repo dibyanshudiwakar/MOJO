@@ -128,7 +128,7 @@ SAMPLES = {
     'agent/clarification/suggested-answers': {
         'suggestions': [{'question': 'Which queue?',
                          'suggested_answer': 'Use the default outbound queue manager alias.',
-                         'confidence': 'MEDIUM', 'caveat': ''}]},
+                         'confidence': 'MEDIUM', 'severity': 'LOW', 'caveat': ''}]},
 }
 
 

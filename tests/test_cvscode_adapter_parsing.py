@@ -59,3 +59,22 @@ def test_prose_around_an_object_still_parses():
 
 def test_a_top_level_array_is_still_recoverable():
     assert _parse_json('Result:\n[{"a": 1}, {"a": 2}]') == [{'a': 1}, {'a': 2}]
+
+
+def test_a_truncated_reply_says_where_the_token_budget_went():
+    """39,313 characters against 32,768 tokens is ~1.2 chars/token: not all visible.
+
+    The error has to separate reasoning from the visible answer, or the next
+    person guesses at the cause the way this one did.
+    """
+    reply = SimpleNamespace(
+        stop_reason='max_tokens', usage=SimpleNamespace(output_tokens=32768),
+        content=[SimpleNamespace(type='thinking', thinking='t' * 5000, text=''),
+                 SimpleNamespace(type='text', text=DOCUMENT)])
+    adapter = CvscodeClaudeAdapter()
+    adapter._client = lambda: SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: reply))
+    with pytest.raises(RuntimeError) as raised:
+        adapter.invoke('t', {})
+    message = str(raised.value)
+    assert 'output_tokens=32768' in message
+    assert 'thinking:5000' in message and 'text:%d' % len(DOCUMENT) in message

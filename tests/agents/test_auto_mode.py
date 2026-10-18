@@ -15,10 +15,9 @@ per cycle, forever. Auto mode therefore answers only for an agent that is going
 on anyway.
 
 **It must not hide the decisions.** Every one is an ANSWERED clarification
-attributed to AUTO_MODE, carrying the model's confidence and caveat. LOW is
-accepted by instruction, and LOW is what the prompt reserves for questions
-needing a credential or a business decision -- so being able to list them
-afterwards is the only thing that makes accepting them reviewable.
+attributed to AUTO_MODE, carrying the model's confidence, severity and caveat.
+The exception is a question the model rates HIGH severity and is not confident
+about: that one stays OPEN and is put to a person, and it does not hold the step.
 
 **It must not touch the gates.** A clarification is an input to the work; a
 gate is approval of the result. Auto mode makes the pipeline flow to the gate.
@@ -81,6 +80,9 @@ def analysis_with_questions(model):
             {'question': q.get('question', ''),
              'suggested_answer': 'Use the approved mapping for this construct.',
              'confidence': confidences[index % len(confidences)],
+             # MEDIUM, so a LOW-confidence answer is still decided: only a HIGH
+             # severity question is ever put to a person.
+             'severity': 'MEDIUM',
              'caveat': 'confirm against the live system'}
             for index, q in enumerate(payload.get('questions') or [])]}
 
@@ -101,11 +103,24 @@ def test_the_switch_accepts_the_obvious_falsey_spellings(monkeypatch, value):
     assert automode.enabled() is False
 
 
-def test_every_confidence_is_accepted(monkeypatch):
-    """Including LOW, by instruction. Recorded rather than filtered."""
-    for confidence in ('HIGH', 'MEDIUM', 'LOW', 'high', 'low', ''):
-        assert automode.accepts(confidence) is True
-    assert automode.accepts('NONSENSE') is False
+def test_a_question_is_put_to_a_person_only_when_severe_and_unsure():
+    """HIGH severity AND confidence below HIGH. Nothing else reaches a person."""
+    assert automode.needs_person('HIGH', 'LOW') is True
+    assert automode.needs_person('HIGH', 'MEDIUM') is True
+    assert automode.needs_person('high', '') is True
+    # A confident answer to a severe question is still the model's to make.
+    assert automode.needs_person('HIGH', 'HIGH') is False
+    # An unsure answer to a low-stakes one is not worth stopping anyone for.
+    for severity in ('MEDIUM', 'LOW', '', None):
+        for confidence in ('HIGH', 'MEDIUM', 'LOW', ''):
+            assert automode.needs_person(severity, confidence) is False
+
+
+def test_accepts_follows_the_same_rule_and_rejects_nonsense():
+    assert automode.accepts('LOW', 'MEDIUM') is True
+    assert automode.accepts('LOW', 'HIGH') is False
+    assert automode.accepts('HIGH', 'HIGH') is True
+    assert automode.accepts('NONSENSE', 'LOW') is False, 'a malformed answer is not a decision'
 
 
 def test_a_blocked_agent_is_recognised_by_its_own_status():
@@ -237,3 +252,29 @@ def test_auto_mode_grants_no_gate_approval(repo, job, ace_repo, dispatch):
     dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
     approvals = repo.rows('select * from approvals where job_id=?', (job['id'],))
     assert approvals == [], 'auto mode must never sign a gate'
+
+
+# ---- only the severe, unsure ones are asked -------------------------------------------------
+
+def test_a_severe_unsure_question_stays_open_and_the_rest_are_decided(
+        repo, job, ace_repo, dispatch, analysis_with_questions, model):
+    """The rule end to end, and that asking does not hold the step."""
+    def suggest(payload):
+        qs = payload.get('questions') or []
+        return {'suggestions': [
+            {'question': q.get('question', ''), 'suggested_answer': 'needs the live URL',
+             # The first question is the severe, unsure one.
+             'confidence': 'LOW' if i == 0 else 'HIGH',
+             'severity': 'HIGH' if i == 0 else 'LOW',
+             'caveat': 'c'} for i, q in enumerate(qs)]}
+
+    model.overrides['agent/clarification/suggested-answers'] = suggest
+    dispatch(job['id'], 'repository-intake', {'path': str(ace_repo)})
+    outcome = dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
+    assert outcome['status'] == 'COMPLETED', 'a question put to a person does not hold the step'
+    rows = repo.rows('select status,answered_by,suggestion_severity from clarifications'
+                     ' where job_id=? order by rowid', (job['id'],))
+    assert [r['status'] for r in rows][0] == 'OPEN'
+    assert {r['status'] for r in rows[1:]} == {'ANSWERED'}
+    assert rows[0]['suggestion_severity'] == 'HIGH' and rows[0]['answered_by'] == ''
+    assert {r['answered_by'] for r in rows[1:]} == {automode.ACTOR}

@@ -97,3 +97,85 @@ def test_the_merge_keeps_each_construct_once():
                                    {'mappings': [m, {**m, 'source_reference': 'G#n'}]}])
     assert [x['source_reference'] for x in merged['mappings']] == ['F#n', 'G#n']
     assert merged['risks'] == [{'a': 1}] and merged['unsupported'] == []
+
+
+# ---- auto mode: plan around gaps the model rates below HIGH ---------------------------------
+
+@pytest.fixture
+def mixed_inputs(repo, job, dispatch, approve, framework_repo, tmp_path):
+    """Approved inputs for a service with one construct that has no Spring pattern."""
+    ace = tmp_path / 'mixed'
+    ace.mkdir()
+    (ace / 'M.msgflow').write_text('<flow><node id="in" type="HTTPInput" url="/x"/>'
+                                   '<node id="odd" type="AcmeAdapterNode"/></flow>')
+    dispatch(job['id'], 'repository-intake', {'path': str(ace)})
+    framework = dispatch(job['id'], 'framework-baseline', {'path': str(framework_repo)})
+    analysis = dispatch(job['id'], 'ace-analysis', {'path': str(ace)})
+    specification = dispatch(job['id'], 'migration-specification',
+                             {'analysis_id': analysis['outputs']['analysis_document']})
+    for gate, outcome in (('G1', framework), ('G2', analysis), ('G2', specification)):
+        ref = outcome['evidence'][0]
+        approve(job['id'], gate, 'APPROVE', ref['id'], ref['content_hash'])
+    return {'framework_id': framework['outputs']['framework_template'],
+            'analysis_id': analysis['outputs']['analysis_document'],
+            'specification_id': specification['outputs']['migration_specification_yaml']}
+
+
+def _gap_severity(model, severity):
+    from tests.agents.model_double import ANSWERS
+
+    def answer(payload):
+        out = ANSWERS['agent/planning/mapping-catalogue'](payload)
+        for risk in out['risks']:
+            risk['severity'] = severity
+        return out
+    model.overrides['agent/planning/mapping-catalogue'] = answer
+
+
+def test_a_gap_rated_below_high_is_planned_around_and_recorded(repo, job, mixed_inputs, model):
+    _gap_severity(model, 'MEDIUM')
+    result = PlanningAgent(repo).run(job['id'], params=mixed_inputs)
+    assert result.status == 'COMPLETED', 'a MEDIUM gap does not stop the plan'
+    assert result.outputs['plan']
+    assert result.metrics['accepted_risk_count'] == 1
+    # Recorded, not hidden: both rows name who decided, so the register and the
+    # G3 package show exactly what the plan leaves out.
+    gap = repo.one('select status from unsupported_mappings where catalogue_id=?',
+                   (result.outputs['mapping'],))
+    assert gap['status'] == 'ACCEPTED_BY_AUTO_MODE'
+    assert {r['status'] for r in result.outputs['risk_register']
+            if r['category'] == 'UNSUPPORTED_MAPPING'} == {'ACCEPTED_BY_AUTO_MODE'}
+    package = repo.one('select payload from approval_packages where id=?',
+                       (result.metrics['g3_package_id'],))
+    assert 'ACCEPTED_BY_AUTO_MODE' in package['payload'] or 'ACCEPTED_BY_AUTO_MODE' in json.dumps(
+        [dict(r) for r in repo.rows('select * from migration_risks where catalogue_id=?',
+                                    (result.outputs['mapping'],))])
+
+
+def test_a_high_gap_still_stops_the_plan_to_be_asked(repo, job, mixed_inputs, model):
+    _gap_severity(model, 'HIGH')
+    result = PlanningAgent(repo).run(job['id'], params=mixed_inputs)
+    assert result.status == 'CLARIFICATION_REQUIRED' and result.outputs['plan'] == ''
+    assert result.metrics['accepted_risk_count'] == 0
+    assert len(result.clarifications) == 1
+
+
+def test_with_auto_mode_off_even_a_minor_gap_stops_the_plan(repo, job, mixed_inputs, model,
+                                                            auto_mode_off):
+    _gap_severity(model, 'LOW')
+    result = PlanningAgent(repo).run(job['id'], params=mixed_inputs)
+    assert result.status == 'CLARIFICATION_REQUIRED'
+
+
+def test_a_gap_with_no_risk_rating_is_treated_as_high():
+    """The service defaults an unrated risk to HIGH, so this must too."""
+    mapped = {'unsupported': [{'source_reference': 'M#odd'}], 'risks': []}
+    out, accepted = PlanningAgent._accept_minor_gaps(mapped)
+    assert accepted == 0 and 'status' not in out['unsupported'][0]
+
+
+def test_the_worst_risk_for_a_construct_decides():
+    mapped = {'unsupported': [{'source_reference': 'M#odd'}],
+              'risks': [{'source_reference': 'M#odd', 'severity': 'LOW'},
+                        {'source_reference': 'M#odd', 'severity': 'HIGH'}]}
+    assert PlanningAgent._accept_minor_gaps(mapped)[1] == 0

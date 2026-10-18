@@ -23,7 +23,12 @@ import json
 import yaml
 from app.agents.base import AgentResult, BaseAgent, Clarification
 from app.agents.artefact import produce_many
+from app.services import automode
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
+
+#: Status of a gap auto mode planned around. Distinct from OPEN on purpose:
+#: ``generate_plan`` blocks only on OPEN, and the name says who decided.
+ACCEPTED = 'ACCEPTED_BY_AUTO_MODE'
 
 
 class PlanningAgent(BaseAgent):
@@ -63,16 +68,23 @@ class PlanningAgent(BaseAgent):
             [(i, {'semantic_model': g, 'framework_standards': standards, 'specification': brief})
              for i, g in enumerate(groups)])
         mapped = self._merge(pieces[i] for i in sorted(pieces))
+        accepted = 0
+        if automode.enabled():
+            mapped, accepted = self._accept_minor_gaps(mapped)
         catalogue = service.record_mapping_catalogue(
             context.job_id, framework_id, analysis_id, specification_id, mapped, version)
         risks = self.repo.rows(
             'select id,category,severity,statement,response,owner,status from migration_risks'
             ' where catalogue_id=? order by created_at', (catalogue['catalogue_id'],))
+        still_open = self.repo.one(
+            "select count(*) n from unsupported_mappings where catalogue_id=? and status='OPEN'",
+            (catalogue['catalogue_id'],))['n']
         metrics = {'mapping_count': catalogue['mapping_count'],
                    'unsupported_count': catalogue['unsupported_count'],
+                   'accepted_risk_count': accepted,
                    'risk_count': len(risks),
                    'model_attempts': provenance.get('attempts', 0)}
-        if catalogue['unsupported_count']:
+        if still_open:
             # The service records the gap as migration_risks/unsupported_mappings
             # rows but does not raise clarifications itself (clarification
             # blocking is disabled there -- see migration_lifecycle_v6.py). This
@@ -135,6 +147,38 @@ class PlanningAgent(BaseAgent):
         if current:
             groups.append({**context, **current})
         return groups
+
+    @staticmethod
+    def _accept_minor_gaps(mapped):
+        """Plan around an unsupported construct the model rates below HIGH.
+
+        Auto mode's rule for questions, applied to the other thing planning
+        stops on. The gap is not hidden: the unsupported entry and its risk are
+        recorded with a status naming auto mode, so they appear in the risk
+        register and in the G3 package, and the approver sees exactly what the
+        plan leaves out. ``generate_plan`` blocks only on ``OPEN``, so this is
+        the whole mechanism -- nothing is deleted and no mapping is invented.
+
+        A HIGH gap, or one with no matching risk (the service's own default
+        severity is HIGH), stays OPEN and stops the plan to be asked.
+        """
+        severity = {}
+        for risk in mapped.get('risks') or []:
+            ref = risk.get('source_reference') or ''
+            rank = str(risk.get('severity') or 'HIGH').upper()
+            # Several risks for one construct: the worst one decides.
+            severity[ref] = 'HIGH' if 'HIGH' in (rank, severity.get(ref)) else rank
+        accepted_refs = set()
+        unsupported = []
+        for entry in mapped.get('unsupported') or []:
+            ref = entry.get('source_reference') or ''
+            if severity.get(ref, 'HIGH') != automode.ASK_SEVERITY:
+                accepted_refs.add(ref)
+                entry = {**entry, 'status': ACCEPTED}
+            unsupported.append(entry)
+        risks = [{**r, 'status': ACCEPTED} if (r.get('source_reference') or '') in accepted_refs else r
+                 for r in mapped.get('risks') or []]
+        return {**mapped, 'unsupported': unsupported, 'risks': risks}, len(accepted_refs)
 
     @staticmethod
     def _merge(pieces):

@@ -252,9 +252,9 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             flat = ' '.join(text.split())
             raise RuntimeError(
                 'provider_response_truncated:max_tokens=%d: the answer was cut off '
-                'mid-JSON (%d chars). Raise max_tokens for this agent or ask for a '
+                'mid-JSON (%d chars; %s). Raise max_tokens for this agent or ask for a '
                 'smaller artefact. Began: %s ... Ended: %s'
-                % (self.max_tokens, len(text), flat[:200], flat[-300:]))
+                % (self.max_tokens, len(text), _spend(message), flat[:200], flat[-300:]))
         if parsed is None:
             # Named for every agent, never wrapped. ``{'answer': <raw text>}``
             # passed an unparseable answer on to the response schema, which then
@@ -270,6 +270,24 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
         answer = parsed if isinstance(parsed, dict) else {'answer': text}
         answer.setdefault('_model', self.model)
         return answer
+
+
+def _spend(message):
+    """Where the output budget went: reasoning, or the visible answer.
+
+    A cut-off reply of 39,313 characters against a 32,768-token limit is about
+    1.2 characters a token -- far below what JSON costs -- which says part of
+    the budget went to something that is not in the text. Thinking blocks are
+    skipped when the text is joined, so without this the cost is invisible.
+    """
+    blocks = {}
+    for block in getattr(message, 'content', None) or []:
+        kind = getattr(block, 'type', '?')
+        size = len(getattr(block, 'text', '') or getattr(block, 'thinking', '') or '')
+        blocks[kind] = blocks.get(kind, 0) + size
+    out = getattr(getattr(message, 'usage', None), 'output_tokens', None)
+    return 'output_tokens=%s, blocks=%s' % (out if out is not None else '?',
+                                           ','.join('%s:%d' % kv for kv in sorted(blocks.items())) or 'none')
 
 
 def _span(text, opener, closer):

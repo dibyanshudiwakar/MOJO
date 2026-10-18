@@ -336,6 +336,9 @@ async function approvalInbox(){
   <div class="card-body">${rows||'<div class="empty">No pending approvals</div>'}</div></div>`;
  document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}})}
 // ---- Clarifications page --------------------------------------------------
+// Auto mode decides most questions; the ones left OPEN are the model's own
+// "high severity and not sure" cases, so say so on the card.
+function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='HIGH'?'<span class="badge badge-error"><span class="badge-dot"></span>HIGH SEVERITY</span>':''}
 async function clarificationsPage(){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
  const all=cd.items||[];
@@ -351,10 +354,12 @@ async function clarificationsPage(){
     <span class="clarif-service">${svc}</span>
     ${stageBadge(c.stage||'')}
     ${isOpen?'<span class="badge badge-warning"><span class="badge-dot"></span>OPEN</span>':'<span class="badge badge-success"><span class="badge-dot"></span>ANSWERED</span>'}
+    ${severityChip(c)}
     <span class="clarif-time">${fmtDt(c.created_at)}</span>
    </div>
    <div class="clarif-type">${questionType}</div>
    ${c.impact?`<div class="clarif-impact">Impact: ${esc(c.impact)}</div>`:''}
+   ${isOpen&&c.suggested_answer?`<div class="clarif-impact">Model's suggestion${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: ${esc(c.suggested_answer)}</div>`:''}
    ${isOpen?`<div class="clarif-form">
     <textarea class="clarif-textarea" placeholder="Enter your answer…" rows="3"></textarea>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
@@ -371,9 +376,9 @@ async function clarificationsPage(){
  $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
-    ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} blocking pipeline progression</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
+    ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
-   ${answered.length?`<div class="card"><div class="card-head"><div class="card-title">Answered (${answered.length})</div></div><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></div>`:''}
+   ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
  document.querySelectorAll('.clarif-submit-btn').forEach(btn=>{
   const item=btn.closest('.clarif-item');
@@ -386,15 +391,16 @@ async function clarificationsPage(){
    btn.disabled=true;btn.textContent='Submitting…';
    try{
     await api('/api/v2/clarifications/'+cid+'/answer',{method:'POST',body:JSON.stringify({answer})});
-    item.classList.remove('clarif-open');item.classList.add('clarif-done');
-    const form=item.querySelector('.clarif-form');
-    if(form)form.outerHTML=`<div class="clarif-answered-block"><span class="clarif-answered-label">Answer</span><span class="clarif-answered-text">${esc(answer)}</span><span class="clarif-answered-meta">just now</span></div>`;
-    const wb=item.querySelector('.badge-warning');
-    if(wb)wb.outerHTML='<span class="badge badge-success"><span class="badge-dot"></span>ANSWERED</span>';
-    item.style.borderLeftColor='var(--success)';
+    // An answered question leaves the list at once; it is in Answered below on
+    // the next load. Other cards are left alone so nothing half-typed is lost.
+    item.remove();
+    const left=document.querySelectorAll('.clarif-open').length;
+    if(!left)return clarificationsPage();
+    document.querySelectorAll('.card-title').forEach(t=>{if(/^Open \(/.test(t.textContent))t.textContent='Open ('+left+')'});
     notice('Answer submitted. If this was the last open clarification, the pipeline will resume automatically.');
    }catch(e){notice(e.message,true);btn.disabled=false;btn.textContent='Submit Answer'}}});
- refreshTimer=setInterval(clarificationsPage,15000)}
+ // Skipped while anything is being typed: a re-render replaces every textarea.
+ refreshTimer=setInterval(()=>{if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage()},15000)}
 // ---- New migration wizard -------------------------------------------------
 let wizard=null;
 const WIZARD_STEPS=['Migration & Workspace','IBM ACE Repository','Migration Framework Repository','Spring Boot Output','Review','Select Agents'];
@@ -1798,6 +1804,12 @@ function renderOutputPane(outputs,artefact){
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
 function renderClarifyPane(clarifications){
  if(!clarifications.length)return '<p class="authhint">No clarifications recorded for this step.</p>';
+ // Open questions first; answered ones fold away so they stop competing with
+ // what still needs a person.
+ const done=clarifications.filter(c=>c.status!=='OPEN'),todo=clarifications.filter(c=>c.status==='OPEN');
+ const fold=done.length?`<details class="clarif-answered-fold"><summary>Answered (${done.length})</summary>${renderClarifyCards(done)}</details>`:'';
+ return (todo.length?renderClarifyCards(todo):'<p class="authhint">Nothing left for you to answer.</p>')+fold}
+function renderClarifyCards(clarifications){
  return clarifications.map(c=>{
   const isOpen=c.status==='OPEN';
   const questionType=esc((c.question||'').replace(/_/g,' '));
@@ -1826,6 +1838,7 @@ function renderClarifyPane(clarifications){
    <div class="clarif-header">
     ${isOpen?'<span class="badge badge-warning"><span class="badge-dot"></span>OPEN</span>':'<span class="badge badge-success"><span class="badge-dot"></span>ANSWERED</span>'}
     ${c.owner?`<span class="badge badge-neutral">${esc(c.owner)}</span>`:''}
+    ${severityChip(c)}
     <span class="clarif-time">${fmtDt(c.created_at)}</span>
    </div>
    <div class="clarif-type">${questionType}</div>

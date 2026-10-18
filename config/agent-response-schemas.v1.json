@@ -315,7 +315,8 @@
             "required": [
               "question",
               "suggested_answer",
-              "confidence"
+              "confidence",
+              "severity"
             ],
             "properties": {
               "question": {
@@ -328,6 +329,11 @@
               "confidence": {
                 "type": "string",
                 "enum": ["HIGH", "MEDIUM", "LOW"]
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["HIGH", "MEDIUM", "LOW"],
+                "description": "What a wrong answer would cost. Auto mode puts a question to a person only when this is HIGH and confidence is not."
               },
               "caveat": {
                 "type": "string"
@@ -717,7 +723,7 @@
         },
         "risks": {
           "type": "array",
-          "maxItems": 512,
+          "maxItems": 12,
           "items": {
             "type": "object",
             "required": [
@@ -741,10 +747,12 @@
               },
               "statement": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 400
               },
               "response": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 400
               },
               "owner": {
                 "type": "string"

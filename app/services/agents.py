@@ -284,9 +284,9 @@ class AgentRegistry:
      for cl,cid in zip(result.clarifications,opened):
       s=by_question.get(cl.question)
       if not s or not str(s.get('suggested_answer') or '').strip():continue
-      c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=? where id=?',
-                (s['suggested_answer'],sugg_prov.get('mode',''),s.get('confidence',''),s.get('caveat',''),now(),cid))
-      if auto and automode.accepts(s.get('confidence')):
+      c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_severity=?,suggestion_caveat=?,suggested_at=? where id=?',
+                (s['suggested_answer'],sugg_prov.get('mode',''),s.get('confidence',''),s.get('severity',''),s.get('caveat',''),now(),cid))
+      if auto and automode.accepts(s.get('confidence'),s.get('severity')):
        c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
                  (s['suggested_answer'],now(),automode.ACTOR,cid))
        decided+=1
@@ -306,6 +306,10 @@ class AgentRegistry:
     _log_warn('Auto mode decided %d of %d clarification(s) — %s' % (
      decided,len(opened),
      ', '.join('%s %s'%(v,k.lower()) for k,v in detail['by_confidence'].items() if v)))
+    if decided<len(opened):
+     # Said outright so the operator is not left to infer it from the Logs and
+     # the Clarifications page: these are the ones a person is being asked.
+     _log_warn('%d clarification(s) left for you — high severity and not confidently answered' % (len(opened)-decided))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))

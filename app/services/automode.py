@@ -31,6 +31,15 @@ anyway, and leaves alone the questions of an agent that stopped. ``planning``
 raising clarifications means it produced no plan, and no automatic answer can
 conjure one -- a person has to decide. That is the "minimal" in "zero to
 minimal".
+
+**What reaches a person.** Not everything auto mode could decide is decided:
+a question the model rates HIGH severity and is not confident about stays OPEN
+(``needs_person``). Those are asked, and they do not hold the step -- the step
+completed with the model's suggestion attached, and the open question is the
+record that a person should confirm it before the gate. ``planning`` follows the
+same rule for constructs with no approved pattern: a gap the model rates below
+HIGH is planned around and recorded as an accepted risk in the register and the
+G3 package; a HIGH one stops the plan and is asked.
 """
 import os
 
@@ -39,16 +48,15 @@ import os
 #: human-looking identity would hide exactly that.
 ACTOR = 'AUTO_MODE'
 
-#: Confidences auto mode accepts. All three, by instruction.
-#:
-#: LOW is the interesting one. ``agent/clarification/suggested-answers`` tells
-#: the model to answer LOW and say so plainly when a question needs something
-#: only a human with live-system access can supply -- a credential, an
-#: environment URL, a business decision. Accepting LOW therefore accepts some
-#: answers that amount to "this needs a person", which is why the confidence is
-#: stored per decision and surfaced rather than averaged away: the LOW list is
-#: the review queue, and the gate is where it gets reviewed.
-ACCEPTED_CONFIDENCE = ('HIGH', 'MEDIUM', 'LOW', '')
+#: Severity at which a question can be put to a person. The model rates each
+#: question by what a wrong answer would cost (``suggestion_severity``).
+ASK_SEVERITY = 'HIGH'
+#: Confidence that settles a high-severity question without asking. Anything
+#: less leaves it open.
+SETTLED_CONFIDENCE = 'HIGH'
+#: Every confidence is recorded with the decision (the LOW ones are the review
+#: queue) but only the combination below reaches a person.
+KNOWN_CONFIDENCE = ('HIGH', 'MEDIUM', 'LOW', '')
 
 
 def enabled():
@@ -62,9 +70,31 @@ def enabled():
         '0', 'false', 'no', 'off')
 
 
-def accepts(confidence):
-    """Whether a suggestion of this confidence may be accepted automatically."""
-    return str(confidence or '').strip().upper() in ACCEPTED_CONFIDENCE
+def needs_person(severity, confidence):
+    """Whether a question is put to a person rather than decided by the model.
+
+    Only when a wrong answer would be costly (HIGH severity) *and* the model is
+    not sure of its own (confidence below HIGH). A confident answer to a
+    high-severity question is still a decision the model can make; an unsure
+    answer to a low-stakes one is not worth stopping anyone for. Everything
+    else is decided and recorded, with severity and confidence, for the gate.
+
+    An unrated severity is treated as not high: the response schema requires a
+    rating, so this only arises for rows written before it existed.
+    """
+    return (str(severity or '').strip().upper() == ASK_SEVERITY
+            and str(confidence or '').strip().upper() != SETTLED_CONFIDENCE)
+
+
+def accepts(confidence, severity=''):
+    """Whether a suggestion may be accepted automatically.
+
+    False for an unrecognised confidence (a malformed answer is not a decision)
+    and for a question ``needs_person`` says to ask.
+    """
+    if str(confidence or '').strip().upper() not in KNOWN_CONFIDENCE:
+        return False
+    return not needs_person(severity, confidence)
 
 
 def blocks(status):

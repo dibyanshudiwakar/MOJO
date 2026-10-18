@@ -371,7 +371,7 @@ def _suggested_answers(payload):
     return {'suggestions': [
         {'question': q.get('question', ''),
          'suggested_answer': 'Follow the standard ACE-to-Spring mapping for this construct.',
-         'confidence': 'MEDIUM',
+         'confidence': 'MEDIUM', 'severity': 'MEDIUM',
          'caveat': 'confirm against the live system before relying on it'}
         for q in payload.get('questions') or []]}
 
