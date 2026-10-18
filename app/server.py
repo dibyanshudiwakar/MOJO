@@ -557,6 +557,11 @@ class H(BaseHTTPRequestHandler):
             counts['jobs']=repo.one("select count(*) n from jobs where state not in ('COMPLETED','ROLLED_BACK')")['n']
             # approvals: approval PACKAGES waiting for a human decision, not historical approval records
             counts['approvals']=repo.one("select count(*) n from approval_packages where status='PENDING_APPROVAL'")['n']
+            # How many of those this viewer can actually act on. The total is
+            # the factory's backlog; the approvals card lists only what the
+            # viewer's roles allow, so without this the tile said 3 while the
+            # card said "All approvals cleared" and neither explained the gap.
+            counts['approvals_actionable']=len(approvals7.inbox_for(self.principal()))
             # evidence: immutable evidence from jobs that have real progress (exclude failed/rolled-back)
             counts['evidence']=repo.one("select count(*) n from evidence where immutable=1 and job_id in (select id from jobs where state not in ('COMPLETED','ROLLED_BACK','FAILED'))")['n']
             counts['running_agents']=repo.one("select count(*) n from agent_runs where status='RUNNING'")['n']
