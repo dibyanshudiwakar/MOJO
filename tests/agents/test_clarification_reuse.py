@@ -66,12 +66,12 @@ def _a_person_answers(repo, job_id, text='Use /api/v2'):
                   "answered_at=? where job_id=?", (text, now(), job_id))
 
 
-def _seed(repo, job_id, rows):
+def _seed(repo, job_id, rows, evidence_ref=''):
     with repo.connect() as c:
         for stage, question, answer, by in rows:
             repo.insert(c, 'clarifications', {
                 'id': uid(), 'job_id': job_id, 'stage': stage, 'question': question, 'owner': 'o',
-                'impact': 'i', 'evidence_ref': '', 'status': 'ANSWERED', 'answer': answer,
+                'impact': 'i', 'evidence_ref': evidence_ref, 'status': 'ANSWERED', 'answer': answer,
                 'created_at': now(), 'answered_at': now(), 'answered_by': by, 'run_id': ''})
 
 
@@ -91,16 +91,36 @@ def test_a_close_rewording_in_the_same_stage_matches(repo, job):
     """The two wordings actually seen in one job."""
     _seed(repo, job['id'], [('ACE_ANALYSIS',
                              'The catch, failure and timeout error bodies and statuses that consumers parse',
-                             'keep them', 'p@x')])
+                             'keep them', 'p@x')], evidence_ref='Orders.msgflow#catch')
     hit = PriorAnswers(repo, job['id']).match(
-        'ACE_ANALYSIS', 'The catch, failure and timeout error bodies that consumers parse')
+        'ACE_ANALYSIS', 'The catch, failure and timeout error bodies that consumers parse',
+        'Orders.msgflow#catch')
     assert hit and hit['answer'] == 'keep them'
 
 
-def test_a_rewording_in_another_stage_does_not_match(repo, job):
-    _seed(repo, job['id'], [('ACE_ANALYSIS', 'The catch and failure error bodies that consumers parse', 'x', 'p')])
+def test_a_rewording_about_a_different_construct_does_not_match(repo, job):
+    """Alike in wording, different in subject: a different question."""
+    _seed(repo, job['id'], [('ACE_ANALYSIS',
+                             'The catch, failure and timeout error bodies and statuses that consumers parse',
+                             'keep them', 'p@x')], evidence_ref='Orders.msgflow#catch')
     assert PriorAnswers(repo, job['id']).match(
-        'PLANNING', 'The catch and failure error bodies that consumers parse in full') is None
+        'ACE_ANALYSIS', 'The catch, failure and timeout error bodies that consumers parse',
+        'Orders.msgflow#other') is None
+
+
+def test_a_rewording_with_no_evidence_reference_does_not_match(repo, job):
+    _seed(repo, job['id'], [('ACE_ANALYSIS',
+                             'The catch, failure and timeout error bodies and statuses that consumers parse',
+                             'keep them', 'p@x')], evidence_ref='Orders.msgflow#catch')
+    assert PriorAnswers(repo, job['id']).match(
+        'ACE_ANALYSIS', 'The catch, failure and timeout error bodies that consumers parse') is None
+
+
+def test_a_rewording_in_another_stage_does_not_match(repo, job):
+    _seed(repo, job['id'], [('ACE_ANALYSIS', 'The catch and failure error bodies that consumers parse', 'x', 'p')],
+          evidence_ref='M#c')
+    assert PriorAnswers(repo, job['id']).match(
+        'PLANNING', 'The catch and failure error bodies that consumers parse in full', 'M#c') is None
 
 
 def test_a_different_question_about_the_same_thing_does_not_match(repo, job):
@@ -132,7 +152,7 @@ def test_a_repeated_question_takes_the_earlier_answer(repo, job, ace_repo, dispa
 
     assert second['clarification_ids'], 'the question was raised again'
     new = [r for r in _rows(repo, job['id']) if r['id'] in second['clarification_ids']]
-    assert [r['status'] for r in new] == ['ANSWERED']
+    assert [r['status'] for r in new] == ['DUPLICATE'], 'recorded, but not another answered row to list'
     assert new[0]['answer'] == 'Use /api/v2' and new[0]['answered_by'] == ACTOR
     # Pointing back at the question a person actually answered.
     assert new[0]['reused_from'] in first['clarification_ids']

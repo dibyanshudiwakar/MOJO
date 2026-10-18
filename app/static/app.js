@@ -344,7 +344,10 @@ async function clarificationsPage(){
  const all=cd.items||[];
  const jobMap={};(jd.items||[]).forEach(j=>{jobMap[j.id]=j.service||j.workspace_dir||j.id});
  const open=all.filter(c=>c.status==='OPEN');
- const answered=all.filter(c=>c.status!=='OPEN');
+ // DUPLICATE rows are repeats of a question that was already answered; the
+ // original is listed, so the copy is not.
+ const answered=all.filter(c=>c.status==='ANSWERED');
+ const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -378,7 +381,7 @@ async function clarificationsPage(){
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
-   ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
+   ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
  document.querySelectorAll('.clarif-submit-btn').forEach(btn=>{
   const item=btn.closest('.clarif-item');
@@ -1806,7 +1809,7 @@ function renderClarifyPane(clarifications){
  if(!clarifications.length)return '<p class="authhint">No clarifications recorded for this step.</p>';
  // Open questions first; answered ones fold away so they stop competing with
  // what still needs a person.
- const done=clarifications.filter(c=>c.status!=='OPEN'),todo=clarifications.filter(c=>c.status==='OPEN');
+ const done=clarifications.filter(c=>c.status==='ANSWERED'),todo=clarifications.filter(c=>c.status==='OPEN');
  const fold=done.length?`<details class="clarif-answered-fold"><summary>Answered (${done.length})</summary>${renderClarifyCards(done)}</details>`:'';
  return (todo.length?renderClarifyCards(todo):'<p class="authhint">Nothing left for you to answer.</p>')+fold}
 function renderClarifyCards(clarifications){

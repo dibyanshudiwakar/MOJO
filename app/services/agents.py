@@ -7,7 +7,7 @@ from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
-from app.services import automode
+from app.services import automode, precedents
 from app.services.clarification_reuse import PriorAnswers, ACTOR as REUSE_ACTOR, origin as reuse_origin
 from app.services.agent_llm_bindings import AgentLLMBindingService
 
@@ -239,7 +239,7 @@ class AgentRegistry:
   if result.clarifications:
    prior=PriorAnswers(self.repo,job_id)
    for i,cl in enumerate(result.clarifications):
-    hit=prior.match(cl.stage,cl.question)
+    hit=prior.match(cl.stage,cl.question,cl.evidence_ref)
     if hit:reused[i]=hit
   taken=0
   if reused:
@@ -249,7 +249,11 @@ class AgentRegistry:
      c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=?,reused_from=? where id=?',
                (hit['answer'],'PRIOR_ANSWER','HIGH','Answered earlier by %s' % (hit['answered_by'] or 'a person'),now(),reuse_origin(hit),opened[i]))
      if take:
-      c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
+      # DUPLICATE, not ANSWERED: the question was already answered, and a
+      # second ANSWERED row is what kept the lists growing with the same
+      # questions. The row stays for the audit trail -- it says which answer it
+      # reused -- but no list shows it.
+      c.execute("update clarifications set status='DUPLICATE',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
                 (hit['answer'],now(),REUSE_ACTOR,opened[i]))
       taken+=1
    _log_info('Reused an earlier answer for %d of %d clarification(s)%s' % (
@@ -311,12 +315,26 @@ class AgentRegistry:
    # app/services/automode.py.
    auto=automode.enabled() and not automode.blocks(result.status)
    decided=0
+   taken_before=taken
    if by_question:
     with self.repo.connect() as c:
      for i,(cl,cid) in enumerate(zip(result.clarifications,opened)):
       if i in reused:continue
       s=by_question.get(cl.question)
       if not s or not str(s.get('suggested_answer') or '').strip():continue
+      # The same question in different words, or about a sibling construct --
+      # which no text comparison can tell from a genuinely different one. The
+      # model was shown the earlier decisions (each with a ref) and says which,
+      # if any, already settles this. Only a ref it was actually shown counts,
+      # and only an answer it is not unsure of; the answer recorded is the
+      # person's, never the model's paraphrase.
+      earlier=precedents.settled_by(context,s.get('settled_by')) if auto else None
+      if earlier and str(s.get('confidence') or '').upper()!='LOW':
+       c.execute("update clarifications set status='DUPLICATE',answer=?,answered_at=?,answered_by=?,reused_from=?,suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_caveat=?,suggested_at=? where id=? and status='OPEN'",
+                 (earlier['answer'],now(),REUSE_ACTOR,earlier['id'],earlier['answer'],'PRIOR_ANSWER',s.get('confidence',''),
+                  'Same question as an earlier decision (%s)' % s.get('settled_by'),now(),cid))
+       taken+=1
+       continue
       c.execute('update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_severity=?,suggestion_caveat=?,suggested_at=? where id=?',
                 (s['suggested_answer'],sugg_prov.get('mode',''),s.get('confidence',''),s.get('severity',''),s.get('caveat',''),now(),cid))
       if auto and automode.accepts(s.get('confidence'),s.get('severity')):
@@ -324,6 +342,8 @@ class AgentRegistry:
                  (s['suggested_answer'],now(),automode.ACTOR,cid))
        decided+=1
    _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened)-len(reused),sugg_prov.get('mode','')))
+   if taken>taken_before:
+    _log_info('%d repeated question(s) settled by earlier decisions — not raised again' % (taken-taken_before))
    if decided:
     # One ledger entry for the batch rather than one per decision: the
     # clarification rows carry the per-question detail, and 95 ledger entries

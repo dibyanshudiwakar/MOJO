@@ -335,6 +335,10 @@
                 "enum": ["HIGH", "MEDIUM", "LOW"],
                 "description": "What a wrong answer would cost. Auto mode puts a question to a person only when this is HIGH and confidence is not."
               },
+              "settled_by": {
+                "type": "string",
+                "description": "The ref (D1, D2, ...) of an earlier decision in _precedents that already settles this question, or empty."
+              },
               "caveat": {
                 "type": "string"
               }

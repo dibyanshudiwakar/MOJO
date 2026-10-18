@@ -10,7 +10,9 @@ instead of asked for again. Matching is deliberately narrow, because reusing the
 wrong answer is worse than asking twice:
 
 * the question has to match once case, spacing and punctuation are ignored, or
-  be a close rewording (``SIMILARITY``) *within the same stage*;
+  be a close rewording (``SIMILARITY``) of a question about the *same thing*:
+  the same stage and the same evidence reference. Two questions about different
+  constructs that happen to read alike are different questions;
 * only answered questions with a real answer count;
 * the same job is searched first, then other jobs of the same service -- a
   re-created job for one service raises the same questions as the last one;
@@ -50,7 +52,7 @@ class PriorAnswers:
         job = repo.one('select service from jobs where id=?', (job_id,)) or {}
         service = job.get('service') or ''
         rows = repo.rows(
-            "select c.id,c.job_id,c.stage,c.question,c.answer,c.answered_by,c.answered_at,c.reused_from"
+            "select c.id,c.job_id,c.stage,c.question,c.evidence_ref,c.answer,c.answered_by,c.answered_at,c.reused_from"
             " from clarifications c join jobs j on j.id=c.job_id"
             " where c.status='ANSWERED' and trim(c.answer)<>''"
             " and (c.job_id=? or (?<>'' and j.service=?))"
@@ -64,16 +66,26 @@ class PriorAnswers:
         self._rows = sorted(rows, key=rank)
         self._norm = [normalise(r['question']) for r in self._rows]
 
-    def match(self, stage, question):
-        """The best earlier answer to this question, or ``None``."""
+    def match(self, stage, question, evidence_ref=''):
+        """The best earlier answer to this question, or ``None``.
+
+        A reworded question needs the same stage *and* the same, non-empty
+        evidence reference. Without one there is nothing saying two similar
+        sentences are about the same construct, so only an exact question
+        matches.
+        """
         wanted = normalise(question)
         if not wanted or not self._rows:
             return None
         for row, norm in zip(self._rows, self._norm):
             if norm == wanted:
                 return row
+        ref = normalise(evidence_ref)
+        if not ref:
+            return None
         for row, norm in zip(self._rows, self._norm):
-            if row['stage'] == stage and SequenceMatcher(None, wanted, norm).ratio() >= SIMILARITY:
+            if (row['stage'] == stage and normalise(row.get('evidence_ref')) == ref
+                    and SequenceMatcher(None, wanted, norm).ratio() >= SIMILARITY):
                 return row
         return None
 

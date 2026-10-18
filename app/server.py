@@ -531,7 +531,7 @@ class H(BaseHTTPRequestHandler):
             # Clarifications tab can show (and let the operator answer) just
             # the questions blocking this step, not every clarification on
             # the job.
-            clarifications=repo.rows('select * from clarifications where run_id=? order by created_at',(run_id,)) if run_id else []
+            clarifications=repo.rows("select * from clarifications where run_id=? and status<>'DUPLICATE' order by created_at",(run_id,)) if run_id else []
             return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact,'clarifications':clarifications})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.

@@ -43,6 +43,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from app.agents.reasoning import MODEL_GATEWAY, NOT_CONSULTED, ReasoningGateway
+from app.services import precedents
 from app.services.feedback import redact
 
 SCHEMA_FILE = Path(__file__).resolve().parents[2] / 'config' / 'agent-response-schemas.v1.json'
@@ -356,6 +357,13 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     """
     info, warn = _log(context)
     schema_name = schema_name or prompt_name
+    # What people have already decided for this agent travels with every
+    # request, so a later run is not authored as if the earlier answers had
+    # never been given. Inside the payload (and so inside the DLP scrub and the
+    # size check), not in the approved template.
+    learned = precedents.for_context(context)
+    if learned:
+        payload = {**payload, '_precedents': learned, '_precedents_note': precedents.NOTE}
     cleared = scrub(payload)
     serialised = json.dumps(cleared, sort_keys=True, default=str)
     if len(serialised) > MAX_PAYLOAD_CHARS:
@@ -368,7 +376,8 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
                                   {'prompt_name': prompt_name, 'schema': schema_name})
     gateway = ReasoningGateway(context.repo)
     budget = max(1, int(attempts or 1))
-    corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name}
+    corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name,
+                                   'precedents': len(learned)}
     failures = []
     for attempt in range(1, budget + 1):
         # Checked before each attempt, not only before the first: a retry with
@@ -387,7 +396,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         # template is the approved prompt and must not be rewritten per attempt.
         request = dict(cleared, _correction=corrections[-1]) if corrections else cleared
         answer, provenance = gateway.reason(context, prompt_name, request, skill=skill)
-        provenance.update({'schema': schema_name, 'attempts': attempt})
+        provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned)})
         if corrections:
             provenance['corrections'] = list(corrections)
         if answer is None:
