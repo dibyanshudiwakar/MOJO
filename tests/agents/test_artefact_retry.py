@@ -406,3 +406,24 @@ def test_a_provider_failure_actually_sleeps(repo, job, gateway, monkeypatch):
 ])
 def test_the_prefix_is_what_decides(reason, expected):
     assert retryable(reason) is expected
+
+
+# ---- a violation names the rule, not the value ---------------------------------------------
+
+def test_a_size_violation_says_how_far_over_it_was():
+    """Observed: "risks: [{'category': 'BLOCKING', ..." -- the value, with the rule cut off.
+
+    Three attempts failed identically because neither the operator nor the
+    correction sent back to the model said what to change.
+    """
+    from app.agents.artefact import _describe
+    from jsonschema import Draft202012Validator
+    schema = {'type': 'object', 'properties': {
+        'risks': {'type': 'array', 'maxItems': 2},
+        's': {'type': 'string', 'maxLength': 3},
+        'n': {'type': 'array', 'minItems': 2}}}
+    def first(doc):
+        return next(iter(Draft202012Validator(schema).iter_errors(doc)))
+    assert _describe(first({'risks': [{'k': 'v' * 500}] * 5})) == 'has 5 items; at most 2 allowed'
+    assert _describe(first({'s': 'abcdef'})) == 'is 6 characters; at most 3 allowed'
+    assert _describe(first({'n': [1]})) == 'has 1 items; at least 2 required'

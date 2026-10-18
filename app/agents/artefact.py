@@ -247,7 +247,32 @@ def validate(artefact, name):
         return ''
     first = errors[0]
     where = '/'.join(str(p) for p in first.absolute_path) or '(root)'
-    return '%s: %s' % (where, first.message[:160])
+    return '%s: %s' % (where, _describe(first))
+
+
+def _describe(error):
+    """The rule that failed, in words, rather than the value that failed it.
+
+    jsonschema's own message for a size rule is the whole offending value
+    followed by "is too long". Cut to a few hundred characters, that left
+    nothing but the value -- the error read "risks: [{'category': 'BLOCKING',
+    ..." with the rule lost, so neither the operator nor the correction sent
+    back to the model said what to change, and all three attempts failed the
+    same way.
+    """
+    rule, limit, value = error.validator, error.validator_value, error.instance
+    try:
+        if rule == 'maxItems':
+            return 'has %d items; at most %s allowed' % (len(value), limit)
+        if rule == 'minItems':
+            return 'has %d items; at least %s required' % (len(value), limit)
+        if rule == 'maxLength':
+            return 'is %d characters; at most %s allowed' % (len(value), limit)
+        if rule == 'minLength':
+            return 'is %d characters; at least %s required' % (len(value), limit)
+    except TypeError:
+        pass
+    return error.message[:160]
 
 
 def _log(context):

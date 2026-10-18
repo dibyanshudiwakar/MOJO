@@ -149,7 +149,7 @@ def test_one_empty_file_fails_the_agent_and_writes_nothing(
         dispatch(job['id'], 'code-generation', params,
                  provider=_provider(omit={'Dockerfile'}))
     assert raised.value.prompt_name == FILE
-    assert 'should be non-empty' in raised.value.reason
+    assert 'is 0 characters; at least 1 required' in raised.value.reason
     assert raised.value.attempts == 3
     # No half-written tree, and nothing registered against the plan.
     assert not (tmp_path / 'authored').exists()
@@ -169,7 +169,7 @@ def test_an_empty_layout_fails_the_agent(repo, job, params, gateway, dispatch):
         dispatch(job['id'], 'code-generation', params,
                  provider=_provider(layout={'files': []}))
     assert raised.value.prompt_name == LAYOUT
-    assert 'should be non-empty' in raised.value.reason
+    assert 'has 0 items; at least 1 required' in raised.value.reason
 
 
 def test_a_path_escaping_the_project_is_refused_not_written(
