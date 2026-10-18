@@ -132,15 +132,14 @@ def _mapping_catalogue(payload):
                              else 'HAND_WRITTEN_PROTECTED',
                              'tests': target['tests']})
         else:
+            # The shape prompt v4 asks for: severity and a one-line risk on the
+            # entry itself. The agent derives the risk-register row from it.
             unsupported.append({'source_reference': source,
                                 'ace_construct': name or 'UNKNOWN',
                                 'reason': 'NO_APPROVED_SPRING_PATTERN',
-                                'status': 'OPEN', 'owner': 'ACE_SME_AND_JAVA_ARCHITECT'})
-            risks.append({'category': 'UNSUPPORTED_MAPPING', 'severity': 'HIGH',
-                          'source_reference': source,
-                          'statement': 'No approved Spring mapping for ' + str(name),
-                          'response': 'Clarify or implement approved plug-in mapping',
-                          'owner': 'ACE_SME_AND_JAVA_ARCHITECT', 'status': 'OPEN'})
+                                'severity': 'HIGH',
+                                'risk': 'No approved Spring mapping for ' + str(name),
+                                'owner': 'ACE_SME_AND_JAVA_ARCHITECT'})
 
     for flow in (model.get('flows') or []) + (model.get('subflows') or []):
         for node in flow.get('nodes') or []:
@@ -157,7 +156,7 @@ def _mapping_catalogue(payload):
         add(x.get('path', ''), 'SCHEMA')
     for x in model.get('policies') or []:
         add(x.get('path', ''), 'POLICY')
-    return {'mappings': mappings, 'unsupported': unsupported, 'risks': risks}
+    return {'mappings': mappings, 'unsupported': unsupported}
 
 
 def _paths(items):

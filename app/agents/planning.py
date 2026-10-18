@@ -194,6 +194,26 @@ class PlanningAgent(BaseAgent):
                 merged['mappings'].append(m)
             merged['unsupported'] += piece.get('unsupported') or []
             merged['risks'] += piece.get('risks') or []
+        # The risk for an unsupported construct is derived from the entry, not
+        # authored as a separate register. The register was where the reply grew
+        # past max_tokens -- twice, at 39,313 and then 45,270 characters, from
+        # long "SILENTLY_WRONG" write-ups for a single ESQL module -- and no
+        # prompt wording held it down, because the planning skill asks for an
+        # exhaustive one. An unrated gap is HIGH, which is the service's own
+        # default and the safe one: it is the rating that stops the plan.
+        rated = {r.get('source_reference') for r in merged['risks']}
+        for entry in merged['unsupported']:
+            ref = entry.get('source_reference') or ''
+            if ref in rated:
+                continue
+            merged['risks'].append({
+                'category': 'UNSUPPORTED_MAPPING',
+                'severity': str(entry.get('severity') or 'HIGH').upper(),
+                'source_reference': ref,
+                'statement': (entry.get('risk') or 'No approved Spring mapping for %s'
+                              % (entry.get('ace_construct') or 'this construct'))[:400],
+                'response': 'Clarify or implement approved plug-in mapping',
+                'owner': entry.get('owner') or 'ACE_SME_AND_JAVA_ARCHITECT', 'status': 'OPEN'})
         return merged
 
 

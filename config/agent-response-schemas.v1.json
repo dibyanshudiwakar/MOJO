@@ -662,7 +662,8 @@
               },
               "ace_construct": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 160
               },
               "mapping_key": {
                 "type": "string"
@@ -690,7 +691,7 @@
               },
               "rationale": {
                 "type": "string",
-                "maxLength": 1000
+                "maxLength": 300
               }
             }
           }
@@ -710,13 +711,29 @@
                 "type": "string"
               },
               "ace_construct": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 160
               },
               "reason": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 300
               },
               "owner": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 120
+              },
+              "severity": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ],
+                "description": "What leaving this construct out would cost. Auto mode plans around anything below HIGH."
+              },
+              "risk": {
+                "type": "string",
+                "maxLength": 300,
+                "description": "One sentence on the risk of leaving it out."
               }
             }
           }

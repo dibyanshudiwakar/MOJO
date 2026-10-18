@@ -126,8 +126,8 @@ def _gap_severity(model, severity):
 
     def answer(payload):
         out = ANSWERS['agent/planning/mapping-catalogue'](payload)
-        for risk in out['risks']:
-            risk['severity'] = severity
+        for entry in out['unsupported']:
+            entry['severity'] = severity
         return out
     model.overrides['agent/planning/mapping-catalogue'] = answer
 
@@ -179,3 +179,42 @@ def test_the_worst_risk_for_a_construct_decides():
               'risks': [{'source_reference': 'M#odd', 'severity': 'LOW'},
                         {'source_reference': 'M#odd', 'severity': 'HIGH'}]}
     assert PlanningAgent._accept_minor_gaps(mapped)[1] == 0
+
+
+# ---- the risk register is derived, not authored --------------------------------------------
+#
+# Twice the mapping reply overran max_tokens (39,313 then 45,270 characters), both
+# times in the model's own risk register for one ESQL module. Prompt wording did
+# not hold it down, so the register is no longer part of the answer.
+
+def test_a_risk_is_derived_for_each_unsupported_entry():
+    merged = PlanningAgent._merge([{'mappings': [], 'unsupported': [
+        {'source_reference': 'M#odd', 'ace_construct': 'AcmeNode', 'severity': 'medium',
+         'risk': 'Routing would be lost.', 'owner': 'ACE_SME'}]}])
+    risk, = merged['risks']
+    assert (risk['severity'], risk['statement'], risk['source_reference']) == (
+        'MEDIUM', 'Routing would be lost.', 'M#odd')
+    assert risk['category'] == 'UNSUPPORTED_MAPPING' and risk['status'] == 'OPEN'
+
+
+def test_an_unrated_unsupported_entry_defaults_to_high():
+    """HIGH is the rating that stops the plan, so a missing one fails safe."""
+    merged = PlanningAgent._merge([{'unsupported': [{'source_reference': 'M#odd'}]}])
+    assert merged['risks'][0]['severity'] == 'HIGH'
+
+
+def test_a_model_supplied_risk_is_not_duplicated_by_the_derived_one():
+    merged = PlanningAgent._merge([{'unsupported': [{'source_reference': 'M#odd'}],
+                                    'risks': [{'source_reference': 'M#odd', 'severity': 'LOW',
+                                               'category': 'X', 'statement': 's'}]}])
+    assert len(merged['risks']) == 1 and merged['risks'][0]['severity'] == 'LOW'
+
+
+def test_the_current_prompt_does_not_ask_for_a_risk_register():
+    import json
+    from pathlib import Path
+    prompts = json.loads((Path(__file__).resolve().parents[2] / 'config' / 'agent-prompts.v1.json')
+                         .read_text(encoding='utf-8'))['prompts']
+    latest = max((p for p in prompts if p['name'] == 'agent/planning/mapping-catalogue'),
+                 key=lambda p: int(p['version']))
+    assert '\"risks\"' not in latest['template'].split('Return JSON:')[1]
