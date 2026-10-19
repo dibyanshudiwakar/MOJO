@@ -1609,7 +1609,17 @@
           "type": "array",
           "maxItems": 128,
           "items": {
-            "type": "string"
+            "anyOf": [
+              {"type": "string"},
+              {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {"type": "string", "minLength": 1},
+                  "reason": {"type": "string"}
+                }
+              }
+            ]
           },
           "description": "Files the skill prescribes that this service does not need, each with why. An omission stated is reviewable; a silent one is not."
         }

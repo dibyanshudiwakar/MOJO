@@ -427,3 +427,21 @@ def test_a_size_violation_says_how_far_over_it_was():
     assert _describe(first({'risks': [{'k': 'v' * 500}] * 5})) == 'has 5 items; at most 2 allowed'
     assert _describe(first({'s': 'abcdef'})) == 'is 6 characters; at most 3 allowed'
     assert _describe(first({'n': [1]})) == 'has 1 items; at least 2 required'
+
+
+def test_a_type_violation_says_what_it_was_and_what_was_expected():
+    """Observed: "omitted/0: {'path': ..., 'reason': 'Rule 10 forbids ..." -- the rule cut off.
+
+    Only size rules were put in words, so a wrong type showed the offending
+    object and lost the words "is not of type 'string'" after 160 characters.
+    """
+    from app.agents.artefact import _describe
+    from jsonschema import Draft202012Validator
+    schema = {'type': 'object', 'properties': {
+        'omitted': {'type': 'array', 'items': {'type': 'string'}},
+        'level': {'enum': ['HIGH', 'LOW']}}}
+    def first(doc):
+        return next(iter(Draft202012Validator(schema).iter_errors(doc)))
+    long_object = {'path': 'x' * 400, 'reason': 'y' * 400}
+    assert _describe(first({'omitted': [long_object]})) == 'is dict; expected string'
+    assert 'is not one of' in _describe(first({'level': 'MIDDLE'}))

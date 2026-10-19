@@ -225,3 +225,54 @@ def test_the_layout_is_asked_at_listing_effort_and_the_files_at_authoring_effort
     provider = Recording(inner._answer)
     dispatch(job['id'], 'code-generation', params, provider=provider)
     assert provider.efforts == {'layout': {LISTING_EFFORT}, 'file': {AUTHORING_EFFORT}}
+
+
+# ---- an omission is a path and a reason ----------------------------------------------------
+#
+# The schema said omitted was a list of strings; its own description said "each
+# with why", and the prompt said only "omitted":[...]. The model returned
+# {path, reason} objects -- the more useful shape -- and the whole layout failed
+# three times on that one field.
+
+def _layout_with(omitted):
+    return {'root': ROOT,
+            'files': [{'path': p, 'purpose': why, 'skill_reference': 'references/structural-conventions.md'}
+                      for p, why in WANTED],
+            'omitted': omitted}
+
+
+def test_an_omission_given_as_a_path_and_a_reason_is_accepted_and_recorded(
+        repo, job, params, gateway, dispatch):
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    omitted = [{'path': 'cvs-v1-x-oci-web/src/main/java/exception/*',
+                'reason': 'Rule 10 forbids an exception package'}]
+    outcome = dispatch(job['id'], 'code-generation', params,
+                       provider=_provider(layout=_layout_with(omitted)))
+    manifest = json.loads(Path(outcome['outputs']['manifest']).read_text())
+    assert ('omitted by the model: cvs-v1-x-oci-web/src/main/java/exception/*: '
+            'Rule 10 forbids an exception package') in manifest['action_items']
+
+
+def test_a_bare_string_omission_is_still_accepted(repo, job, params, gateway, dispatch):
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'code-generation', params,
+                       provider=_provider(layout=_layout_with(['Secret.yaml: service needs no secret'])))
+    manifest = json.loads(Path(outcome['outputs']['manifest']).read_text())
+    assert 'omitted by the model: Secret.yaml: service needs no secret' in manifest['action_items']
+
+
+def test_an_omission_object_without_a_path_is_still_rejected(repo, job, params, gateway, dispatch):
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    with pytest.raises(ArtefactUnavailable):
+        dispatch(job['id'], 'code-generation', params,
+                 provider=_provider(layout=_layout_with([{'reason': 'no path given'}])))
+
+
+def test_the_current_layout_prompt_asks_for_objects():
+    from app.agents.reasoning import prompt_catalogue, version_key
+    latest = max((p for p in prompt_catalogue() if p['name'] == LAYOUT),
+                 key=lambda p: version_key(p['version']))
+    assert '"omitted":[{"path":...,"reason":...}]' in latest['template']
