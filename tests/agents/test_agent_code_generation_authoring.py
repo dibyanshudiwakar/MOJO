@@ -276,3 +276,91 @@ def test_the_current_layout_prompt_asks_for_objects():
     latest = max((p for p in prompt_catalogue() if p['name'] == LAYOUT),
                  key=lambda p: version_key(p['version']))
     assert '"omitted":[{"path":...,"reason":...}]' in latest['template']
+
+
+# ---- a failed gate is a result, not a failed run -------------------------------------------
+
+def _no_build_file_layout():
+    """A layout with no pom.xml or build.gradle anywhere: PROJECT_STRUCTURE must fail.
+
+    Not a leaked secret, which would be the obvious way to fail the gate: the
+    gateway's own response DLP refuses an answer containing a credential
+    assignment before it can reach the gate at all.
+    """
+    return {'root': ROOT,
+            'files': [{'path': p, 'purpose': why, 'skill_reference': 'references/structural-conventions.md'}
+                      for p, why in WANTED if not p.endswith('pom.xml')],
+            'omitted': []}
+
+
+def test_a_failed_gate_completes_the_run_and_hands_the_project_to_feedback(
+        repo, job, params, gateway, dispatch):
+    """The feedback agent exists to repair exactly this, and was refused for it.
+
+    code-generation used to return FAILED here. Its run was recorded FAILED
+    while the pipeline showed the step green, and feedback then failed with
+    agent_dependency_not_satisfied:code-generation.
+    """
+    from app.services.agents import AgentRegistry
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'code-generation', params, provider=_provider(layout=_no_build_file_layout()))
+
+    assert outcome['metrics']['quality_status'] == 'FAIL', 'the fixture must actually fail the gate'
+    assert outcome['metrics']['failed_checks'] == ['PROJECT_STRUCTURE'], 'and for the reason intended'
+    assert outcome['status'] == 'COMPLETED' and outcome['error'] == ''
+    assert outcome['metrics']['repair_by'] == 'feedback'
+    assert outcome['metrics']['failed_checks'], 'and it says which checks failed'
+    run = repo.one("select status from agent_runs where job_id=? and agent_id='code-generation'", (job['id'],))
+    assert run['status'] == 'COMPLETED'
+    # The gate's verdict is recorded, not softened.
+    assert repo.one('select status from quality_runs where job_id=?', (job['id'],))['status'] == 'FAIL'
+    assert AgentRegistry(repo).dependency_status(job['id'], 'feedback')['outstanding'] == []
+
+
+def test_a_passing_gate_asks_for_no_repair(repo, job, params, gateway, dispatch):
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'code-generation', params, provider=_provider())
+    assert outcome['metrics']['quality_status'] != 'FAIL' and outcome['metrics']['repair_by'] == ''
+
+
+# ---- PROJECT_STRUCTURE understands the layout the skill prescribes ---------------------------
+#
+# The check wanted a pom.xml at the project root. The skill prescribes a
+# repository root holding module directories (<service>-parent/pom.xml,
+# <service>-web/pom.xml) and no pom.xml of its own, so every skill-compliant
+# project failed the gate -- the 07:47 run's quality_gate_failed.
+
+def _structure(repo, job, tmp_path, files):
+    from app.services.migration_lifecycle_v6 import MappingAndPlanningService
+    root = tmp_path / 'proj'
+    root.mkdir(exist_ok=True)
+    for rel in files:
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('x', encoding='utf-8')
+    result = MappingAndPlanningService(repo).quality_validate(job['id'], 'plan-1', str(root))
+    return {c['name']: c['status'] for c in result['checks']}['PROJECT_STRUCTURE']
+
+
+def test_a_multi_module_layout_with_no_root_pom_passes(repo, job, tmp_path):
+    assert _structure(repo, job, tmp_path,
+                      ['svc-parent/pom.xml', 'svc-web/pom.xml', 'Dockerfile']) == 'PASS'
+
+
+def test_a_flat_project_with_a_root_pom_still_passes(repo, job, tmp_path):
+    assert _structure(repo, job, tmp_path, ['pom.xml']) == 'PASS'
+
+
+def test_a_gradle_module_passes(repo, job, tmp_path):
+    assert _structure(repo, job, tmp_path, ['svc/build.gradle']) == 'PASS'
+
+
+def test_a_project_with_no_build_file_anywhere_still_fails(repo, job, tmp_path):
+    assert _structure(repo, job, tmp_path, ['svc-web/src/main/java/App.java', 'Dockerfile']) == 'FAIL'
+
+
+def test_a_build_file_buried_deep_does_not_count(repo, job, tmp_path):
+    """Modules sit directly under the root; a pom three levels down is not one."""
+    assert _structure(repo, job, tmp_path, ['a/b/c/pom.xml']) == 'FAIL'

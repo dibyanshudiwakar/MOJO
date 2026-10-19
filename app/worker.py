@@ -281,8 +281,35 @@ class WorkerLoop:
             log.warn('Agent requires clarification — step parked')
             self.pipelines.park_for_clarification(step_id, outputs, outputs.get('_clarification_ids') or [])
             return
+        if outputs.get('_agent_status') == 'FAILED':
+            # An agent can fail by returning a result rather than by raising. The
+            # registry records its run as FAILED either way, but only an
+            # exception reached the branch above, so the step was reported as
+            # "completed successfully" with a failed run behind it -- and
+            # whatever depends on that agent's completed run was then refused.
+            error = outputs.get('_agent_error') or 'agent_reported_failure'
+            log.error('Agent reported failure: %s' % str(error)[:300])
+            self.pipelines.mark_step(step_id, 'FAILED', outputs=outputs, error=str(error))
+            return
+        repair_by = (outputs.get('_metrics') or {}).get('repair_by')
+        if repair_by and not self._has_step(step['pipeline_id'], repair_by):
+            # The agent finished and said its result needs another agent to
+            # repair it. If this pipeline has no such agent, nothing will, and
+            # carrying on would hand a failing result downstream as if it were
+            # sound.
+            error = 'quality_gate_failed:%s; no %s step in this pipeline to repair it' % (
+                (outputs.get('_metrics') or {}).get('quality_run_id', ''), repair_by)
+            log.error(error)
+            self.pipelines.mark_step(step_id, 'FAILED', outputs=outputs, error=error)
+            return
         log.success('Step completed successfully')
         self.pipelines.mark_step(step_id, 'COMPLETED', outputs=outputs)
+
+    def _has_step(self, pipeline_id, agent_id):
+        """Whether this pipeline will run ``agent_id`` (present and not skipped)."""
+        return bool(self.repo.one(
+            "select 1 x from pipeline_steps where pipeline_id=? and agent_id=? and status<>'SKIPPED'",
+            (pipeline_id, agent_id)))
 
     def _principal(self, email):
         """The pipeline creator's roles, re-read at dispatch time.
@@ -396,6 +423,7 @@ class WorkerLoop:
         return {**result.get('outputs', {}), '_run_id': result.get('run_id'),
                 '_agent_status': result.get('status'), '_metrics': result.get('metrics'),
                 '_artefact_complete': bool(result.get('artefact_complete')),
+                '_agent_error': result.get('error') or '',
                 '_evidence_ids': evidence_ids,
                 '_clarification_ids': result.get('clarification_ids')}
 

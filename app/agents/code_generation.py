@@ -187,9 +187,21 @@ class CodeGenerationAgent(BaseAgent):
         # what happened. Authoring is the model work this agent exists to do.
         provenance = dict(authoring)
         provenance['quality_triage'] = {k: triage.get(k) for k in ('mode', 'reason')}
+        gate_failed = quality['status'] == 'FAIL'
+        if gate_failed and context.logger:
+            context.logger.warn('Quality gate FAILED (%s) — the project is generated and handed to the '
+                                'feedback agent to repair' % ', '.join(failed))
         return AgentResult(
-            status='FAILED' if quality['status'] == 'FAIL' else 'COMPLETED',
-            error='quality_gate_failed:' + quality['quality_run_id'] if quality['status'] == 'FAIL' else '',
+            # Generation is complete either way; the gate's verdict is recorded
+            # beside it (``quality_status``, the quality run, the evidence) and is
+            # not softened. This used to return FAILED, which the pipeline worker
+            # did not read -- so the step showed COMPLETED while the run was
+            # FAILED, and the feedback agent, whose whole job is to repair a
+            # project the gate has flagged, was refused for want of a completed
+            # code-generation run. ``repair_by`` tells the worker to fail the step
+            # if nothing in the pipeline is going to do that.
+            status='COMPLETED',
+            error='',
             outputs={'source_code': generated['project_root'], 'tests': tests,
                      'manifest': str(manifest_path), 'provenance': generated['content_hash']},
             # ``generate_spring`` hashes the manifest as sorted, compact json but
@@ -208,6 +220,8 @@ class CodeGenerationAgent(BaseAgent):
                      'model_attempts': authoring.get('attempts', 0),
                      'layout_root': authoring.get('layout_root', ''),
                      'quality_status': quality['status'], 'failed_checks': failed,
+                     'quality_run_id': quality['quality_run_id'],
+                     'repair_by': 'feedback' if gate_failed else '',
                      # What the model said it left out, surfaced on the run so
                      # the output panel shows it beside the code.
                      'action_items': generated.get('action_items', []),

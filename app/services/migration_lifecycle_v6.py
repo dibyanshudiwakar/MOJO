@@ -321,7 +321,14 @@ class MappingAndPlanningService:
   return len(rows)
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
-  checks.append(self._check('PROJECT_STRUCTURE',(root/'pom.xml').exists() or (root/'build.gradle').exists()))
+  # A build file at the root (a flat project) or in a module directory directly
+  # under it (the multi-module layout the skill prescribes: a repository root
+  # holding ``<service>-parent/pom.xml`` and ``<service>-web/pom.xml``, and no
+  # pom.xml of its own). This asked for the root only, so it failed every
+  # skill-compliant project -- it was written for the flat tree the old
+  # generator produced, before the layout came from the skill.
+  checks.append(self._check('PROJECT_STRUCTURE',any(
+   p.exists() for p in (root/'pom.xml',root/'build.gradle',*root.glob('*/pom.xml'),*root.glob('*/build.gradle')))))
   config_files=[f for f in root.rglob('*') if f.is_file() and f.suffix.lower() in ('.java','.yml','.yaml','.properties') and f.stat().st_size<2_000_000]
   text='\n'.join(f.read_text(errors='ignore') for f in config_files)
   checks.append(self._check('SECRET_SCAN',not bool(re.search(r'(?i)(password|secret|token)\s*[:=]\s*["\'][^$][^"\']+',text))))
