@@ -44,6 +44,13 @@ _CONNECTOR_REFERENCE = {
 }
 
 
+def _omission(item):
+    """One omitted file as text: ``path: reason`` for the object form, as-is for a string."""
+    if isinstance(item, dict):
+        return '%s: %s' % (item.get('path', ''), item.get('reason') or 'no reason given')
+    return str(item)
+
+
 class CodeGenerationAgent(BaseAgent):
     AGENT_ID = 'code-generation'
     SKILL = 'iib-to-ms-code-generation'
@@ -129,7 +136,7 @@ class CodeGenerationAgent(BaseAgent):
         # a violation on that one file and is re-asked. Filtering here meant one
         # blank response discarded every other file the model had authored.
         files = [(path, answer['content']) for path, answer in authored.items()]
-        actions = ['omitted by the model: ' + str(x) for x in (layout.get('omitted') or [])]
+        actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
         recorded = service.record_generated_project(
             context.job_id, plan_id, context.param('output_root'),
             layout.get('root') or '', files, action_items=actions)

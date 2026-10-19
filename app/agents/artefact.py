@@ -271,9 +271,19 @@ def _describe(error):
             return 'is %d characters; at most %s allowed' % (len(value), limit)
         if rule == 'minLength':
             return 'is %d characters; at least %s required' % (len(value), limit)
+        if rule == 'type':
+            return 'is %s; expected %s' % (type(value).__name__, limit)
+        if rule == 'enum':
+            return '%.60r is not one of %s' % (value, list(limit)[:8])
     except TypeError:
         pass
-    return error.message[:160]
+    message = error.message
+    # jsonschema's message usually leads with the offending value, which for an
+    # object or array is long: cut at 160 it hid "is not of type 'string'" and
+    # left an error naming the value but not the rule. Lead with the rule.
+    if len(message) > 160:
+        return 'fails %s: %s' % (rule, message[:140])
+    return message
 
 
 def _log(context):
