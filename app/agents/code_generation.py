@@ -28,7 +28,7 @@ does not hold.
 """
 import json
 from pathlib import Path
-from app.agents.artefact import LISTING_EFFORT, produce, produce_many
+from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, produce, produce_many
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
@@ -124,7 +124,7 @@ class CodeGenerationAgent(BaseAgent):
                              'tasks': tasks,
                              'semantic_model': model, 'framework_standards': standards})
              for item in wanted],
-            skill=skill)
+            skill=skill, effort=AUTHORING_EFFORT)
         # No emptiness filter: 'content' carries minLength 1, so a blank file is
         # a violation on that one file and is re-asked. Filtering here meant one
         # blank response discarded every other file the model had authored.

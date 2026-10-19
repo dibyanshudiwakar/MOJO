@@ -346,6 +346,27 @@ def _diagnose(reason, failures, budget):
 #: and the reply was cut off. Analysis and code authoring keep the alias default.
 LISTING_EFFORT = 'low'
 STRUCTURED_EFFORT = 'medium'
+#: Authoring a file is real work, so it is not turned down as far as the above;
+#: but the coding alias's own ``xhigh`` spent all 32,768 tokens on reasoning for
+#: an 8,791-character file. ``high`` is what ace-analysis already runs at.
+AUTHORING_EFFORT = 'high'
+
+#: Highest to lowest. A reply cut off after the model reasoned is retried one
+#: rung down: the request changed, so unlike a plain retry it can succeed.
+EFFORT_LADDER = ('xhigh', 'high', 'medium', 'low')
+
+
+def lower_effort(effort):
+    """The next rung down, or ``None`` at the bottom.
+
+    An unspecified effort means the alias's own, which is not known here and is
+    ``high`` or above, so it steps to ``medium``.
+    """
+    if effort is None:
+        return 'medium'
+    if effort in EFFORT_LADDER and EFFORT_LADDER.index(effort) + 1 < len(EFFORT_LADDER):
+        return EFFORT_LADDER[EFFORT_LADDER.index(effort) + 1]
+    return None
 
 
 def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
@@ -391,7 +412,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     budget = max(1, int(attempts or 1))
     corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name,
                                    'precedents': len(learned)}
-    failures = []
+    failures, lowered = [], []
     for attempt in range(1, budget + 1):
         # Checked before each attempt, not only before the first: a retry with
         # its backoff can add seconds after the operator pressed Stop, and
@@ -412,10 +433,26 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned)})
         if corrections:
             provenance['corrections'] = list(corrections)
+        if lowered:
+            provenance['effort_lowered'] = list(lowered)
         if answer is None:
             # reason() already recorded and logged why.
             reason = provenance.get('reason') or 'model_unavailable'
             failures.append(reason)
+            # Cut off at max_tokens after the model reasoned: its thinking took
+            # the budget. Asking again unchanged would take it again (that is
+            # why a truncated reply is otherwise terminal), but asking it to
+            # think less is a different request.
+            lower = (lower_effort(effort)
+                     if 'provider_response_truncated' in reason
+                     and 'reasoned before answering' in reason else None)
+            if lower and attempt < budget:
+                warn('Reply for "%s" was cut off at max_tokens after the model reasoned — '
+                     'asking again at %s effort (attempt %d of %d)'
+                     % (prompt_name, lower, attempt + 1, budget))
+                lowered.append('%s->%s' % (effort or 'default', lower))
+                effort = lower
+                continue
             if not retryable(reason) or attempt >= budget:
                 raise ArtefactUnavailable(prompt_name, _diagnose(reason, failures, budget),
                                           attempt, provenance)

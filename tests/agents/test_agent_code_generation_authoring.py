@@ -193,15 +193,16 @@ def test_a_path_escaping_the_project_is_refused_not_written(
     assert any('refused' in str(a) for a in manifest['action_items'])
 
 
-def test_the_layout_is_asked_at_listing_effort_and_the_files_at_the_aliases_own(
+def test_the_layout_is_asked_at_listing_effort_and_the_files_at_authoring_effort(
         repo, job, params, gateway, dispatch):
     """A file list at the coding alias's xhigh spent all 32,768 tokens on hidden reasoning.
 
     Observed on a real project layout: 15,096 visible characters, cut off at
-    max_tokens. Writing the files themselves is real authoring and is not
-    turned down.
+    max_tokens. Writing the files themselves is real authoring and is turned
+    down only to `high`: at the alias's xhigh an 8,791-character file spent all
+    32,768 tokens reasoning.
     """
-    from app.agents.artefact import LISTING_EFFORT
+    from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT
 
     class Recording(ArtefactProvider):
         accepts_skill = True
@@ -223,4 +224,4 @@ def test_the_layout_is_asked_at_listing_effort_and_the_files_at_the_aliases_own(
     inner = _provider()
     provider = Recording(inner._answer)
     dispatch(job['id'], 'code-generation', params, provider=provider)
-    assert provider.efforts == {'layout': {LISTING_EFFORT}, 'file': {None}}
+    assert provider.efforts == {'layout': {LISTING_EFFORT}, 'file': {AUTHORING_EFFORT}}

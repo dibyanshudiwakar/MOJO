@@ -7,7 +7,8 @@ spent all 32,768 tokens before the answer finished -- a file list, cut off.
 import pytest
 
 from app.agents import artefact
-from app.agents.artefact import LISTING_EFFORT, STRUCTURED_EFFORT, produce
+from app.agents.artefact import (ArtefactUnavailable, LISTING_EFFORT, STRUCTURED_EFFORT,
+                                 lower_effort, produce)
 from app.agents.dormancy_intelligence import DormancyIntelligenceAgent
 
 PROMPT = DormancyIntelligenceAgent.PROMPT
@@ -109,3 +110,72 @@ def test_planning_maps_at_structured_effort(repo, job, approved_inputs, model):
     recorder, seen = _recording(model)
     PlanningAgent(repo).run(job['id'], params=approved_inputs, provider=recorder)
     assert seen['agent/planning/mapping-catalogue'] == {STRUCTURED_EFFORT}
+
+
+# ---- a reply cut off after reasoning is retried with less of it ------------------------------
+
+CUT_OFF = ('provider_response_truncated:max_tokens=32768: the answer was cut off mid-JSON '
+           '(8791 chars; output_tokens=32768, blocks=text:8791,thinking:0 -- the model reasoned '
+           'before answering; its text is omitted but its tokens count against max_tokens)')
+
+
+class _CutOffThenFine(_TakesEffort):
+    def __init__(self, cut_offs):
+        super().__init__()
+        self.cut_offs = cut_offs
+
+    def invoke(self, template, payload, skill=None, effort=None):
+        self.efforts.append(effort)
+        if len(self.efforts) <= self.cut_offs:
+            raise RuntimeError(CUT_OFF)
+        return VALID
+
+
+@pytest.mark.parametrize('start,expected', [
+    (None, [None, 'medium']),
+    ('xhigh', ['xhigh', 'high']),
+    ('high', ['high', 'medium']),
+])
+def test_a_reply_cut_off_after_reasoning_is_retried_one_rung_down(repo, job, gateway, start, expected):
+    """The request changed, so unlike a plain retry it can succeed -- and did not take 30 minutes."""
+    gateway(PROMPT)
+    provider = _CutOffThenFine(cut_offs=1)
+    _, provenance = produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1}, effort=start)
+    assert provider.efforts == expected
+    assert provenance['attempts'] == 2 and provenance['effort_lowered']
+
+
+def test_it_keeps_stepping_down_until_it_fits(repo, job, gateway):
+    gateway(PROMPT)
+    provider = _CutOffThenFine(cut_offs=2)
+    produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1}, effort='high')
+    assert provider.efforts == ['high', 'medium', 'low']
+
+
+def test_at_the_bottom_rung_there_is_nothing_left_to_lower(repo, job, gateway):
+    gateway(PROMPT)
+    provider = _CutOffThenFine(cut_offs=5)
+    with pytest.raises(ArtefactUnavailable) as raised:
+        produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1}, effort='low')
+    assert provider.efforts == ['low'] and raised.value.attempts == 1
+
+
+def test_a_plain_truncation_with_no_reasoning_is_still_not_retried(repo, job, gateway):
+    """Nothing to lower: the same request would be cut off the same way."""
+    gateway(PROMPT)
+
+    class _Plain(_TakesEffort):
+        def invoke(self, template, payload, skill=None, effort=None):
+            self.efforts.append(effort)
+            raise RuntimeError('provider_response_truncated:max_tokens=32768: cut off (9000 chars)')
+
+    provider = _Plain()
+    with pytest.raises(ArtefactUnavailable):
+        produce(_context(repo, job, provider), PROMPT, {'traffic_count': 1}, effort='high')
+    assert provider.efforts == ['high']
+
+
+@pytest.mark.parametrize('effort,lower', [(None, 'medium'), ('xhigh', 'high'), ('high', 'medium'),
+                                          ('medium', 'low'), ('low', None), ('nonsense', None)])
+def test_the_ladder(effort, lower):
+    assert lower_effort(effort) == lower
