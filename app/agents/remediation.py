@@ -62,22 +62,6 @@ class RemediationAgent(BaseAgent):
             'variance_ids': variance_ids,
         }
 
-    def _fallback_plan(self, variances):
-        """The deterministic change set: one descriptive intent per varying path.
-
-        Descriptive on purpose -- the change an approved plan should carry, not
-        an edit this agent performs. It is a lookup over variance kinds, which
-        is why authoring it is worth moving to the model.
-        """
-        intents = {'STRUCTURAL': 'restore the omitted mapping for this path',
-                   'TYPE': 'align the generated contract model type',
-                   'VALUE': 'correct the transformation that produces this value'}
-        return {'pattern': 'APPROVED_PATTERN_REQUIRED',
-                'changes': [{'path': x['path'],
-                             'intent': intents.get(x['kind'], 'investigate')}
-                            for x in variances],
-                'tests': [], 'bounded': None}
-
     def execute(self, context):
         job = context.job()
         cause = self.repo.one('select * from root_causes where id=? and job_id=?',
@@ -104,10 +88,13 @@ class RemediationAgent(BaseAgent):
         plan, provenance = produce(
             context, self.PROMPT,
             {'hypothesis': cause['hypothesis'], 'confidence': cause['confidence'],
-             'variances': [{'path': x['path'], 'kind': x['kind']} for x in variances]},
-            lambda: self._fallback_plan(variances))
+             'variances': [{'path': x['path'], 'kind': x['kind']} for x in variances]})
+        # No ``or`` fallback on the change set either. It used to substitute a
+        # lookup over variance kinds -- "restore the omitted mapping for this
+        # path" -- which reads as a remediation proposal and is a table, so an
+        # empty model answer became a plan nobody wrote.
         changes = [{'source_reference': c.get('path', ''), 'intent': c.get('intent', '')}
-                   for c in (plan.get('changes') or [])] or self._fallback_plan(variances)['changes']
+                   for c in (plan.get('changes') or [])]
         if plan.get('pattern'):
             proposal['proposed_pattern'] = plan['pattern']
         # The model declaring the change bounded does not make it so: the

@@ -157,16 +157,32 @@ class ApprovalWorkspaceService:
   Derives the approver role from the authenticated token and applies project
   and environment scope, rather than trusting a caller-supplied role.
   """
+  return self._split_inbox(principal)[0]
+ def withheld_for(self,principal):
+  """Pending packages this principal cannot see, and why.
+
+  The inbox filters silently, so a person who holds none of the gate approver
+  roles saw "No pending approvals" while packages were waiting -- the same
+  screen as a genuinely clear queue. One entry per (gate, role, reason) with a
+  count, so the page can say what is waiting and which role would reveal it.
+  """
+  summary={}
+  for x,role,reason in self._split_inbox(principal)[1]:
+   k=(x['gate'],role,reason)
+   summary[k]=summary.get(k,0)+1
+  return [{'gate':g,'required_role':r,'reason':why,'count':n} for (g,r,why),n in sorted(summary.items())]
+ def _split_inbox(self,principal):
   q=("select p.*,j.service,j.state,j.project_scope,j.environment from approval_packages p "
      "join jobs j on j.id=p.job_id where p.status='PENDING_APPROVAL' order by p.created_at desc")
-  roles=set(principal.roles);scopes=set(principal.project_scopes);envs=set(principal.environments);out=[]
+  roles=set(principal.roles);scopes=set(principal.project_scopes);envs=set(principal.environments);out=[];hidden=[]
   for x in self.repo.rows(q):
    policy=self.repo.one('select required_role from approval_policies where gate=?',(x['gate'],))
-   if not policy or policy['required_role'] not in roles:continue
-   if 'GLOBAL' not in scopes and x.get('project_scope') not in scopes:continue
-   if x.get('environment') not in envs:continue
-   row=dict(x);row['role']=policy['required_role'];out.append(row)
-  return out
+   role=policy['required_role'] if policy else ''
+   if not policy or role not in roles:hidden.append((x,role,'role_not_held'));continue
+   if 'GLOBAL' not in scopes and x.get('project_scope') not in scopes:hidden.append((x,role,'project_scope'));continue
+   if x.get('environment') not in envs:hidden.append((x,role,'environment'));continue
+   row=dict(x);row['role']=role;out.append(row)
+  return out,hidden
  def gates(self):
   q="""select p.gate,p.required_role,p.allowed_decisions,p.min_evidence,p.enabled,
    coalesce(c.quorum,1) quorum,coalesce(c.timeout_minutes,0) timeout_minutes,

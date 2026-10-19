@@ -10,7 +10,7 @@ import pytest
 from app.agents import IMPLEMENTATIONS
 from app.agents.ace_analysis import ACEAnalysisAgent
 from app.agents.dormancy_intelligence import DormancyIntelligenceAgent
-from app.agents.reasoning import DETERMINISTIC, MODEL_GATEWAY, ProviderExecutionAdapter, ReasoningGateway
+from app.agents.reasoning import MODEL_GATEWAY, UNAVAILABLE, ProviderExecutionAdapter, ReasoningGateway
 from app.agents.skills import DEFAULT_ROOT, SkillIntegrityError, SkillLibrary, skill_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -160,7 +160,15 @@ def test_context_carries_the_agent_id_for_the_skill_lookup(repo, job):
     assert DormancyIntelligenceAgent(repo).context(job['id']).skill_provenance() == {}
 
 
+@pytest.mark.no_model
 def test_a_damaged_skill_is_recorded_not_fatal(repo, job, library_copy, monkeypatch):
+    """A tampered skill is guidance missing, not an agent failure.
+
+    Still true with no fallback left, and still worth pinning separately from
+    the model outage: the run here stops because there is no provider, not
+    because the skill hash did not match, and the two reasons have to stay
+    distinguishable on the record.
+    """
     (library_copy / 'iib-to-ms-ace-analysis' / 'SKILL.md').write_text('tampered')
     monkeypatch.setenv('FACTORY_AGENT_SKILLS_DIR', str(library_copy))
     provenance = ACEAnalysisAgent(repo).context(job['id']).skill_provenance()
@@ -168,14 +176,21 @@ def test_a_damaged_skill_is_recorded_not_fatal(repo, job, library_copy, monkeypa
     assert 'skill_file_modified' in provenance['skill_error']
     answer, recorded = ReasoningGateway(repo).reason(ACEAnalysisAgent(repo).context(job['id']),
                                                      ACEAnalysisAgent.PROMPT, {'k': 'v'})
-    assert answer is None and recorded['mode'] == DETERMINISTIC
+    assert answer is None and recorded['mode'] == UNAVAILABLE
+    assert recorded['reason'] == 'no_provider_execution_adapter'
     assert 'skill_file_modified' in recorded['skill_error']
 
 
-def test_provenance_records_the_skill_on_the_deterministic_path(repo, job):
+@pytest.mark.no_model
+def test_provenance_records_the_skill_even_when_the_model_is_unreachable(repo, job):
+    """Which skill was in play is recorded whether or not an answer came back.
+
+    A failed run is the one most worth being able to reconstruct, so the skill
+    hash has to be on the provenance before the provider is reached.
+    """
     context = ACEAnalysisAgent(repo).context(job['id'])
     answer, provenance = ReasoningGateway(repo).reason(context, ACEAnalysisAgent.PROMPT, {'k': 'v'})
-    assert answer is None and provenance['mode'] == DETERMINISTIC
+    assert answer is None and provenance['mode'] == UNAVAILABLE
     assert provenance['skill_name'] == 'iib-to-ms-ace-analysis'
     assert provenance['skill_hash'] == context.skill().content_hash
 
@@ -346,7 +361,12 @@ class _FakeClaude:
                                content=[SimpleNamespace(type='text', text='{"ok": true}')])
 
 
+@pytest.mark.pristine_registry
 def test_the_claude_adapter_puts_the_agents_skill_after_the_approved_template(repo, job, gateway, monkeypatch):
+    # pristine_registry so this test owns the template. The seeded registry
+    # holds the real catalogue prompt at version 1 and the gateway fixture is
+    # idempotent on (name, version), so it would hand back the catalogue's
+    # template and the ordering assertion below would be about that instead.
     gateway(ACEAnalysisAgent.PROMPT, template='APPROVED TEMPLATE')
     fake = _FakeClaude()
     adapter = CvscodeClaudeAdapter()
@@ -375,6 +395,7 @@ def test_each_agent_reaches_the_model_with_its_own_skill_not_anothers(repo, job,
         assert other not in system
 
 
+@pytest.mark.pristine_registry
 def test_an_agent_without_a_skill_reaches_the_model_without_one(repo, job, gateway, monkeypatch):
     gateway(DormancyIntelligenceAgent.PROMPT, template='APPROVED TEMPLATE')
     fake = _FakeClaude()

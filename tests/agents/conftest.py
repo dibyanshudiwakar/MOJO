@@ -4,6 +4,15 @@ Each agent is tested on its own: a fresh database, only the artefacts that agent
 actually needs, and a direct ``execute`` call. The registry-level behaviour
 (dependency ordering, contract conformance, run ownership, the evidence loop) is
 covered separately in ``tests/test_agent_registry.py``.
+
+**Every agent test needs an approved prompt and a provider.** With the
+deterministic fallback gone, ``artefact.produce`` either returns a schema-valid
+model answer or raises, so an agent with no provider does not complete at all.
+The autouse ``model`` fixture and the registry seeding that make that work live
+in ``tests/conftest.py``, because they are not specific to this package -- the
+root tests dispatch agents too. A test that wants the no-provider or
+no-approval path, which is now a failure path worth asserting, marks itself
+``@pytest.mark.no_model`` or ``@pytest.mark.pristine_registry``.
 """
 import json
 from pathlib import Path
@@ -86,7 +95,27 @@ class SkillAwareArtefactProvider(ArtefactProvider):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def auto_mode_off(monkeypatch):
+    """Keep clarifications OPEN and parking the step.
+
+    Auto mode is on by default, so an agent whose artefact is complete resolves
+    its own questions and reports COMPLETED. A test whose subject is that a
+    conflict *becomes a question* at all needs the other setting -- the
+    behaviour is unchanged, it is just no longer the default.
+    """
+    monkeypatch.setenv('FACTORY_AUTO_MODE', '0')
+
+
+@pytest.fixture
+def repo(tmp_path, _registry_seeding):
+    """A database whose governed prompt and model registries are seeded.
+
+    The seeding itself is decided in ``tests/conftest.py`` -- depending on
+    ``_registry_seeding`` is what guarantees the environment variable is set
+    before ``Repository.init`` reads it. The seeded templates are the real ones
+    from ``config/agent-prompts.v1.json``, which is what lets ``ModelDouble``
+    tell from the template alone which prompt it is answering.
+    """
     return Repository(str(tmp_path / 'agents.db'))
 
 
@@ -163,7 +192,7 @@ def gateway(repo):
         roles = ('AI_GOVERNANCE_ADMIN',)
 
     def approve(prompt_name, template='Cite only the supplied evidence.',
-                model_name='approved-model'):
+                model_name='approved-model', version='1'):
         """Approve a prompt and a model so a dispatch can route to the gateway.
 
         Registering any model at all arms the AT-13 fail-closed guard for
@@ -183,9 +212,18 @@ def gateway(repo):
         # Idempotent, like the models below: Repository seeds prompt_registry
         # APPROVED on init, so a prompt this fixture names may already exist
         # and prompt_registry is unique on (name, version).
+        #
+        # ``version`` is how a test takes ownership of the template. The seeded
+        # row is version 1 with the real catalogue template, so asking for a
+        # custom template at version 1 would silently hand back the catalogue's
+        # and the test would be asserting about text it never supplied.
+        # ``_approved`` resolves ``order by version desc``, so registering a
+        # higher version wins -- which is also how a real template change is
+        # made: a new version an AI_GOVERNANCE_ADMIN approves, never an edit in
+        # place.
         prompt = repo.one('select * from prompt_registry where name=? and version=?',
-                          (prompt_name, '1')) or ai.register_prompt(
-            {'name': prompt_name, 'version': '1', 'template': template,
+                          (prompt_name, version)) or ai.register_prompt(
+            {'name': prompt_name, 'version': version, 'template': template,
              'status': 'APPROVED'}, _Approver())
         catalogue = json.loads(
             (Path(__file__).resolve().parents[2] / 'config' / 'agent-catalogue.v1.json')

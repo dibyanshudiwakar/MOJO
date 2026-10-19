@@ -300,6 +300,53 @@
         }
       }
     },
+    "agent/clarification/suggested-answers": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "suggestions"
+      ],
+      "properties": {
+        "suggestions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": [
+              "question",
+              "suggested_answer",
+              "confidence",
+              "severity"
+            ],
+            "properties": {
+              "question": {
+                "type": "string",
+                "minLength": 1
+              },
+              "suggested_answer": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "string",
+                "enum": ["HIGH", "MEDIUM", "LOW"]
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                "description": "What a wrong answer would cost. Auto mode puts a question to a person only when this is CRITICAL and confidence is not HIGH."
+              },
+              "settled_by": {
+                "type": "string",
+                "description": "The ref (D1, D2, ...) of an earlier decision in _precedents that already settles this question, or empty."
+              },
+              "caveat": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "agent/repository-intake/inventory": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Repository inventory and intake gaps",
@@ -578,6 +625,20 @@
         }
       ]
     },
+    "agent/migration-specification/section": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "One section of the migration specification",
+      "description": "The full document overran the gateway's output limit when authored in one reply, so it is authored a section at a time. The section's own shape is checked by the agent against its slice of schemas/migration-specification.schema.json inside the retry loop; this schema only has to catch an answer that is not a section at all.",
+      "type": "object",
+      "properties": {
+        "section": {
+          "type": "string",
+          "enum": ["source", "interfaces", "behaviour", "target", "mappings", "tests"]
+        },
+        "content": {}
+      },
+      "required": ["section", "content"]
+    },
     "agent/planning/mapping-catalogue": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ACE construct to Spring pattern mappings",
@@ -605,7 +666,8 @@
               },
               "ace_construct": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 160
               },
               "mapping_key": {
                 "type": "string"
@@ -633,7 +695,7 @@
               },
               "rationale": {
                 "type": "string",
-                "maxLength": 1000
+                "maxLength": 300
               }
             }
           }
@@ -653,20 +715,37 @@
                 "type": "string"
               },
               "ace_construct": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 160
               },
               "reason": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 300
               },
               "owner": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 120
+              },
+              "severity": {
+                "enum": [
+                  "CRITICAL",
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ],
+                "description": "What leaving this construct out would cost. Auto mode plans around anything below CRITICAL."
+              },
+              "risk": {
+                "type": "string",
+                "maxLength": 300,
+                "description": "One sentence on the risk of leaving it out."
               }
             }
           }
         },
         "risks": {
           "type": "array",
-          "maxItems": 512,
+          "maxItems": 40,
           "items": {
             "type": "object",
             "required": [
@@ -680,6 +759,7 @@
               },
               "severity": {
                 "enum": [
+                  "CRITICAL",
                   "HIGH",
                   "MEDIUM",
                   "LOW"
@@ -690,10 +770,12 @@
               },
               "statement": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 400
               },
               "response": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 400
               },
               "owner": {
                 "type": "string"
@@ -892,7 +974,9 @@
         },
         "content": {
           "type": "string",
-          "maxLength": 200000
+          "minLength": 1,
+          "maxLength": 200000,
+          "description": "minLength is 1 because an empty file is not an authored one. The agent used to filter empty content out and then generate the whole project deterministically instead, so one blank file silently discarded the other forty the model had authored. Emptiness is now a violation on that single file, which is re-asked on its own."
         },
         "language": {
           "type": "string"
@@ -948,6 +1032,7 @@
     "agent/test-engineering/case-design": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Differential test cases",
+      "description": "minItems is 1 because zero differential cases is not an answer: the whole point of this artefact is to find where the two systems behave differently, and an empty set proves nothing. The agent used to accept an empty array and substitute its own one-nominal-case-per-interface derivation; with no fallback left, emptiness is a schema violation so the model is re-asked with the violation rather than quietly replaced.",
       "type": "object",
       "required": [
         "cases"
@@ -955,6 +1040,7 @@
       "properties": {
         "cases": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 512,
           "items": {
             "type": "object",

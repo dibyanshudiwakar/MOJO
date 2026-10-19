@@ -18,7 +18,8 @@ def test_analysis_builds_a_semantic_model_bindable_at_g2(repo, job, ace_repo):
     assert result.outputs['semantic_model'] == row['content_hash']
 
 
-def test_an_unsupported_node_is_recorded_and_the_clarification_comes_from_the_service(repo, job, tmp_path):
+def test_an_unsupported_node_is_recorded_and_the_agent_raises_the_clarification(
+        repo, job, tmp_path, auto_mode_off):
     root = tmp_path / 'vendor'
     root.mkdir()
     (root / 'V.msgflow').write_text('<flow><node id="n1" type="VendorCustomNode"/></flow>')
@@ -26,16 +27,17 @@ def test_an_unsupported_node_is_recorded_and_the_clarification_comes_from_the_se
     assert result.status == 'CLARIFICATION_REQUIRED'
     assert result.metrics['unsupported_count'] == 1
     assert repo.one('select count(*) n from unsupported_constructs where job_id=?', (job['id'],))['n'] == 1
-    # The agent must not return the clarification itself -- analyze_ace owns the
-    # ambiguity, so returning it here would double it up.
-    assert result.clarifications == ()
-    # Clarification blocking is disabled (see the comment in
-    # PriorityOneService.analyze_ace): an ambiguity is recorded on the analysis
-    # record and surfaced as an output, not inserted as an open clarification
-    # row. The unsupported construct above is the durable record of it.
-    assert result.outputs['ambiguities'], 'the ambiguity must still be surfaced'
-    assert repo.one("select count(*) n from clarifications where job_id=? and status='OPEN'",
-                    (job['id'],))['n'] == 0
+    assert result.outputs['ambiguities'], 'the ambiguity must still be surfaced in outputs too'
+    # record_analysis stores the ambiguity on the analysis record but does not
+    # insert it as a clarification -- clarification blocking is disabled at
+    # that layer (see its own comment). This agent holds clarification.create,
+    # so it is the one that must turn the still-OPEN ambiguity into an
+    # answerable question, or nothing downstream (AgentRegistry.dispatch, the
+    # pipeline's WAITING_CLARIFICATION park) ever has anything to show.
+    assert len(result.clarifications) == 1
+    clar = result.clarifications[0]
+    assert clar.stage == 'ACE_ANALYSIS'
+    assert clar.question == result.outputs['ambiguities'][0]['question']
 
 
 def test_coverage_is_reported_for_undetected_areas(repo, job, ace_repo):

@@ -5,32 +5,42 @@ analysis: the contract that says what is being migrated, to what, and what
 remains unresolved. Validation is delegated to ``SpecificationService``, which
 holds the JSON Schema and records the errors.
 
-The specification is written so
-``AnalysisSpecificationConsistencyValidator`` passes: every flow, ESQL module,
-map, schema and policy path from the semantic model is listed under ``source``,
-and every parser ambiguity is carried into ``clarifications``. That validator
-exists to catch a specification that has quietly dropped part of the analysis it
-claims to describe, so an agent that authored a specification failing it would be
-producing exactly the artefact the check was written to reject.
+The document is authored by the model from its skill, and there is no
+deterministic composer behind it any more. Two consequences worth knowing:
 
-Target modules are resolved through ``migration_lifecycle_v6.mapping_key``
-against the same approved mapping table the planning agent uses, so the
-specification cannot promise a Spring module the mapping catalogue will refuse.
+``AnalysisSpecificationConsistencyValidator`` -- which catches a specification
+that has quietly dropped part of the analysis it claims to describe -- is no
+longer satisfied by construction. It is a real check on a real answer now, and
+the document schema is enforced inside the retry loop (see ``document_valid``)
+so a specification that fails it is re-asked rather than replaced.
+
+Target modules used to be resolved here through
+``migration_lifecycle_v6.mapping_key`` against the approved mapping table. That
+knowledge now lives in the ``iib-to-ms-migration-specification`` skill, which is
+the stated source of standards; the table is deliberately *not* passed in the
+payload, because doing so would make the skill decorative.
+
+Everything the document requires that is not in the semantic model -- the
+service name, the source commit, the analysis version, the governance block --
+is passed explicitly. A model cannot guess those, and the composer that used to
+supply them is gone.
 """
 import json
 from pathlib import Path
 import yaml
+from jsonschema import Draft202012Validator
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.artefact import produce
-from app.services.migration_lifecycle_v6 import DEFAULT_MAPPINGS, mapping_key
+from app.agents.artefact import STRUCTURED_EFFORT, produce_many
 from app.services.specification import SpecificationService
 
 SCHEMA = Path(__file__).resolve().parents[2] / 'schemas' / 'migration-specification.schema.json'
+#: Passed to the model rather than written into the document here: the stop
+#: conditions are a governance fact, not something a model may invent, and the
+#: document schema requires them.
 STOP_CONDITIONS = ['iteration-limit', 'unresolved-clarification', 'failed-gate']
-
-
-def _paths(items):
-    return sorted({x.get('path') for x in items or [] if isinstance(x, dict) and x.get('path')})
+#: The sections the model authors, one request each. The rest of the document
+#: (metadata, governance, clarifications) is recorded fact attached by execute().
+SECTIONS = ('source', 'interfaces', 'behaviour', 'target', 'mappings', 'tests')
 
 
 class MigrationSpecificationAgent(BaseAgent):
@@ -38,18 +48,9 @@ class MigrationSpecificationAgent(BaseAgent):
     SKILL = 'iib-to-ms-migration-specification'
     TOOLS = ('evidence.read', 'schema.validate', 'evidence.write')
     OUTPUTS = ('migration_specification_yaml',)
-    PROMPT = 'agent/migration-specification/authoring'
-
-    def _modules(self, model):
-        """Approved target modules for the constructs the analysis found."""
-        constructs = [n.get('type', '') for f in model.get('flows', []) + model.get('subflows', [])
-                      for n in f.get('nodes', [])]
-        constructs += ['ESQL'] * len(model.get('esql', []))
-        constructs += [x.get('type', 'Mapping') for x in model.get('maps', [])]
-        constructs += ['SCHEMA'] * len(model.get('schemas', []))
-        constructs += ['POLICY'] * len(model.get('policies', []))
-        keys = {mapping_key(x, DEFAULT_MAPPINGS) for x in constructs}
-        return sorted({DEFAULT_MAPPINGS[k]['module'] for k in keys if k})
+    #: ``.../authoring`` (the whole document in one reply) stays registered but is
+    #: no longer asked for; see the comment in execute().
+    PROMPT = 'agent/migration-specification/section'
 
     def execute(self, context):
         job = context.job()
@@ -71,28 +72,53 @@ class MigrationSpecificationAgent(BaseAgent):
             dependencies = sorted(json.loads(framework['standards'] or '{}').get('dependencies') or [])
         service = SpecificationService(self.repo, SCHEMA)
 
-        def computed():
-            return {'specification': self._compose(context, job, version, analysis, framework,
-                                                   model, ambiguities, gates, dependencies)}
+        metadata = {'service': job['service'],
+                    'sourceCommit': job['source_revision'],
+                    'analysisVersion': analysis['version'],
+                    'frameworkTemplateVersion': framework['version'] if framework else version}
+        governance = {'enabledGates': gates,
+                      'iterationLimit': int(context.param('iteration_limit', 5)),
+                      'stopConditions': STOP_CONDITIONS}
+        slices = service.schema.get('properties', {})
 
-        authored, provenance = produce(
+        def section_valid(section, answer):
+            """One section against its slice of the document schema, in the retry loop.
+
+            ``schemas/migration-specification.schema.json`` has rules the
+            response schema cannot express, and an invalid specification blocks
+            G2. A violation goes back to the model as a correction, which is the
+            only path that can produce a valid section.
+            """
+            if (answer or {}).get('section') != section:
+                return 'section must be %r, got %r' % (section, (answer or {}).get('section'))
+            errors = [e.message for e in Draft202012Validator(slices[section]).iter_errors(answer.get('content'))]
+            return ('section %r failed its document schema: %s' % (section, json.dumps(errors)[:300])) if errors else ''
+
+        # Authored a section at a time. The whole document in one reply overran
+        # the gateway's 32768-token output limit on a real service (34
+        # interfaces, 95 clarifications): the reply was cut off mid-JSON on all
+        # three attempts, about four minutes each. A retry cannot fix a length
+        # limit, so the request itself is bounded.
+        #
+        # The model writes the sections that are judgement over the semantic
+        # model. metadata, governance and clarifications are recorded facts the
+        # document must carry verbatim -- the service name, source commit and
+        # enabled gates, and the analysis's own ambiguities -- so they are
+        # attached here rather than asked for. Re-typing 95 clarifications
+        # through a model is where most of the length went, and a transcription
+        # a model can only get wrong.
+        base = {'semantic_model': model,
+                'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
+                'metadata': metadata,
+                'ace_version': str(context.param('ace_version', '12')),
+                'approved_dependencies': dependencies}
+        authored, provenance = produce_many(
             context, self.PROMPT,
-            {'semantic_model': model,
-             'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
-             'schema': service.schema},
-            computed)
-        spec = authored.get('specification') or {}
-        # The document is validated against schemas/migration-specification.
-        # schema.json before it is stored, and an invalid one blocks G2. A model
-        # specification that does not validate is refused here rather than
-        # persisted INVALID, which is the same rule produce() applies to the
-        # response shape -- just against the document's own schema.
-        if not isinstance(spec, dict) or service.validate(yaml.safe_dump(spec))[1]:
-            if provenance.get('artefact_source') == 'MODEL':
-                provenance['mode'] = 'DETERMINISTIC_FALLBACK'
-                provenance['artefact_source'] = 'DETERMINISTIC'
-                provenance['reason'] = 'model_specification_failed_document_schema'
-            spec = computed()['specification']
+            [(s, {**base, 'section': s, 'section_schema': slices[s]}) for s in SECTIONS],
+            validator=section_valid, effort=STRUCTURED_EFFORT)
+        spec = {s: authored[s]['content'] for s in SECTIONS}
+        spec.update({'metadata': metadata, 'governance': governance,
+                     'clarifications': [self._clarification(a) for a in ambiguities]})
         text = yaml.safe_dump(spec, sort_keys=True, default_flow_style=False)
         saved = service.save(context.job_id, version, text)
         if saved['status'] != 'VALID':
@@ -100,7 +126,7 @@ class MigrationSpecificationAgent(BaseAgent):
         metrics = {'flow_count': len(spec.get('source', {}).get('flows', [])),
                    'module_count': len(spec.get('target', {}).get('springModules', [])),
                    'clarification_count': len(ambiguities),
-                   'specification_source': provenance.get('artefact_source', 'DETERMINISTIC')}
+                   'model_attempts': provenance.get('attempts', 0)}
         return AgentResult(
             outputs={'migration_specification_yaml': saved['id']},
             # A specification's content_hash is the digest of its YAML text, so a
@@ -110,35 +136,6 @@ class MigrationSpecificationAgent(BaseAgent):
                                   {'analysis_id': analysis['id'],
                                    'validation_status': saved['status']}),),
             metrics=metrics, reasoning=provenance)
-
-    def _compose(self, context, job, version, analysis, framework, model, ambiguities,
-                 gates, dependencies):
-        """The deterministic specification: the fallback."""
-        return {
-            'metadata': {'service': job['service'], 'sourceCommit': job['source_revision'],
-                         'analysisVersion': analysis['version'],
-                         'frameworkTemplateVersion': framework['version'] if framework else version},
-            'source': {'aceVersion': str(context.param('ace_version', '12')),
-                       'applications': [job['service']],
-                       'libraries': [], 'flows': _paths(model.get('flows')),
-                       'subflows': _paths(model.get('subflows')),
-                       'nodes': sorted({n.get('type', '') for f in model.get('flows', []) + model.get('subflows', [])
-                                        for n in f.get('nodes', []) if n.get('type')}),
-                       'esql': _paths(model.get('esql')), 'maps': _paths(model.get('maps')),
-                       'schemas': _paths(model.get('schemas')), 'policies': _paths(model.get('policies'))},
-            'interfaces': model.get('interfaces', []),
-            'behaviour': model.get('behaviour', {}),
-            'target': {'springModules': self._modules(model), 'approvedDependencies': dependencies},
-            # Construct-level mappings are the planning agent's output, under G2
-            # approval of this specification. Naming them here would pre-empt a
-            # decision this document is an input to.
-            'mappings': [],
-            'tests': {'inputSources': sorted({x.get('protocol', '') for x in model.get('interfaces', [])}),
-                      'invariants': [], 'masks': [], 'tolerances': []},
-            'clarifications': [self._clarification(a) for a in ambiguities],
-            'governance': {'enabledGates': gates,
-                           'iterationLimit': int(context.param('iteration_limit', 5)),
-                           'stopConditions': STOP_CONDITIONS}}
 
     def _clarification(self, a):
         """Backfill a model-authored ambiguity to the shape this document requires.

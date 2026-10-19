@@ -36,9 +36,11 @@ class DormancyIntelligenceAgent(BaseAgent):
             context.param('last_seen_days', None),
             context.param('deployed', None),
             context.param('already_migrated', None))
-        verdict, provenance = produce(context, self.PROMPT, supplied,
-                                      lambda: service.classify(supplied))
+        verdict, provenance = produce(context, self.PROMPT, supplied)
         assessment = service.record(context.job_id, supplied, verdict)
+        # Still computed, and still not a fallback: the rules are the second
+        # opinion the model is checked against below, and a disagreement is the
+        # signal worth recording. ``classify`` never supplies the verdict.
         computed = service.classify(supplied)
         metrics = {'confidence': assessment['confidence'],
                    'known_signals': sum(v is not None for v in supplied.values()),

@@ -48,6 +48,15 @@ def token(roles=ROLES, subject='svc@example', secret=SECRET):
     return header + '.' + claims + '.' + _b64(hmac.new(secret.encode(), signing, hashlib.sha256).digest())
 
 
+#: Generous because an orchestration now does real work per step. Every agent
+#: makes a governed gateway request and a DLP scan per artefact where it used to
+#: fall back immediately, so a 24-step walk that took under a second takes a few
+#: -- and several more under the load of the rest of the suite running beside
+#: it. 15s passed in isolation and timed out in a full run, which is a property
+#: of the machine rather than of the route under test.
+TIMEOUT = 60
+
+
 def call(base, path, payload=None, bearer=None, method=None):
     request = urllib.request.Request(
         base + path, data=json.dumps(payload).encode() if payload is not None else None,
@@ -55,7 +64,7 @@ def call(base, path, payload=None, bearer=None, method=None):
                  **({'Authorization': 'Bearer ' + bearer} if bearer else {})},
         method=method or ('POST' if payload is not None else 'GET'))
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return response.status, json.loads(response.read() or b'{}')
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read() or b'{}')
@@ -73,8 +82,15 @@ def server(tmp_path):
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
         port = probe.getsockname()[1]
+    # The server is a separate process, so the suite's in-process provider
+    # double cannot reach it -- and with no deterministic fallback left, an
+    # agent dispatched over HTTP with no provider now fails with a 500. The
+    # double is named by import path through the same AI_PROVIDER seam an
+    # enterprise would use for its own adapter.
     env = dict(os.environ, FACTORY_DB=str(tmp_path / 'api.db'), PORT=str(port), HOST='127.0.0.1',
-               FACTORY_JWT_HS256_SECRET=SECRET, FACTORY_WORKSPACE_ROOT=str(workspace))
+               FACTORY_JWT_HS256_SECRET=SECRET, FACTORY_WORKSPACE_ROOT=str(workspace),
+               AI_PROVIDER='tests.agents.model_double:ModelDouble',
+               FACTORY_SEED_MODEL_GATEWAY='1')
     proc = subprocess.Popen([sys.executable, '-m', 'app.server'], cwd=str(root), env=env,
                             stderr=subprocess.PIPE, text=True)
     base = 'http://127.0.0.1:%d' % port

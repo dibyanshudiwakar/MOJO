@@ -1,22 +1,27 @@
-"""ace-analysis reads the source with the model, and degrades honestly.
+"""ace-analysis reads the source with the model, and fails if it cannot.
 
 The agent used to call the gateway and discard the answer into
 ``metrics['model_ambiguity_count']`` while ``ACEParser`` built the artefact a
-G2 approval binds. Now the model reads each source file and the parser is the
-fallback. Three things have to hold for that to be trustworthy, and each has a
-test here: the model's artefact is what gets persisted; a model that cannot
-answer still yields an analysis, marked as computed; and a response that does
-not match its schema is treated as no answer rather than persisted.
+G2 approval binds. The model reads each source file now, and the parser is no
+longer behind it.
 
-The fourth is the one that makes the first three safe -- a model-authored model
-and a parsed one must hash identically, or the two paths would produce artefacts
-that no single approval can bind.
+Three things have to hold: the model's artefact is what gets persisted; a
+response that does not match its schema is refused rather than stored; and a
+model that cannot read one file fails the analysis instead of producing one that
+is part model-read and part regex-parsed. That last is a deliberate reversal --
+per-file fallback kept a 500-file repository usable, but it also meant nothing
+downstream could tell a construct the parser does not understand from one the
+model decided was absent.
+
+The hashing test is what makes the rest safe: the stored hash has to be a
+function of the stored model alone, or no approval could bind the artefact.
 """
 import json
 
 import pytest
 
 from app.agents.ace_analysis import ACEAnalysisAgent
+from app.agents.artefact import ArtefactUnavailable
 from app.services.enterprise_v5 import ACEParser
 from tests.agents.conftest import ArtefactProvider, SkillAwareArtefactProvider
 
@@ -106,19 +111,24 @@ def test_the_skill_reaches_the_provider_focused_on_the_files_at_hand(
     assert all(whole.text.strip()[:60] in s.text for s in supplied)
 
 
-def test_without_a_provider_the_analysis_is_still_produced_and_says_it_was_computed(
-        repo, job, params, dispatch):
-    outcome = dispatch(job['id'], 'ace-analysis', params)
-    assert outcome['status'] in ('COMPLETED', 'CLARIFICATION_REQUIRED')
-    assert outcome['reasoning']['mode'] == 'DETERMINISTIC_FALLBACK'
-    assert outcome['reasoning']['artefact_source'] == 'DETERMINISTIC'
-    row = repo.one('select * from ace_analyses where id=?',
-                   (outcome['outputs']['analysis_document'],))
-    model = json.loads(row['semantic_model'])
-    # The parser's own reading of the fixture, not the model's.
-    assert model['interfaces'][0]['endpoint'] == '/orders'
-    assert outcome['metrics']['sources_from_model'] == 0
-    assert outcome['metrics']['sources_computed'] > 0
+def test_without_a_provider_no_analysis_is_produced(repo, job, params):
+    """What used to be a COMPLETED run with a parsed artefact.
+
+    The parsed analysis was a real reading of the source, which is exactly why
+    this was dangerous: a G2 approval bound it, planning mapped it, and nothing
+    on the run said the model had never been reached.
+
+    ``provider=None`` explicitly rather than the ``no_model`` marker: the marker
+    would also strip the provider from the ``params`` fixture's own
+    repository-intake dispatch, so the test would fail in setup on a different
+    agent. An explicit None defeats the autouse ``setdefault`` for this call
+    only.
+    """
+    with pytest.raises(ArtefactUnavailable) as raised:
+        ACEAnalysisAgent(repo).run(job['id'], params=params, provider=None)
+    assert raised.value.reason == 'no_provider_execution_adapter'
+    assert repo.one('select count(*) n from ace_analyses where job_id=?',
+                    (job['id'],))['n'] == 0
 
 
 def test_a_response_that_breaks_its_schema_is_not_persisted(repo, job, params, gateway, dispatch):
@@ -126,29 +136,32 @@ def test_a_response_that_breaks_its_schema_is_not_persisted(repo, job, params, g
 
     A node with no ``type`` violates the schema. Everything downstream joins on
     those ids, so persisting the fragment would corrupt the mapping catalogue
-    and the generated code -- and silently, since a fallback is a recorded
-    degradation rather than a failure.
+    and the generated code.
     """
     gateway(PROMPT, model_name=ALIAS)
     provider = ArtefactProvider(lambda p: {'flows': [{'path': p['path'],
                                                       'nodes': [{'id': 'in'}]}]})
-    outcome = dispatch(job['id'], 'ace-analysis', params, provider=provider)
+    with pytest.raises(ArtefactUnavailable) as raised:
+        dispatch(job['id'], 'ace-analysis', params, provider=provider)
+    assert 'model_response_schema_invalid' in raised.value.reason
+    assert "'type' is a required property" in raised.value.reason
+    assert raised.value.attempts == 3
+    assert repo.one('select count(*) n from ace_analyses where job_id=?',
+                    (job['id'],))['n'] == 0
 
-    assert outcome['reasoning']['mode'] == 'DETERMINISTIC_FALLBACK'
-    assert 'model_response_schema_invalid' in outcome['reasoning']['reason']
-    assert "'type' is a required property" in outcome['reasoning']['reason']
-    row = repo.one('select * from ace_analyses where id=?',
-                   (outcome['outputs']['analysis_document'],))
-    assert json.loads(row['semantic_model'])['interfaces'][0]['endpoint'] == '/orders'
 
+def test_one_unreadable_file_costs_the_whole_analysis(repo, job, params, gateway, dispatch):
+    """All or nothing across the source files, which is a reversal.
 
-def test_one_unreadable_file_does_not_cost_the_whole_repository(
-        repo, job, params, gateway, dispatch):
-    """Per-file fallback is why a 500-file repo stays usable.
+    Per-file fallback kept a 500-file repository usable, and that was the
+    argument for it. Against it: the merged model then carried some flows the
+    model had read and some the parser had, with nothing to say which. A
+    construct the regex parser does not understand and a construct the model
+    judged absent produce the same artefact, and the mapping catalogue built on
+    top of it cannot tell them apart either.
 
-    The ESQL answer is invalid and the flow's is fine, so the flow stays
-    model-authored and only the ESQL is computed -- recorded as partial
-    authorship rather than claimed as either.
+    So a file the model cannot read fails the analysis. The blast radius is a
+    repository rather than a file, and it is visible.
     """
     gateway(PROMPT, model_name=ALIAS)
 
@@ -157,15 +170,11 @@ def test_one_unreadable_file_does_not_cost_the_whole_repository(
             return {'esql': [{'modules': ['NoPath']}]}      # 'path' is required
         return _fragment(payload)
 
-    outcome = dispatch(job['id'], 'ace-analysis', params, provider=ArtefactProvider(answer))
-
-    assert outcome['reasoning']['mode'] == 'PARTIAL_MODEL_GATEWAY'
-    assert outcome['metrics']['sources_from_model'] >= 1
-    assert outcome['metrics']['sources_computed'] >= 1
-    model = json.loads(repo.one('select * from ace_analyses where id=?',
-                                (outcome['outputs']['analysis_document'],))['semantic_model'])
-    assert model['interfaces'][0]['endpoint'] == '/model-authored'   # the flow: from the model
-    assert model['esql'][0]['path'].endswith('.esql')                # the ESQL: computed
+    with pytest.raises(ArtefactUnavailable) as raised:
+        dispatch(job['id'], 'ace-analysis', params, provider=ArtefactProvider(answer))
+    assert 'model_response_schema_invalid' in raised.value.reason
+    assert repo.one('select count(*) n from ace_analyses where job_id=?',
+                    (job['id'],))['n'] == 0
 
 
 def test_a_model_authored_analysis_hashes_like_a_parsed_one(repo, job, params, gateway, dispatch):

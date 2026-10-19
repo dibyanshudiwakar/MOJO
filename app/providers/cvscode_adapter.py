@@ -124,6 +124,12 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
 
     #: ``invoke`` takes ``skill=``; ReasoningGateway passes the agent's skill to adapters that say so.
     accepts_skill = True
+    #: ...and ``effort=``, a per-call override of how hard the model reasons.
+    #: Hidden reasoning is billed against ``max_tokens`` but never appears in the
+    #: reply, so a listing task at an alias's top effort can spend its whole
+    #: output budget thinking: a 15,096-character file layout used all 32,768
+    #: tokens at ``xhigh``. See ``tests/test_cvscode_adapter_parsing.py``.
+    accepts_effort = True
 
     #: Output budget per alias. 16384 was one number for every agent and it is
     #: too small for the artefacts this factory asks for: the mapping catalogue
@@ -196,18 +202,21 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             http_client=httpx2.Client(trust_env=False, timeout=httpx2.Timeout(float(self.timeout))),
         )
 
-    def _request(self, template, payload):
+    def _request(self, template, payload, effort=None):
         body = {
             'model': self.model,
             'max_tokens': self.max_tokens,
             'system': template,
             'messages': [{'role': 'user', 'content': json.dumps(payload, sort_keys=True, default=str)}],
         }
-        if self.effort:
-            body['output_config'] = {'effort': self.effort}
+        # A model with no effort parameter (Haiku errors on it) keeps none, however
+        # one is asked for.
+        chosen = (effort or self.effort) if self.effort else None
+        if chosen:
+            body['output_config'] = {'effort': chosen}
         return body
 
-    def invoke(self, template, payload, skill=None):
+    def invoke(self, template, payload, skill=None, effort=None):
         """Send the approved template + cleared payload to Claude; return a dict.
 
         A JSON-object answer is returned as-is (agents expect structured output),
@@ -227,23 +236,34 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             except AttributeError:
                 pass
         try:
-            message = self._client().messages.create(**self._request(system, payload))
+            message = self._client().messages.create(**self._request(system, payload, effort))
         except Exception as exc:  # SDK/network errors surface as a governed provider failure
             raise RuntimeError('provider_error:%s:%s' % (type(exc).__name__, exc)) from exc
         if getattr(message, 'stop_reason', '') == 'refusal':
             raise RuntimeError('provider_refused:' + str(getattr(message, 'stop_details', '')))
         text = ''.join(b.text for b in message.content if getattr(b, 'type', '') == 'text')
         parsed = _parse_json(text)
+        brace, bracket = text.find('{'), text.find('[')
+        if not isinstance(parsed, dict) and brace >= 0 and (bracket < 0 or brace < bracket):
+            # The reply opens like an object but did not parse as one. A scalar
+            # or array recovered from inside it is a fragment, not the answer.
+            parsed = None
         if parsed is None and getattr(message, 'stop_reason', '') == 'max_tokens':
             # The answer was cut off mid-JSON, so it cannot parse. Reported as
             # itself rather than wrapped as {'answer': <raw>}: that wrapper then
             # fails the response schema and the run blames the model's shape for
             # what is really a length limit. Seen on the specification document,
             # which is the largest artefact any agent returns.
+            # The head and tail are included because the raw reply is not
+            # stored, and what a runaway answer is *made of* (a long rationale,
+            # an entry per statement, a repeated block) is the only thing that
+            # says how to shorten it.
+            flat = ' '.join(text.split())
             raise RuntimeError(
                 'provider_response_truncated:max_tokens=%d: the answer was cut off '
-                'mid-JSON. Raise max_tokens for this agent or ask for a smaller '
-                'artefact.' % self.max_tokens)
+                'mid-JSON (%d chars; %s). Raise max_tokens for this agent or ask for a '
+                'smaller artefact. Began: %s ... Ended: %s'
+                % (self.max_tokens, len(text), _spend(message), flat[:200], flat[-300:]))
         if parsed is None:
             # Named for every agent, never wrapped. ``{'answer': <raw text>}``
             # passed an unparseable answer on to the response schema, which then
@@ -259,6 +279,31 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
         answer = parsed if isinstance(parsed, dict) else {'answer': text}
         answer.setdefault('_model', self.model)
         return answer
+
+
+def _spend(message):
+    """Where the output budget went: reasoning, or the visible answer.
+
+    A cut-off reply of 39,313 characters against a 32,768-token limit is about
+    1.2 characters a token -- far below what JSON costs -- which says part of
+    the budget went to something that is not in the text. Thinking blocks are
+    skipped when the text is joined, so without this the cost is invisible.
+    """
+    blocks = {}
+    for block in getattr(message, 'content', None) or []:
+        kind = getattr(block, 'type', '?')
+        size = len(getattr(block, 'text', '') or getattr(block, 'thinking', '') or '')
+        blocks[kind] = blocks.get(kind, 0) + size
+    out = getattr(getattr(message, 'usage', None), 'output_tokens', None)
+    spend = 'output_tokens=%s, blocks=%s' % (out if out is not None else '?',
+                                            ','.join('%s:%d' % kv for kv in sorted(blocks.items())) or 'none')
+    if 'thinking' in blocks or 'redacted_thinking' in blocks:
+        # A thinking block of 0 characters is not "no thinking": the gateway
+        # omits the text, not the work. Misread once as proof reasoning was not
+        # the problem, on a reply that spent 32,768 tokens to write 15,096
+        # characters.
+        spend += ' -- the model reasoned before answering; its text is omitted but its tokens count against max_tokens'
+    return spend
 
 
 def _span(text, opener, closer):
@@ -316,7 +361,16 @@ def _parse_json(text):
     if fence:
         body = s[fence.end():]
         candidates.append(body.rsplit('```', 1)[0] if '```' in body else body)
-    candidates += [_span(s, '{', '}'), _span(s, '[', ']')]
+    # Only the outermost structure: whichever opener comes first in the text.
+    # Trying '[' after '{' failed let an *inner* array of a document that did
+    # not parse as a whole (cut off, or malformed) parse on its own, return as
+    # the answer, and defeat both the max_tokens check and the unparseable
+    # error below -- the run then reported a schema failure on {'answer': ...}
+    # for what was a truncated specification.
+    openers = [(s.find(o), o, c) for o, c in (('{', '}'), ('[', ']')) if o in s]
+    if openers:
+        _, opener, closer = min(openers)
+        candidates.append(_span(s, opener, closer))
     for candidate in candidates:
         candidate = (candidate or '').strip()
         if not candidate:

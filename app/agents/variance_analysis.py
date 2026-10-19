@@ -212,16 +212,20 @@ class VarianceAnalysisAgent(BaseAgent):
         # the evidence. What the model adds is whether each divergence is
         # materially behavioural, which the comparator cannot judge -- its
         # severity is derived from the variance kind alone.
+        #
+        # The materiality judgement is no longer optional. It used to fall back
+        # to marking every variance material with "severity derived from the
+        # variance kind" as the explanation -- which is not a judgement, it is
+        # the comparator's own output wearing the model's label, and it made a
+        # model outage indistinguishable from a model that found everything
+        # material. The comparison and its evidence survive a model outage
+        # because they are recorded above; this call does not.
         judged, provenance = produce(
             context, self.PROMPT,
             {'policy': policy,
              'variances': [{'path': v['path'], 'kind': v['kind'], 'severity': v['severity'],
                             'expected': v.get('expected'), 'actual': v.get('actual')}
-                           for v in flat]},
-            lambda: {'findings': [{'path': v['path'], 'kind': v['kind'],
-                                   'severity': v['severity'], 'material': True,
-                                   'explanation': 'severity derived from the variance kind'}
-                                  for v in flat]})
+                           for v in flat]})
         findings = judged.get('findings') or []
         immaterial = [f['path'] for f in findings if f.get('material') is False]
         metrics = {'case_count': len(records), 'variance_count': len(flat),
@@ -233,7 +237,7 @@ class VarianceAnalysisAgent(BaseAgent):
                    # thing that tells the two apart on the run.
                    'runtime_comparison': 'EXECUTED' if executions else 'NOT_EXECUTED',
                    'findings': findings,
-                   'findings_source': provenance.get('artefact_source', 'DETERMINISTIC'),
+                   'model_attempts': provenance.get('attempts', 0),
                    # Judged immaterial by the model. Recorded, never applied:
                    # closing a variance is the G4 ACCEPT_EXCEPTION decision and
                    # disposition_differential is the only thing that may do it.

@@ -231,19 +231,48 @@ def test_an_unapproved_or_unknown_agent_cannot_be_dispatched(registry, repo, job
 
 
 def test_reasoning_provenance_is_snapshotted_onto_the_run(registry, repo, job, ace_repo):
+    """Which prompt, model and skill shaped a stored artefact, on the run row.
+
+    The assertion was ``DETERMINISTIC_FALLBACK`` with
+    ``no_approved_prompt_or_model``, which described the normal mode when the
+    model was optional. It is a successful model run now, and what matters is
+    that the identifiers survive onto ``agent_runs`` -- an artefact traceable
+    to "some model, at some point" is not traceable.
+    """
     registry.dispatch(job['id'], 'repository-intake', '1.0.0', ROLES, 'svc', {'path': str(ace_repo)})
     outcome = registry.dispatch(job['id'], 'dormancy-intelligence', '1.0.0',
                                 ROLES + ('DORMANCY_ANALYST',), 'svc', {'traffic_count': 3, 'deployed': True})
     run = repo.one('select * from agent_runs where id=?', (outcome['run_id'],))
     provenance = json.loads(run['model_provenance'])
-    assert run['reasoning'] == 'DETERMINISTIC_FALLBACK'
+    assert run['reasoning'] == 'MODEL_GATEWAY'
     assert provenance['prompt_name'] == 'agent/dormancy-intelligence/classification-rationale'
-    assert provenance['reason'] == 'no_approved_prompt_or_model'
+    assert provenance['artefact_source'] == 'MODEL'
+    assert provenance['attempts'] == 1
+    # The exact prompt version and its content hash, so a stored artefact can be
+    # traced to the template that shaped it rather than to the prompt's name.
+    assert provenance['prompt_hash'] and provenance['prompt_version']
+    assert provenance['model_id'] and provenance['request_id']
 
 
-def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo, job, ace_repo):
-    """The data-loss rules refuse a lot of legitimate migration content, so a
-    refusal must not take the run down with it."""
+def test_a_dlp_refusal_fails_the_agent_and_names_the_rule(registry, repo, job, ace_repo):
+    """A refusal now takes the run down, and that is the trade being made.
+
+    The data-loss rules refuse a lot of legitimate migration content -- the PAN
+    rule matches any run of 13 or more digits, which a telemetry counter or an
+    ESQL numeric literal trips routinely -- and this used to degrade to a
+    computed classification so the run completed.
+
+    It cannot any more: there is no computed classification. ``artefact.scrub``
+    is what keeps this from happening for content that only *looks* sensitive,
+    and ``gateway_refused`` is in ``artefact.TERMINAL`` because the same payload
+    trips the same rule on every attempt, so the agent fails on the first rather
+    than spending two more calls to learn that.
+
+    The failure has to name the rule, because the fix is either scrubbing the
+    payload or changing the policy and the operator cannot tell which from
+    "the model did not answer".
+    """
+    from app.agents.artefact import ArtefactUnavailable
     from app.services.connectors import ConnectorRegistry
     from app.services.platform_v7 import AIRegistryService
 
@@ -280,13 +309,19 @@ def test_a_dlp_refusal_is_recorded_and_the_agent_still_completes(registry, repo,
     ensure_model('reasoning-small')
     registry.dispatch(job['id'], 'repository-intake', '1.0.0', ROLES, 'svc', {'path': str(ace_repo)})
     # A 16-digit telemetry counter trips the PAN rule.
-    outcome = registry.dispatch(job['id'], 'dormancy-intelligence', '1.0.0',
-                                ROLES + ('DORMANCY_ANALYST',), 'svc',
-                                {'traffic_count': 1234567890123456, 'deployed': True})
-    assert outcome['status'] == 'COMPLETED'
-    assert outcome['outputs']['classification'] == 'ACTIVE'
-    assert outcome['reasoning']['reason'].startswith('gateway_refused:dlp_violation')
-    assert outcome['reasoning']['mode'] == 'DETERMINISTIC_FALLBACK'
+    with pytest.raises(ArtefactUnavailable) as raised:
+        registry.dispatch(job['id'], 'dormancy-intelligence', '1.0.0',
+                          ROLES + ('DORMANCY_ANALYST',), 'svc',
+                          {'traffic_count': 1234567890123456, 'deployed': True})
+    assert raised.value.reason.startswith('gateway_refused:dlp_violation')
+    assert 'PAN' in raised.value.reason, 'the operator has to know which rule fired'
+    assert raised.value.attempts == 1, 'the same payload trips the same rule every time'
+    # Nothing classified, and the failure is on the run rather than only raised.
+    assert repo.one('select count(*) n from dormancy_assessments where job_id=?',
+                    (job['id'],))['n'] == 0
+    run = repo.one("select status,error from agent_runs where job_id=?"
+                   " and agent_id='dormancy-intelligence'", (job['id'],))
+    assert run['status'] == 'FAILED' and 'dlp_violation' in run['error']
 
 
 def test_the_governed_registry_survives_reinitialisation(tmp_path):

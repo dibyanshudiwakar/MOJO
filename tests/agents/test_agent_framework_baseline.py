@@ -15,7 +15,7 @@ def test_baseline_produces_a_template_the_g1_approval_can_bind(repo, job, framew
     assert result.metrics['golden_status'] == 'PASS'
 
 
-def test_a_missing_standard_becomes_a_clarification(repo, job, tmp_path):
+def test_a_missing_standard_becomes_a_clarification(repo, job, tmp_path, auto_mode_off):
     """An ambiguous baseline would be encoded into every generated service."""
     bare = tmp_path / 'bare'
     bare.mkdir()

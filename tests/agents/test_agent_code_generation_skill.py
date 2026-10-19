@@ -1,17 +1,25 @@
-"""The skill reaches the provider on code-generation's synthesis call.
+"""The skill reaches the provider on code-generation's authoring calls.
 
-Business-logic synthesis is the step that writes real logic into generated
-source, and the skill is where the 13 mandatory rules, the structural
-conventions and the backend-specific connector patterns live. Guidance that
-never arrives is a silent failure: the model still answers, the edits still
-apply, and the result is merely wrong in the ways the skill exists to prevent.
+The skill is where the 13 mandatory rules, the structural conventions and the
+backend-specific connector patterns live, and it is now the *only* place: with
+``springgen`` no longer reachable from this agent, nothing else knows that a
+repository needs a parent POM under an ``EIPMS_`` root or that an ``exception``
+package is forbidden. Guidance that never arrives is a silent failure -- the
+model still answers, the files still get written, and the result is merely wrong
+in the ways the skill exists to prevent.
 
 Two paths matter. When the detected backend type names a connector reference,
-the skill is narrowed to SKILL.md plus structural-conventions plus that
-reference. When it does not -- UNDETERMINED is the common case before any
-backend has been identified -- the agent passes no skill, and what must then
-happen is that ``ReasoningGateway`` substitutes the agent's full skill rather
-than sending none at all.
+the skill is narrowed to SKILL.md plus structural-conventions plus the mandatory
+rules plus that reference. When it does not -- UNDETERMINED is the common case
+before any backend has been identified -- the agent passes no skill, and what
+must then happen is that ``ReasoningGateway`` substitutes the agent's full skill
+rather than sending none at all.
+
+This file previously covered business-logic synthesis, which filled in
+``springgen``'s TODO transformer bodies. That stage is gone: its only input was
+the generator's stub reporting, and a model-authored project has no stubs. The
+generator itself still reports them for callers of ``POST /api/v6/*``, which the
+last test here pins.
 """
 import json
 
@@ -19,104 +27,127 @@ import pytest
 
 from app.agents.code_generation import CodeGenerationAgent
 from app.agents.skills import skill_for
-from tests.agents.conftest import SkillAwareArtefactProvider
 
-PROMPT = CodeGenerationAgent.BUSINESS_LOGIC_PROMPT
-#: code-generation's default_model_alias; AT-13 refuses the dispatch otherwise.
-ALIAS = 'coding'
+LAYOUT = CodeGenerationAgent.LAYOUT_PROMPT
+FILE = CodeGenerationAgent.FILE_PROMPT
 
 
 @pytest.fixture
-def synthesise(repo, job, planned, tmp_path, gateway):
-    """Run the agent with the synthesis stage on, under a forced backend type."""
-    def _run(backend, answer=None):
-        gateway(PROMPT, model_name=ALIAS)
+def author(repo, job, planned, tmp_path, model):
+    """Run the agent under a forced backend type, returning the double."""
+    def _run(backend):
         row = repo.one('select id,semantic_model from ace_analyses where job_id=?', (job['id'],))
-        model = json.loads(row['semantic_model'])
-        model['backend_type'] = {'type': backend, 'signal': 'forced by test'}
+        semantic = json.loads(row['semantic_model'])
+        semantic['backend_type'] = {'type': backend, 'signal': 'forced by test'}
         with repo.connect() as c:
             c.execute('update ace_analyses set semantic_model=? where id=?',
-                      (json.dumps(model, sort_keys=True), row['id']))
-        provider = SkillAwareArtefactProvider(answer or (lambda payload: {'edits': []}))
+                      (json.dumps(semantic, sort_keys=True), row['id']))
         result = CodeGenerationAgent(repo).run(job['id'], params={
             'plan_id': planned['plan_id'],
             'output_root': str(tmp_path / ('out-' + backend.lower())),
-            'service_name': 'orders', 'package_name': 'com.example.orders',
-            'synthesise_business_logic': True}, provider=provider)
-        return provider, result
+            'service_name': 'orders', 'package_name': 'com.example.orders'})
+        return model, result
     return _run
 
 
-def _synthesis_skills(provider):
-    """The skills passed on synthesis calls, ignoring the triage call."""
-    return [skill for call, skill in zip(provider.calls, provider.skills)
-            if 'stub_files' in (call['payload'] or {})]
+def _skills_for(double, prompt):
+    return [c['skill'] for c in double.calls if c['prompt'] == prompt]
 
 
-def test_a_known_backend_focuses_the_skill_on_its_connector_reference(synthesise):
-    provider, _ = synthesise('REST_EXTERNAL_DIRECT')
-    skills = _synthesis_skills(provider)
-    if not skills:
-        pytest.skip('no stub bodies to synthesise in this fixture project')
-    skill, = skills[:1]
+def test_a_known_backend_focuses_the_skill_on_its_connector_reference(author):
+    double, _ = author('REST_EXTERNAL_DIRECT')
+    skills = _skills_for(double, LAYOUT)
+    assert skills, 'the layout call must reach the provider'
+    skill = skills[0]
     assert skill is not None, 'the skill must reach the provider'
-    assert skill.focused_on == 'structural-conventions.md+rest-external-direct.md'
+    assert skill.focused_on == ('structural-conventions.md+mandatory-migration-rules.md'
+                               '+rest-external-direct.md')
     # SKILL.md's own guidance is kept, not replaced: focus_many combines them,
-    # and the mandatory rules live in SKILL.md.
+    # and the mandatory rules live in SKILL.md as well as in their reference.
     full = skill_for('code-generation')
     assert full.text.strip()[:80] in skill.text
-    assert 'rest-external-direct' in skill.focused_on
     # The hash recorded on the run is the focused skill's, not the whole one's.
     assert skill.provenance()['skill_hash'] != full.content_hash
 
 
-def test_an_undetermined_backend_still_sends_the_agents_full_skill(synthesise):
+def test_every_file_is_authored_with_the_same_focused_skill(author):
+    """One narrowing per run, not per file.
+
+    Each file is its own request, so a regression that lost the focus after the
+    first call would leave most of the project authored without the connector
+    reference -- and nothing would fail, because the files would still compile.
+    """
+    double, _ = author('REST_EXTERNAL_DIRECT')
+    skills = _skills_for(double, FILE)
+    assert len(skills) > 1, 'the fixture plan authors more than one file'
+    assert all(s is not None for s in skills)
+    assert len({s.focused_on for s in skills}) == 1
+
+
+def test_an_undetermined_backend_still_sends_the_structural_rules(author):
     """The case with no connector reference must not send no guidance.
 
-    The agent passes skill=None here, and ReasoningGateway's fallback is what
-    substitutes the agent's own skill. If that fallback regressed, synthesis
-    would run with no mandatory rules at all and nothing would fail.
+    UNDETERMINED is the common state before a backend has been identified, and
+    the structural conventions and mandatory rules apply regardless of which
+    connector a service eventually turns out to need. If this regressed, a
+    project would be authored with no rules at all and nothing would fail --
+    the output would compile and simply breach Rule 10.
     """
-    provider, _ = synthesise('UNDETERMINED')
-    skills = _synthesis_skills(provider)
-    if not skills:
-        pytest.skip('no stub bodies to synthesise in this fixture project')
+    double, _ = author('UNDETERMINED')
+    skills = _skills_for(double, LAYOUT)
+    assert skills, 'the layout call must reach the provider'
     skill = skills[0]
-    assert skill is not None, 'an unknown backend must not mean unguided synthesis'
-    assert skill.name == 'iib-to-ms-code-generation'
-    assert skill.content_hash == skill_for('code-generation').content_hash
-    assert not skill.focused_on
+    assert skill is not None, 'an unknown backend must not mean unguided authoring'
+    assert skill.focused_on == 'structural-conventions.md+mandatory-migration-rules.md'
+    assert 'rest-external-direct' not in skill.focused_on
+    # SKILL.md itself still travels with it, which is where the rules live.
+    assert skill_for('code-generation').text.strip()[:80] in skill.text
 
 
-def test_the_synthesis_payload_carries_the_real_ace_source_and_the_stubs(synthesise):
-    """Without both, the model is being asked to invent the logic."""
-    provider, _ = synthesise('REST_EXTERNAL_DIRECT')
-    calls = [c for c in provider.calls if 'stub_files' in (c['payload'] or {})]
-    if not calls:
-        pytest.skip('no stub bodies to synthesise in this fixture project')
-    payload = calls[0]['payload']
-    assert payload['stub_files'], 'the files whose bodies are placeholders'
-    assert 'real_source' in payload, 'the ACE source each stub implements'
+def test_the_layout_payload_carries_what_the_skill_needs_to_decide_structure(author):
+    """Without the tasks and the backend type the layout is a guess."""
+    double, _ = author('REST_EXTERNAL_DIRECT')
+    payload = [c['payload'] for c in double.calls if c['prompt'] == LAYOUT][0]
+    assert payload['tasks'], 'the approved plan decides what files exist'
+    assert payload['backend_type'] == 'REST_EXTERNAL_DIRECT'
+    assert payload['service_name'] == 'orders'
+    assert payload['package_name'] == 'com.example.orders'
 
 
-def test_the_synthesis_stage_actually_runs(synthesise):
-    """The regression this file exists for.
+def test_the_project_is_recorded_as_model_authored(author):
+    """The run's provenance describes the authoring, not the quality triage.
 
-    generate_spring returned a hardcoded stub_sources={} from when the
-    generator moved to springgen.py, so _synthesize_business_logic returned
-    'no_stubs' on every run and the model was never asked for the logic --
-    silently, because an empty dict is a valid answer and nothing failed.
+    On a passing gate the triage is never made, so recording *its* provenance
+    put mode=MODEL_NOT_CONSULTED on a project the model wrote in full.
     """
-    provider, result = synthesise('REST_EXTERNAL_DIRECT')
-    outcome = result.metrics.get('business_logic_synthesis')
-    assert outcome is not None, 'the stage must report an outcome'
-    assert outcome != 'no_stubs', 'the generator must report its placeholder bodies'
-    # And it got there by asking the model, with guidance attached.
-    assert _synthesis_skills(provider), 'synthesis must reach the provider'
+    double, result = author('REST_EXTERNAL_DIRECT')
+    assert result.metrics['file_count'] >= 1
+    assert result.metrics['layout_root'] == 'orders-parent'
+    assert result.reasoning['artefact_source'] == 'MODEL'
+    assert result.reasoning['mode'] == 'MODEL_GATEWAY'
+    assert result.reasoning['prompt_name'] == FILE
+    # The triage is still on the record, one level down.
+    assert result.reasoning['quality_triage']['reason'] == \
+        'quality_gate_passed_nothing_to_triage'
+    # Every file the layout named was authored; produce_many is all-or-nothing,
+    # so a shortfall would have raised rather than written a partial tree.
+    assert double.count(FILE) == len(_layout_files(double))
 
 
-def test_the_generator_names_the_ace_source_each_stub_needs(repo, job, planned, tmp_path):
-    """A stub with no source reference is a request the model cannot answer."""
+def _layout_files(double):
+    from tests.agents.model_double import ANSWERS
+    payload = [c['payload'] for c in double.calls if c['prompt'] == LAYOUT][0]
+    return ANSWERS[LAYOUT](payload)['files']
+
+
+def test_the_generator_still_names_the_ace_source_each_stub_needs(repo, job, planned, tmp_path):
+    """``springgen`` is unchanged and still reachable as a service.
+
+    The agent no longer calls it -- this is the deterministic generation behind
+    ``POST /api/v6/*``. Kept because scrapping the fallback was a change to the
+    agents, not a removal of the service, and a stub with no source reference
+    would still be a request nobody can answer.
+    """
     from app.services.migration_lifecycle_v6 import MappingAndPlanningService
     generated = MappingAndPlanningService(repo).generate_spring(
         job['id'], planned['plan_id'], str(tmp_path / 'stubs'), 'orders', 'com.example.orders')

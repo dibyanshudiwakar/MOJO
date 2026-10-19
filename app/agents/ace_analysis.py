@@ -15,16 +15,17 @@ exactly as a parsed one does and one G2 approval binds either.
 produced, deriving the content hash, the parser coverage report and the
 unsupported-construct rows from the model itself.
 
-This agent requests ``clarification.create`` but returns no clarifications of its
-own: ``analyze_ace`` already inserts one per ambiguity the parser could not
-resolve, on this agent's behalf. Returning them again would duplicate every
-question. The tool is in the requested set because the capability really is
-exercised during the run -- the registry checks what an agent may do, and this
-run does create clarifications.
+Each unresolved ambiguity becomes a clarification. ``record_analysis`` stores
+ambiguities on the analysis record itself but does not raise them as
+clarifications (clarification blocking is disabled at that layer -- see its
+own comment); this agent is the one holding ``clarification.create``, so it
+turns each OPEN ambiguity into an answerable question rather than leaving it
+visible only inside the semantic model's own JSON.
 """
 import json
 from app.agents.artefact import produce_many
-from app.agents.base import AgentResult, BaseAgent, EvidenceRef
+from app.services import automode
+from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.services.priority1 import PriorityOneService
 
 #: Which skill reference a source file's reading is guided by. The whole skill
@@ -51,33 +52,29 @@ class ACEAnalysisAgent(BaseAgent):
         """The semantic model, read by the model one source file at a time.
 
         One request per file rather than per repository: a 200-node flow plus
-        its ESQL does not fit in a 16,384-token response, and a file the model
-        cannot read degrades to the deterministic parse of *that file* while the
-        rest stays model-authored. The merge itself is deterministic -- it is
-        list concatenation, and leaving it in code is what stops the assembly
-        inventing, dropping or reordering a construct.
+        its ESQL does not fit in one response.
+
+        All or nothing across the files. A per-file fallback to the parser left
+        an analysis that was part model-read and part regex-parsed, and nothing
+        downstream could tell which flows came from which -- so a construct the
+        parser does not understand looked identical to one the model decided was
+        absent. Each file gets its own retry budget instead.
         """
         parser = service.parser
-        try:
-            sources = parser.sources(path)
-        except ValueError:
-            # repository_not_accessible: nothing to read, and the deterministic
-            # path owns raising that so the error stays identical either way.
-            return service.compute_semantic_model(path), {'mode': 'DETERMINISTIC_FALLBACK',
-                                                          'prompt_name': self.PROMPT,
-                                                          'reason': 'repository_not_accessible'}
+        # ValueError('repository_not_accessible') propagates: an unreadable path
+        # is an operator error, not a model outage, and it used to be answered
+        # by parsing the same unreadable path -- which produced an empty model
+        # the pipeline then treated as a real analysis of a repository with
+        # nothing in it.
+        sources = parser.sources(path)
         by_path = {rel: (text, ext) for rel, text, ext in sources}
         skill = self._focused_skill(context, by_path)
-
-        def fallback(rel):
-            text, ext = by_path[rel]
-            fragment = parser.empty()
-            parser.fold(fragment, rel, text, ext)
-            return fragment
-
         items = [(rel, {'path': rel, 'kind': ext, 'text': text})
                  for rel, text, ext in sources]
-        fragments, provenance = produce_many(context, self.PROMPT, items, fallback, skill=skill)
+        fragments, provenance = produce_many(context, self.PROMPT, items, skill=skill)
+        # The merge stays deterministic: it is list concatenation, and leaving
+        # it in code is what stops the assembly inventing, dropping or
+        # reordering a construct the per-file answers established.
         return parser.merge([fragments[rel] for rel, _, _ in sources if rel in fragments]), provenance
 
     def _focused_skill(self, context, by_path):
@@ -116,15 +113,34 @@ class ACEAnalysisAgent(BaseAgent):
                    # directly rather than re-deriving it later.
                    'backend_type': model.get('backend_type', {}).get('type', 'UNDETERMINED'),
                    'backend_type_signal': model.get('backend_type', {}).get('signal', ''),
-                   # Which files the model read and which fell back to the
-                   # parser, so a half-model-authored analysis says so.
-                   'sources_from_model': provenance.get('items_from_model', 0),
-                   'sources_computed': provenance.get('items_from_fallback', 0)}
+                   # Every source file is model-read or the agent failed, so
+                   # sources_from_model/sources_computed no longer describe
+                   # anything: produce_many is all-or-nothing. What is left to
+                   # record is how many files were read and how many requests
+                   # the last of them took.
+                   'sources_read': provenance.get('item_count', 0),
+                   'model_attempts': provenance.get('attempts', 0)}
+        clarifications = tuple(
+            Clarification(stage='ACE_ANALYSIS', question=a.get('question', ''),
+                          owner=a.get('owner', 'ACE_SME'), impact=a.get('impact', 'unassessed'),
+                          evidence_ref=a.get('evidenceReference', '') or 'analysis://' + result['analysis_id'])
+            for a in ambiguities if isinstance(a, dict) and a.get('status', 'OPEN') == 'OPEN')
+        # The analysis itself is complete -- analysis_document and the semantic
+        # model's hash are both below -- so in auto mode the ambiguities are
+        # recorded as decisions rather than used to park the step. One real
+        # application raised 95 of them, which stopped the migration before
+        # anything downstream could run.
+        #
+        # The clarifications are still returned: dispatch persists them and, in
+        # auto mode, answers each one through the model and attributes it to
+        # AUTO_MODE. Nothing is discarded; what changes is that a reviewer reads
+        # decisions instead of blocking questions.
         return AgentResult(
-            status='CLARIFICATION_REQUIRED' if ambiguities else 'COMPLETED',
+            status='CLARIFICATION_REQUIRED' if ambiguities and not automode.enabled() else 'COMPLETED',
             outputs={'analysis_document': result['analysis_id'],
                      'semantic_model': row['content_hash'],
                      'ambiguities': ambiguities},
+            clarifications=clarifications,
             # content_hash of an analysis is the digest of the semantic model
             # json, so a G2 approval binding this evidence also binds the model.
             evidence=(EvidenceRef('ACE_ANALYSIS', version,

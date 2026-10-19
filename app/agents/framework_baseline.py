@@ -14,6 +14,7 @@ rather than discovered after generation.
 """
 from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.agents.artefact import produce
+from app.services import automode
 from app.services.priority1 import PriorityOneService
 
 OWNER = 'JAVA_ARCHITECT'
@@ -36,26 +37,20 @@ class FrameworkBaselineAgent(BaseAgent):
         # configuration: the versions and dependencies the whole baseline turns
         # on live in the build files, and credential values are redacted before
         # anything reaches the gateway.
-        try:
-            sources = extractor.sources(path)
-        except ValueError:
-            sources = None
-        if sources is None:
-            read = service.compute_framework(path, version, effective_from)
-            provenance = {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
-                          'reason': 'framework_repository_not_accessible',
-                          'artefact_source': 'DETERMINISTIC'}
-        else:
-            answer, provenance = produce(
-                context, self.PROMPT,
-                {'version': version, 'files': [{'path': p, 'text': t} for p, t in sources]},
-                lambda: service.compute_framework(path, version, effective_from))
-            # Assembled deterministically either way: the template markdown is
-            # what a framework baseline hashes, so both paths must derive it
-            # the same way for one G1 approval to bind either.
-            read = (extractor.assemble(answer.get('standards') or {},
-                                       answer.get('conflicts') or [], version, effective_from)
-                    if provenance.get('artefact_source') == 'MODEL' else answer)
+        # ValueError('framework_repository_not_accessible') propagates: a path
+        # that is not a directory is an operator error. It used to be answered
+        # by extracting from that same path, which produced a baseline of empty
+        # standards and a G1 approval bound to it.
+        sources = extractor.sources(path)
+        answer, provenance = produce(
+            context, self.PROMPT,
+            {'version': version, 'files': [{'path': p, 'text': t} for p, t in sources]})
+        # Assembly stays deterministic: the template markdown is what a
+        # framework baseline hashes and what a G1 approval binds, so deriving it
+        # in code is what keeps the hash a function of the standards rather than
+        # of how the model chose to render them.
+        read = extractor.assemble(answer.get('standards') or {},
+                                  answer.get('conflicts') or [], version, effective_from)
         result = service.record_framework(context.job_id, read, version,
                                           context.param('golden_path', None) or path)
         row = self.repo.one('select * from framework_baselines where id=?', (result['framework_id'],))
@@ -68,7 +63,13 @@ class FrameworkBaselineAgent(BaseAgent):
                           'framework://' + result['framework_id'])
             for x in conflicts)
         return AgentResult(
-            status='CLARIFICATION_REQUIRED' if conflicts else 'COMPLETED',
+            # The baseline is recorded and its template hashed before this
+            # point, so an unresolved convention conflict does not make the
+            # artefact incomplete -- it makes it annotated. In auto mode the
+            # conflicts become recorded decisions and the step proceeds; see
+            # app/services/automode.py for why that rule is "complete artefact"
+            # rather than "any clarification".
+            status='CLARIFICATION_REQUIRED' if conflicts and not automode.enabled() else 'COMPLETED',
             outputs={'framework_template': result['framework_id'], 'conflicts': conflicts},
             # content_hash of a framework baseline is the digest of its template
             # markdown, so this evidence id and the artefact share a hash and one

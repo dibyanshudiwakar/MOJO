@@ -32,6 +32,7 @@ from app.services.agents import AgentRegistry
 from app.services.factory_v3 import WorkflowOrchestrator
 from app.repository import now as _now
 from app.services.pipelines import PipelineService, StepLogger, PipelineContextAccumulator
+from app.agents.artefact import StepCancelled
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import AGENT_LIFECYCLE_TRANSITIONS
 from app.services.platform_v7 import NotificationService
@@ -93,19 +94,22 @@ class WorkerLoop:
         pipeline_id = payload['pipeline_id']
         try:
             self._execute(pipeline_id, step_id)
-            # The step may have been parked at WAITING_APPROVAL by the
-            # pre-flight gate check rather than completing normally.  In that
-            # case the queue row should be cancelled (not completed) so the
-            # retry backoff does not re-run the step behind the operator's
-            # back.  ``_enter_gate_wait`` already parks the queue row via
-            # ``_park_queue_row``, but ``complete`` below would overwrite that,
-            # so detect the park and skip the normal completion.
+            # The step may have been parked at WAITING_APPROVAL (pre-flight
+            # gate check) or WAITING_CLARIFICATION (_execute, below) rather
+            # than completing normally.  In either case the queue row should
+            # be cancelled (not completed) so the retry backoff does not
+            # re-run the step behind the operator's back.  ``_enter_gate_wait``
+            # / ``park_for_clarification`` already park the queue row via
+            # ``_park_queue_row``, but ``complete`` below would overwrite
+            # that, so detect the park and skip the normal completion.
             step = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
-            if step and step['status'] == 'WAITING_APPROVAL':
-                # The queue row was already parked by _enter_gate_wait; resolve
-                # it as cancelled so it stays dormant until the gate is approved.
+            if step and step['status'] in ('WAITING_APPROVAL', 'WAITING_CLARIFICATION'):
+                # The queue row was already parked; resolve it as cancelled
+                # so it stays dormant until the gate is approved / the
+                # clarification is answered.
+                reason = 'gate_hold' if step['status'] == 'WAITING_APPROVAL' else 'clarification_hold'
                 try:
-                    self.workflow.complete(item['id'], False, 'gate_hold', worker_id=self.worker_id)
+                    self.workflow.complete(item['id'], False, reason, worker_id=self.worker_id)
                 except Exception:
                     pass
             else:
@@ -124,7 +128,7 @@ class WorkerLoop:
             traceback.print_exc()
             try:
                 step = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
-                if not step or step['status'] not in ('FAILED', 'WAITING_APPROVAL'):
+                if not step or step['status'] not in ('FAILED', 'WAITING_APPROVAL', 'WAITING_CLARIFICATION'):
                     self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
             except Exception:
                 pass
@@ -253,10 +257,30 @@ class WorkerLoop:
                 outputs = self._deliver(pipeline, step, log)
             else:
                 raise ValueError('unsupported_pipeline_step_kind:' + step['kind'])
+        except StepCancelled as exc:
+            # The operator stopped it. ``PipelineService.cancel`` has already
+            # written CANCELLED onto this step -- that write is what the agent's
+            # checkpoint saw -- so there is nothing to mark here, and marking
+            # FAILED is actively wrong: ``mark_step`` refuses to overwrite
+            # CANCELLED, but recording the attempt would still log a fault
+            # against a decision. Swallowed rather than re-raised so
+            # ``process_one``'s catch-all does not record it either.
+            log.warn('Step cancelled: %s' % str(exc)[:300])
+            return
         except Exception as exc:
             log.error('Step failed: %s' % str(exc)[:300])
             self.pipelines.mark_step(step_id, 'FAILED', error=type(exc).__name__ + ':' + str(exc))
             raise
+        if outputs.get('_agent_status') == 'CLARIFICATION_REQUIRED':
+            # The agent did not fail, but it also did not finish: it returned
+            # an incomplete result and questions that need a human answer.
+            # Marking this COMPLETED would let a dependent step dispatch on
+            # that incomplete result (e.g. code-generation reading an empty
+            # plan_id) -- park it instead so nothing downstream starts until
+            # the clarifications are resolved.
+            log.warn('Agent requires clarification — step parked')
+            self.pipelines.park_for_clarification(step_id, outputs, outputs.get('_clarification_ids') or [])
+            return
         log.success('Step completed successfully')
         self.pipelines.mark_step(step_id, 'COMPLETED', outputs=outputs)
 
@@ -272,6 +296,50 @@ class WorkerLoop:
         if not user:
             raise PermissionError('pipeline_owner_account_not_found:' + email)
         return user, AccountService.roles_of(user)
+
+    #: How long a cancellation check trusts its last answer, in seconds.
+    #:
+    #: The predicate is called between every source file and every retry, and
+    #: each call is a database read. Agent steps run for minutes, so a second of
+    #: staleness is invisible to the operator and keeps a long ``produce_many``
+    #: from adding one read per item on top of its model calls.
+    CANCEL_POLL_SECONDS = 1.0
+
+    def _cancellation_check(self, step_id):
+        """A predicate an agent calls to ask whether it should stop.
+
+        True once the step is no longer RUNNING. ``PipelineService.cancel``
+        writes CANCELLED straight onto a RUNNING step, so that status *is* the
+        signal -- there is no separate flag to keep consistent with it, and a
+        step cancelled while its agent sits in a gateway call stops at the
+        agent's next checkpoint.
+
+        Deliberately reads the step rather than the pipeline: a step can also be
+        stopped on its own (a retry supersedes it, a gate parks it), and in
+        every one of those cases continuing to spend model calls on it is
+        wrong.
+
+        Fails open. A database error here returns False -- not cancelled -- so a
+        transient read problem cannot abort work that is otherwise fine. The
+        operator's Stop is retried on the next checkpoint a second later.
+        """
+        state = {'at': 0.0, 'stop': False}
+
+        def cancelled():
+            if state['stop']:
+                return True                      # terminal: never un-cancel
+            moment = time.time()
+            if moment - state['at'] < self.CANCEL_POLL_SECONDS:
+                return False
+            state['at'] = moment
+            try:
+                row = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
+            except Exception:
+                return False
+            if row and row['status'] != 'RUNNING':
+                state['stop'] = True
+            return state['stop']
+        return cancelled
 
     def _dispatch_agent(self, job_id, step, created_by, log=None):
         user, roles = self._principal(created_by)
@@ -297,7 +365,9 @@ class WorkerLoop:
             log.info('No prior pipeline context (first agent in this pipeline)')
         if log:
             log.info('Dispatching agent %s v%s' % (step['agent_id'], step['version']))
-        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by, params, [], logger=log)
+        result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by,
+                                      params, [], logger=log,
+                                      cancelled=self._cancellation_check(step['id']))
         evidence_ids = [e.get('id') for e in result.get('evidence', [])]
         if log:
             status = result.get('status', 'UNKNOWN')
@@ -325,7 +395,9 @@ class WorkerLoop:
         # underscore so it can never collide with a real output key.
         return {**result.get('outputs', {}), '_run_id': result.get('run_id'),
                 '_agent_status': result.get('status'), '_metrics': result.get('metrics'),
-                '_evidence_ids': evidence_ids}
+                '_artefact_complete': bool(result.get('artefact_complete')),
+                '_evidence_ids': evidence_ids,
+                '_clarification_ids': result.get('clarification_ids')}
 
     def _clone(self, pipeline, step, log=None):
         params = json.loads(step['params'] or '{}')

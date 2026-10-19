@@ -23,11 +23,11 @@ somewhere the next agent can actually read them.
 import json
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.artefact import produce
+from app.agents.reasoning import NOT_CONSULTED
 from app.repository import digest, now, uid
 from app.services.enterprise_v5 import ACERuntimeAdapter, SpringBootRuntimeAdapter
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
-HTTP = ('HTTP', 'SOAP')
 
 #: Adapter envelope fields, ignored by default in the comparison policy.
 #:
@@ -57,30 +57,6 @@ class TestEngineeringAgent(BaseAgent):
                  'endpoint': x.get('endpoint', '')}
                 for x in json.loads(analysis['semantic_model']).get('interfaces', [])]
 
-    def _cases(self, context):
-        """Supplied cases, or one per analysed interface."""
-        supplied = context.param('cases', None)
-        if supplied:
-            return supplied
-        analysis = self.repo.one(
-            'select * from ace_analyses where job_id=? order by created_at desc limit 1',
-            (context.job_id,))
-        if not analysis:
-            raise ValueError('analysis_required_to_derive_test_cases')
-        interfaces = json.loads(analysis['semantic_model']).get('interfaces', [])
-        cases = []
-        for index, x in enumerate(interfaces, 1):
-            endpoint = x.get('endpoint') or ''
-            cases.append({'id': 'CASE-%03d' % index,
-                          'input': {'interface': x.get('node', ''), 'protocol': x.get('protocol', '')},
-                          'method': 'POST' if x.get('protocol') in HTTP else 'GET',
-                          'path': endpoint if endpoint.startswith('/') else '/',
-                          'headers': {}, 'timing': {}, 'side_effect_observations': [],
-                          'secure_references': []})
-        if not cases:
-            raise ValueError('no_interface_to_derive_test_cases')
-        return cases
-
     def _adapters(self, context):
         ace = context.param('ace_adapter', None)
         spring = context.param('spring_adapter', None)
@@ -93,30 +69,31 @@ class TestEngineeringAgent(BaseAgent):
     def _design(self, context):
         """The test cases, designed by the model.
 
-        A caller-supplied set still wins -- an operator naming the cases is
-        not asking for them to be invented -- and the one-case-per-interface
-        derivation in ``_cases`` is the fallback. The model is worth asking
-        because that derivation produces exactly one nominal case per
-        interface: no boundary values, no error paths, and therefore nothing
-        that would distinguish the two systems behaving differently.
+        A caller-supplied set still wins -- an operator naming the cases is not
+        asking for them to be invented. Otherwise the model designs them, and
+        there is no derivation behind it: the one-nominal-case-per-interface
+        version that used to be the fallback had no boundary values and no error
+        paths, so it could not distinguish the two systems behaving differently,
+        which is the only thing a differential case is for.
         """
         supplied = context.param('cases', None)
         if supplied:
-            return supplied, {'mode': 'DETERMINISTIC_FALLBACK', 'prompt_name': self.PROMPT,
+            # The model was never asked, legitimately. Not an outage and not
+            # model-authored: a third thing, and the mode says which.
+            return supplied, {'mode': NOT_CONSULTED, 'prompt_name': self.PROMPT,
                               'reason': 'cases_supplied_by_caller',
-                              'artefact_source': 'DETERMINISTIC'}
+                              'artefact_source': 'CALLER'}
         interfaces = self._interfaces(context.job_id)
+        # No emptiness check behind this. An empty set used to be replaced by
+        # the one-nominal-case-per-interface derivation, which is exactly the
+        # artefact that cannot distinguish the two systems -- so "the model
+        # designed nothing" and "the model designed something useless" produced
+        # the same result. The response schema now carries minItems: 1, which
+        # makes emptiness a retryable violation the model is re-asked about.
         designed, provenance = produce(
             context, self.PROMPT,
-            {'interfaces': interfaces, 'plan_id': context.param('plan_id')},
-            lambda: {'cases': self._cases(context)})
-        cases = designed.get('cases') or []
-        if not cases:
-            provenance['mode'] = 'DETERMINISTIC_FALLBACK'
-            provenance['artefact_source'] = 'DETERMINISTIC'
-            provenance['reason'] = 'model_designed_no_cases'
-            cases = self._cases(context)
-        return cases, provenance
+            {'interfaces': interfaces, 'plan_id': context.param('plan_id')})
+        return designed['cases'], provenance
 
     def execute(self, context):
         service = MappingAndPlanningService(self.repo)
@@ -157,7 +134,7 @@ class TestEngineeringAgent(BaseAgent):
                                    'runtimes': ['ACE', 'SPRING_BOOT'] if executions else []}),),
             metrics={'case_count': package['case_count'], 'executed_count': len(executions),
                      'replay': 'EXECUTED' if executions else 'NOT_EXECUTED',
-                     'cases_source': provenance.get('artefact_source', 'DETERMINISTIC')},
+                     'model_attempts': provenance.get('attempts', 0)},
             reasoning=provenance)
 
 

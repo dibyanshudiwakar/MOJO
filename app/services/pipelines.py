@@ -593,7 +593,7 @@ class PipelineService:
             for step in queued:
                 if step['queue_id']:
                     workflow.cancel(step['queue_id'])
-                c.execute("update pipeline_steps set status='PENDING',queue_id='',updated_at=? where id=?", (now(), step['id']))
+                self._requeue(c, step['id'])
             c.execute("update pipelines set status='PAUSED',updated_at=? where id=?", (now(), pipeline_id))
         return self.detail(pipeline_id)
 
@@ -626,20 +626,57 @@ class PipelineService:
         if p['status'] not in ('DRAFT', 'READY', 'RUNNING', 'PAUSED', HELD):
             raise PipelineError('pipeline_not_cancellable:' + p['status'])
         rows = self.repo.rows('select * from pipeline_steps where pipeline_id=?', (pipeline_id,))
+        running = [s for s in rows if s['status'] == 'RUNNING']
         with self.repo.connect() as c:
             for step in rows:
-                if step['status'] == 'QUEUED':
-                    if step['queue_id']:
-                        workflow.cancel(step['queue_id'])
-                    c.execute("update pipeline_steps set status='CANCELLED',queue_id='',updated_at=? where id=?", (now(), step['id']))
-                elif step['status'] in ('PENDING', HELD):
+                if step['status'] in ('QUEUED', 'RUNNING', 'PENDING', HELD):
+                    # RUNNING is cancelled here too, which it was not before:
+                    # the step was left alone and its agent carried on, so
+                    # cancelling a pipeline stopped the queue but not the work.
+                    # Observed with two ace-analysis runs still RUNNING against
+                    # an already-CANCELLED pipeline, one of them for 1.5 hours.
+                    #
+                    # Marking it now is both the record and the signal. The
+                    # agent's own cancellation check (see
+                    # ``WorkerLoop._cancellation_check``) reads this status, so
+                    # writing it is what reaches a run already inside a model
+                    # call. The step is therefore CANCELLED a moment before the
+                    # agent actually stops, which is the honest ordering: the
+                    # decision has been taken and the work is unwinding.
+                    #
                     # A held step is cancellable like an unstarted one. The job
                     # stays at WAITING_Gx and its approval package stays open:
                     # closing one is a governed act for an approver, not
                     # something cancelling a pipeline may do.
-                    c.execute("update pipeline_steps set status='CANCELLED',queue_id='',updated_at=? where id=?", (now(), step['id']))
+                    if step['queue_id']:
+                        workflow.cancel(step['queue_id'])
+                    c.execute("update pipeline_steps set status='CANCELLED',queue_id='',"
+                              "completed_at=?,updated_at=? where id=?",
+                              (now(), now(), step['id']))
             c.execute("update pipelines set status='CANCELLED',completed_at=?,updated_at=? where id=?", (now(), now(), pipeline_id))
+        # Close the agent_runs row for anything that was mid-flight. Left open
+        # it reads as work still in progress that nothing is doing, which is
+        # exactly what the orphaned rows looked like, and agent health counts
+        # them as active.
+        for step in running:
+            self._close_cancelled_run(step)
         return self.detail(pipeline_id)
+
+    def _close_cancelled_run(self, step):
+        """Mark a cancelled step's agent run CANCELLED rather than leaving it RUNNING.
+
+        Separate from the transaction above on purpose: ``agent_runs`` is the
+        agent registry's table, this is a courtesy write to stop a terminal
+        pipeline leaving live-looking rows behind, and it must not be able to
+        roll the cancellation itself back.
+        """
+        run_id = (step or {}).get('agent_run_id') or ''
+        if not run_id:
+            return
+        with self.repo.connect() as c:
+            c.execute("update agent_runs set status='CANCELLED',completed_at=?,"
+                      "error=? where id=? and status='RUNNING'",
+                      (now(), 'pipeline_cancelled', run_id))
 
     def _ready_steps(self, pipeline_id):
         """Steps whose dependencies are all satisfied and that can be scheduled.
@@ -753,7 +790,8 @@ class PipelineService:
         cannot continue even once the approval lands.
         """
         statuses = {r['status'] for r in rows}
-        return 'FAILED' if 'FAILED' in statuses else (HELD if HELD in statuses else '')
+        return 'FAILED' if 'FAILED' in statuses else (
+            HELD if (HELD in statuses or 'WAITING_CLARIFICATION' in statuses) else '')
 
     def _park_queue_row(self, queue_id, workflow):
         """Stop this step's queue row from running, reversibly.
@@ -786,8 +824,7 @@ class PipelineService:
                 continue
             self._park_queue_row(step['queue_id'], workflow)
             with self.repo.connect() as c:
-                c.execute("update pipeline_steps set status='PENDING',queue_id='',updated_at=? where id=? and status='QUEUED'",
-                          (now(), step['id']))
+                self._requeue(c, step['id'], " and status='QUEUED'")
 
     @staticmethod
     def _blocked(rows):
@@ -864,21 +901,57 @@ class PipelineService:
             return
         self._set_status(pipeline_id, 'COMPLETED', final=True)
 
+    #: SQL fragment for sending a step back to PENDING to be run again.
+    #:
+    #: ``completed_at`` is cleared, and that is the whole point of having this
+    #: in one place. A retried step kept the finish time of the attempt that
+    #: failed, so once ``mark_step`` stamped a *new* ``started_at`` the step
+    #: carried a window that ended before it began. The UI rendered the
+    #: resulting negative duration as "<1s" -- its clamp against browser clock
+    #: skew turning bad data into a plausible number -- and any later
+    #: arithmetic over these two columns would have been wrong the same way.
+    #:
+    #: ``started_at`` is deliberately *not* cleared: ``_release_disabled_gate``
+    #: reads ``bool(step['started_at'])`` to decide whether a step held at a
+    #: gate has ever run, and clearing it would make a step that already ran
+    #: look like one that never did.
+    _REQUEUE = ("update pipeline_steps set status='PENDING',completed_at='',"
+                "error='',queue_id='',updated_at=? where id=?")
+
+    def _requeue(self, c, step_id, guard=''):
+        """Send a step back to PENDING for another attempt.
+
+        ``guard`` appends a status condition, for the callers that must only
+        act on a step still in a particular state.
+        """
+        return c.execute(self._REQUEUE + guard, (now(), step_id))
+
     def mark_step(self, step_id, status, outputs=None, error=''):
         with self.repo.connect() as c:
             if status == 'RUNNING':
                 c.execute("update pipeline_steps set status=?,started_at=?,updated_at=? where id=?", (status, now(), now(), step_id))
                 return
-            # A step already parked at a gate must not be dragged back out of
-            # it. ``app/worker.py`` records the same failure twice -- once in
-            # ``_execute`` and again in ``process_one``'s catch-all -- and
-            # without this guard the second write replaced WAITING_APPROVAL with
-            # FAILED and then re-attempted the WAITING_Gx transition the job had
-            # already made, which the state machine rejects. The visible effect
-            # was that a gate-blocked step ended FAILED and the hold was lost
-            # every time it ran through the worker.
-            written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status!=?",
-                                (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD)).rowcount
+            # A step already parked at a gate -- or on a clarification -- must
+            # not be dragged back out of it. ``app/worker.py`` records the same
+            # failure twice -- once in ``_execute`` and again in
+            # ``process_one``'s catch-all -- and without this guard the second
+            # write replaced WAITING_APPROVAL with FAILED and then re-attempted
+            # the WAITING_Gx transition the job had already made, which the
+            # state machine rejects. The visible effect was that a gate-blocked
+            # step ended FAILED and the hold was lost every time it ran through
+            # the worker. WAITING_CLARIFICATION is excluded for the same reason:
+            # it is parked by ``park_for_clarification`` before this call could
+            # ever race it, but a stray late write must still not clobber it.
+            #
+            # CANCELLED is excluded because cancelling a RUNNING step is now
+            # also the signal that stops its agent, so this call always races
+            # it: the agent notices at its next checkpoint and unwinds, and
+            # whatever the worker writes on the way out -- FAILED from the
+            # StepCancelled, or COMPLETED if it happened to finish first --
+            # would overwrite the operator's decision with a fault or a success
+            # nobody wanted. The cancellation is the final word.
+            written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status not in (?,?,?)",
+                                (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD, 'WAITING_CLARIFICATION', 'CANCELLED')).rowcount
         if not written:
             return
         if status == 'COMPLETED':
@@ -1116,7 +1189,7 @@ class PipelineService:
         if step['status'] != 'FAILED':
             raise PipelineError('pipeline_step_not_failed:' + step['status'])
         with self.repo.connect() as c:
-            c.execute("update pipeline_steps set status='PENDING',error='',updated_at=? where id=?", (now(), step_id))
+            self._requeue(c, step_id)
         # The queue row is revived by _schedule_ready when this step is next
         # scheduled, which also defeats the 2**attempt backoff -- that backoff
         # is for a transient blip, not for a human who just fixed the cause.
@@ -1124,6 +1197,93 @@ class PipelineService:
         # another failure still halts the pipeline.
         self._set_status(step['pipeline_id'], 'RUNNING')
         return self.repo.one('select * from pipeline_steps where id=?', (step_id,))
+
+    # -- clarification waiting --------------------------------------------------
+
+    def park_for_clarification(self, step_id, outputs, clarification_ids):
+        """Park a step whose agent returned CLARIFICATION_REQUIRED.
+
+        Mirrors ``_enter_gate_wait``'s shape -- park the step, stop its queue
+        row, hold the pipeline -- but for a human-answerable question rather
+        than a gate signature. The step's own outputs are recorded (a partial
+        artefact, e.g. a risk register with no plan yet, is still worth
+        showing in the Output tab), but -- like a gate hold -- ``completed_at``
+        is deliberately left unset: waiting on a human answer is paused, not
+        finished, and the duration ticker (``LIVE_STEP_STATUS`` in app.js)
+        depends on an unset ``completed_at`` to keep counting while parked.
+        The status stays WAITING_CLARIFICATION so ``_ready_steps`` never
+        treats it as satisfying a dependency the way a wrongly-COMPLETED step
+        would.
+        """
+        with self.repo.connect() as c:
+            parked = c.execute(
+                "update pipeline_steps set status='WAITING_CLARIFICATION',outputs=?,error=?,updated_at=? "
+                "where id=? and status!='COMPLETED'",
+                (json.dumps(outputs or {}, default=str),
+                 'clarification_required:' + ','.join(clarification_ids), now(), step_id),
+            ).rowcount
+            row = c.execute('select pipeline_id,queue_id from pipeline_steps where id=?', (step_id,)).fetchone()
+        if not parked or not row:
+            return
+        self._park_queue_row(row['queue_id'], WorkflowOrchestrator(self.repo))
+        if self._halt_reason(self.repo.rows('select * from pipeline_steps where pipeline_id=?', (row['pipeline_id'],))) == HELD:
+            self._set_status(row['pipeline_id'], HELD)
+
+    def _complete_parked(self, step_id):
+        """Complete a step that parked on questions after finishing its artefact."""
+        with self.repo.connect() as c:
+            row = c.execute('select outputs from pipeline_steps where id=?', (step_id,)).fetchone()
+            outputs = {**json.loads((row['outputs'] if row else '') or '{}'),
+                       '_agent_status': 'COMPLETED', '_artefact_complete': False}
+            written = c.execute(
+                "update pipeline_steps set status='COMPLETED',completed_at=?,outputs=?,error='',updated_at=? "
+                "where id=? and status='WAITING_CLARIFICATION'",
+                (now(), json.dumps(outputs, default=str), now(), step_id)).rowcount
+        if written:
+            self._try_lifecycle_transition(step_id)
+
+    def resume_clarification_steps(self, job_id, workflow):
+        """Un-park every step whose own clarifications are now all answered.
+
+        Unlike ``resume_after_clarification`` (job-wide, lifecycle-only), this
+        acts per step: a step parked at WAITING_CLARIFICATION is tied to one
+        agent run via the ``_run_id`` stamped into its outputs, so it resumes
+        as soon as *that run's* clarifications are resolved, not when every
+        clarification on the job happens to be. Resuming means re-running the
+        agent (status -> PENDING), not completing it -- the step's prior
+        result was incomplete by definition, which is why it parked.
+        """
+        pl = self.repo.one(
+            "select id from pipelines where job_id=? and status in ('RUNNING',?) order by created_at desc limit 1",
+            (job_id, HELD),
+        )
+        if not pl:
+            return False
+        parked = self.repo.rows(
+            "select * from pipeline_steps where pipeline_id=? and status='WAITING_CLARIFICATION'",
+            (pl['id'],),
+        )
+        resumed = False
+        for step in parked:
+            run_id = json.loads(step['outputs'] or '{}').get('_run_id', '')
+            if not run_id:
+                continue
+            remaining = self.repo.one(
+                "select count(*) n from clarifications where run_id=? and status='OPEN'", (run_id,))
+            if remaining and remaining['n']:
+                continue
+            if json.loads(step['outputs'] or '{}').get('_artefact_complete'):
+                # The agent had already produced its artefact and only the
+                # questions were outstanding, so re-running it would repeat
+                # work that exists. Finish the step with what it produced.
+                self._complete_parked(step['id'])
+            else:
+                with self.repo.connect() as c:
+                    self._requeue(c, step['id'])
+            resumed = True
+        if resumed:
+            self.advance(pl['id'], workflow)
+        return resumed
 
     # -- gate-approval waiting -------------------------------------------------
 
@@ -1274,8 +1434,7 @@ class PipelineService:
                     c.execute("update pipeline_steps set status='COMPLETED',completed_at=?,error='',updated_at=? where id=?",
                               (now(), now(), s['id']))
                 else:
-                    c.execute("update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
-                              (now(), s['id']))
+                    self._requeue(c, s['id'])
             released.append(gate)
         if not released:
             return False
@@ -1362,10 +1521,7 @@ class PipelineService:
                         (now(), now(), step['id']),
                     )
                 else:
-                    c.execute(
-                        "update pipeline_steps set status='PENDING',error='',updated_at=? where id=?",
-                        (now(), step['id']),
-                    )
+                    self._requeue(c, step['id'])
         self.advance(pl['id'], workflow)
         return True
 
