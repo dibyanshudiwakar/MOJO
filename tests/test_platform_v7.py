@@ -55,6 +55,60 @@ def test_v7_model_gateway_blocks_secret_bearing_payloads(tmp_path):
   with pytest.raises(PermissionError,match='dlp_violation'):
    ai.gateway_request({'job_id':'j','prompt_id':p['id'],'model_id':m['id'],'input_evidence':payload})
 
+def test_v7_credential_assignment_does_not_cross_a_newline_or_block_a_placeholder(tmp_path):
+ """A real secret value still blocks; an empty or externalised one must not.
+
+ Confirmed live: code-generation's file-synthesis authoring a config-map
+ properties file with blank application.medforce.client-secret= (exactly
+ this codebase's own convention -- never a literal credential) got
+ dlp_violation_in_response on every retry, because the old \\s* gap crossed
+ the newline after the empty value and matched the next line's first
+ character as "the secret". A ${...} placeholder reference failed the same
+ way on the same line.
+ """
+ r=Repository(str(tmp_path/'dlp2.db'));_gateway_profile(r)
+ ai=AIRegistryService(r)
+ p=ai.register_prompt({'name':'rca','version':'1','template':'t','status':'APPROVED'},APPROVER)
+ m=ai.register_model({'name':'m','version':'1','provider_profile':'model-primary','status':'APPROVED','region':'approved-region'},APPROVER)
+ safe=['application.medforce.client-secret=\napplication.medforce.client-id=\n',
+       'application.medforce.client-secret=\n\nspring.ssl.bundle.pem.medforce.truststore.certificate=classpath:x\n',
+       'client-secret: ${MEDFORCE_CLIENT_SECRET}\n']
+ for payload in safe:
+  ai.gateway_request({'job_id':'j','prompt_id':p['id'],'model_id':m['id'],'input_evidence':[payload]})
+ # A real, same-line value must still be refused.
+ with pytest.raises(PermissionError,match='dlp_violation'):
+  ai.gateway_request({'job_id':'j','prompt_id':p['id'],'model_id':m['id'],
+                      'input_evidence':['application.medforce.client-secret=an-actual-leaked-value']})
+
+
+def test_v7_a_generated_files_content_field_is_scanned_with_real_newlines(tmp_path):
+ """The exact shape of a file-synthesis response: {path, content}.
+
+ scan_payload used to json.dumps a dict whole before matching, which
+ re-encodes every real newline inside 'content' as the two literal
+ characters backslash-n -- not whitespace to any regex. That defeated the
+ newline-safe gap fix and blocked a real config-map file's blank
+ client-secret on every attempt. Scanning each string leaf directly (this
+ test's real reproduction of the live failure) is what fixes it.
+ """
+ r=Repository(str(tmp_path/'dlp3.db'));_gateway_profile(r)
+ ai=AIRegistryService(r)
+ p=ai.register_prompt({'name':'file-synthesis','version':'1','template':'t','status':'APPROVED'},APPROVER)
+ m=ai.register_model({'name':'m','version':'1','provider_profile':'model-primary','status':'APPROVED','region':'approved-region'},APPROVER)
+ safe_response={'path':'config/config-map/application.dev-pbmaz.properties',
+                'content':'application.medforce.client-secret=\napplication.medforce.client-id=\n'
+                         'spring.ssl.bundle.pem.medforce.truststore.certificate=classpath:x\n'}
+ request=ai.gateway_request({'job_id':'j','prompt_id':p['id'],'model_id':m['id'],'input_evidence':['x']})
+ result=ai.complete_request(request['request_id'],safe_response)
+ assert result['status']=='COMPLETED'
+
+ leaked_response={'path':'x.properties',
+                  'content':'application.medforce.client-secret=an-actual-leaked-value\n'}
+ request2=ai.gateway_request({'job_id':'j','prompt_id':p['id'],'model_id':m['id'],'input_evidence':['y']})
+ with pytest.raises(PermissionError,match='dlp_violation_in_response'):
+  ai.complete_request(request2['request_id'],leaked_response)
+
+
 def test_v7_unapproved_model_gateway_profile_is_rejected(tmp_path):
  r=Repository(str(tmp_path/'prof.db'))
  with pytest.raises(ValueError,match='approved_model_gateway_profile_required'):

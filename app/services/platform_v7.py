@@ -60,18 +60,53 @@ class AIRegistryService:
   return self.repo.one('select * from model_registry where id=?',(i,))
  # Section 14 data-loss-prevention rules. Previously the only check was a
  # caller-supplied contains_secrets boolean, so the request declared its own
- # compliance. These patterns are applied to the payload by the gateway.
+ # compliance. These patterns are applied to the payload by the gateway, and
+ # to a provider's response in complete_request -- the one direction that
+ # scrub()/redact() never touches, since those run on an outbound payload
+ # before it reaches the gateway.
+ #
+ # CREDENTIAL_ASSIGNMENT's gap was ``\s*`` on both sides of the separator,
+ # which matches a newline same as a space: an empty, correctly-externalised
+ # ``application.medforce.client-secret=`` immediately followed by *any*
+ # next line -- another property, a comment, even just the file ending --
+ # let the regex cross onto that line and treat its first character as "the
+ # secret value". Confirmed live: file-synthesis authoring a config-map
+ # properties file with blank client-id/client-secret keys (exactly what
+ # this codebase's own convention requires -- never a literal credential)
+ # got the model's correct, safe answer blocked as dlp_violation_in_response
+ # on every retry, with no way to ever succeed. ``[ \t]*`` keeps the gap on
+ # one line; ``(?!\$|"")`` lets a ``${...}`` placeholder or an immediately
+ # -closed empty string through. A real secret value still blocks, on the
+ # same line, starting with anything else.
  DLP_RULES=(
   ('PRIVATE_KEY',r'-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY'),
-  ('CREDENTIAL_ASSIGNMENT',r'(?i)\b(?:password|passwd|secret|api[_-]?key|client_secret|access[_-]?token|private[_-]?key)\b\s*[:=]\s*\S'),
+  ('CREDENTIAL_ASSIGNMENT',r'(?i)\b(?:password|passwd|secret|api[_-]?key|client_secret|access[_-]?token|private[_-]?key)\b[ \t]*[:=][ \t]*(?!\$|"")\S'),
   ('BEARER_TOKEN',r'(?i)\bbearer\s+[A-Za-z0-9._-]{16,}'),
   ('JWT',r'\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'),
   ('CONNECTION_STRING',r'(?i)\b[a-z][a-z0-9+.-]*://[^\s:@/]+:[^\s:@/]+@'),
   ('PAN',r'\b(?:\d[ -]?){13,19}\b'),
  )
+ def _texts(self,value):
+  """Every string leaf in ``value``, depth-first.
+
+  ``scan_payload`` used to ``json.dumps`` a non-string payload whole before
+  matching against it -- which re-encodes every real newline inside a
+  nested string (a generated file's own ``content``) as the two literal
+  characters backslash-and-``n``, not a newline. Neither ``\\s`` nor the gap
+  fix above can stay on "one line" against text where the line breaks
+  themselves were turned into ordinary non-whitespace characters. Scanning
+  each string value on its own, with its real newlines intact, is what lets
+  the gap fix actually work against a multi-line file.
+  """
+  if isinstance(value,str):yield value
+  elif isinstance(value,dict):
+   for v in value.values():yield from self._texts(v)
+  elif isinstance(value,(list,tuple)):
+   for v in value:yield from self._texts(v)
+  else:yield str(value)
  def scan_payload(self,value):
-  """Return DLP findings for an outbound payload."""
-  text=value if isinstance(value,str) else json.dumps(value,sort_keys=True,default=str)
+  """Return DLP findings for an outbound payload or a provider's response."""
+  text='\n'.join(self._texts(value))
   return [rid for rid,rx in self.DLP_RULES if re.search(rx,text)]
  def gateway_request(self,d):
   required=('job_id','prompt_id','model_id','input_evidence')
