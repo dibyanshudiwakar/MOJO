@@ -44,7 +44,7 @@ account.
 The **first** account registered also receives the administration roles
 (`GOVERNANCE_ADMIN`, `CONNECTOR_ADMIN`, `GATE_ADMIN`, `AUDITOR`), because a fresh
 database otherwise has nobody able to grant anything. Registration itself only
-offers operational roles — approver roles such as `SOLUTION_ARCHITECT` are
+offers operational roles — approver roles such as `PRODUCT_OWNER` are
 granted afterwards through `POST /api/v2/auth/grant-role`, so an account cannot
 self-assign the authority to approve its own gate.
 

@@ -51,7 +51,8 @@ WANTED = [
 
 def _content(path):
     if path.endswith('pom.xml'):
-        return '<project><modelVersion>4.0.0</modelVersion></project>\n'
+        return ('<project><modelVersion>4.0.0</modelVersion><dependencies><dependency>'
+                '<artifactId>framework-restclient</artifactId></dependency></dependencies></project>\n')
     if path.endswith('Dockerfile'):
         return 'FROM openjdk-micro:21\n'
     if path.endswith('.properties'):

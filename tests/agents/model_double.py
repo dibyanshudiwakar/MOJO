@@ -243,8 +243,12 @@ def _file_synthesis(payload):
     """One file. ``content`` carries minLength 1, so it is never blank."""
     path = str(payload.get('path') or 'pom.xml')
     if path.endswith('.xml'):
+        # framework-restclient is the skill's BLOCKING item B4: the quality gate
+        # fails a web pom without it, so the double's pom carries it.
         body = ('<project><modelVersion>4.0.0</modelVersion>'
-                '<artifactId>%s</artifactId></project>' % (payload.get('service_name') or 'app'))
+                '<artifactId>%s</artifactId><dependencies><dependency>'
+                '<artifactId>framework-restclient</artifactId></dependency></dependencies></project>'
+                % (payload.get('service_name') or 'app'))
     else:
         package = str(payload.get('package_name') or 'com.example')
         name = path.rsplit('/', 1)[-1].rsplit('.', 1)[0]

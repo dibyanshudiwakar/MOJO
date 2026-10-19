@@ -54,7 +54,7 @@ def test_signup_rejects_duplicate_weak_and_elevated(svc):
         accounts.sign_up({**GOOD, 'email': 'not-an-email'})
     # Self-registration must not be able to hand out an approver role.
     with pytest.raises(PermissionError, match='role_requires_administrator_grant'):
-        accounts.sign_up({**GOOD, 'email': 'c@example.com', 'role': 'SOLUTION_ARCHITECT'})
+        accounts.sign_up({**GOOD, 'email': 'c@example.com', 'role': 'PRODUCT_OWNER'})
     with pytest.raises(ValueError, match='unsupported_role'):
         accounts.sign_up({**GOOD, 'email': 'd@example.com', 'role': 'NOT_A_ROLE'})
 
@@ -95,13 +95,13 @@ def test_grant_role_requires_governance_admin(svc):
     accounts, _ = svc
     accounts.sign_up(dict(GOOD))
     with pytest.raises(PermissionError, match='required_role_missing:GOVERNANCE_ADMIN'):
-        accounts.grant_role(('ACE_ANALYST',), 'ada@example.com', 'SOLUTION_ARCHITECT')
-    granted = accounts.grant_role(('GOVERNANCE_ADMIN',), 'ada@example.com', 'SOLUTION_ARCHITECT')
-    assert 'SOLUTION_ARCHITECT' in granted['roles']
+        accounts.grant_role(('ACE_ANALYST',), 'ada@example.com', 'PRODUCT_OWNER')
+    granted = accounts.grant_role(('GOVERNANCE_ADMIN',), 'ada@example.com', 'PRODUCT_OWNER')
+    assert 'PRODUCT_OWNER' in granted['roles']
 
 
 def test_assignable_roles_exclude_approvers():
-    assert 'SOLUTION_ARCHITECT' not in AccountService.assignable_roles()
+    assert 'PRODUCT_OWNER' not in AccountService.assignable_roles()
     assert set(AccountService.assignable_roles()) == set(SELF_SERVICE_ROLES)
 
 
@@ -287,3 +287,40 @@ def test_config_reports_not_configured_before_setup(gh):
     service, _, user = gh
     state = service.config(user['id'])
     assert state == {'configured': False, 'provider': 'github', 'status': 'NOT_CONFIGURED'}
+
+
+# -- only roles the code enforces ------------------------------------------
+
+def test_retired_roles_are_not_offered_or_grantable(svc):
+    from app.services.accounts import RETIRED_ROLES, ELEVATED_ROLES
+    accounts, _ = svc
+    offered = set(AccountService.assignable_roles()) | set(ELEVATED_ROLES)
+    assert not offered & set(RETIRED_ROLES)
+    accounts.sign_up(dict(GOOD))
+    with pytest.raises(ValueError, match='unsupported_role'):
+        accounts.grant_role(('GOVERNANCE_ADMIN',), 'ada@example.com', 'MIGRATION_VIEWER')
+
+
+def test_every_listed_role_is_required_by_something():
+    """A role is listed because an agent, endpoint or gate policy checks it."""
+    import json
+    from pathlib import Path
+    from app.services.accounts import SELF_SERVICE_ROLES, ELEVATED_ROLES
+    root = Path(__file__).resolve().parents[1]
+    code = ' '.join(p.read_text(encoding='utf-8', errors='ignore')
+                    for p in list((root / 'app').rglob('*.py')) if p.name != 'accounts.py')
+    code += (root / 'config' / 'agent-catalogue.v1.json').read_text(encoding='utf-8')
+    unused = [r for r in SELF_SERVICE_ROLES + ELEVATED_ROLES if "'%s'" % r not in code and '"%s"' % r not in code]
+    assert unused == []
+
+
+def test_startup_cleanup_strips_retired_roles_from_stored_accounts(svc):
+    accounts, repo = svc
+    accounts.sign_up(dict(GOOD))
+    with repo.connect() as c:
+        c.execute("update users set role='MIGRATION_VIEWER',"
+                  "granted_roles='MIGRATION_VIEWER,ACE_ANALYST,SOLUTION_ARCHITECT'")
+    assert accounts.prune_retired_roles() == 1
+    user = accounts.by_email('ada@example.com')
+    assert accounts.roles_of(user) == ('ACE_ANALYST',) and user['role'] == 'ACE_ANALYST'
+    assert accounts.prune_retired_roles() == 0

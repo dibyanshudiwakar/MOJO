@@ -33,7 +33,7 @@ from app.repository import uid, now
 SELF_SERVICE_ROLES = (
     'ACE_ANALYST', 'FRAMEWORK_ANALYST', 'SPECIFICATION_AUTHOR', 'CODE_GENERATOR',
     'TEST_ENGINEER', 'RCA_ANALYST', 'REPOSITORY_INTAKE', 'DORMANCY_ANALYST',
-    'DELIVERY_ENGINEER', 'MIGRATION_VIEWER',
+    'DELIVERY_ENGINEER',
     'MIGRATION_PLANNER', 'VARIANCE_ANALYST', 'REMEDIATION_ENGINEER',
     'GOVERNANCE_ENGINE', 'KNOWLEDGE_CURATOR', 'FEEDBACK_ENGINEER',
 )
@@ -55,7 +55,7 @@ GATE_APPROVER_ROLES = (
 )
 # Roles that decide whether governed work may proceed. Section 13's rule that an
 # approval is never self-asserted applies to the granting of approver roles too:
-# if registration could hand out SOLUTION_ARCHITECT, anyone could sign up and
+# if registration could hand out PRODUCT_OWNER, anyone could sign up and
 # approve their own gate. These are granted by an existing administrator.
 # GATE_APPROVER_ROLES are folded in here, deliberately NOT into
 # SELF_SERVICE_ROLES, for exactly that reason.
@@ -64,7 +64,7 @@ GATE_APPROVER_ROLES = (
 # a role appearing in both would be elevated-only and the self-service entry
 # would silently do nothing.
 ELEVATED_ROLES = tuple(r for r in dict.fromkeys((
-    'GOVERNANCE_ADMIN', 'AI_GOVERNANCE_ADMIN', 'SOLUTION_ARCHITECT', 'CHIEF_ARCHITECT',
+    'GOVERNANCE_ADMIN', 'AI_GOVERNANCE_ADMIN',
     'AUDITOR', 'GATE_ADMIN', 'CONNECTOR_ADMIN', 'RELEASE_MANAGER', 'SERVICE_REGISTRAR',
     'KNOWLEDGE_CURATOR', 'NOTIFICATION_PUBLISHER', 'OBSERVABILITY_PUBLISHER',
     'CLARIFICATION_ADMIN', 'ORCHESTRATOR', 'AGENT_OPERATOR', 'AGENT_REGISTRY_ADMIN',
@@ -72,6 +72,11 @@ ELEVATED_ROLES = tuple(r for r in dict.fromkeys((
 # The first account bootstraps administration, otherwise a fresh deployment has
 # no one able to grant an elevated role to anyone.
 BOOTSTRAP_ROLES = ('GOVERNANCE_ADMIN', 'CONNECTOR_ADMIN', 'GATE_ADMIN', 'AUDITOR')
+
+# Roles an earlier build offered that nothing enforces. No endpoint, agent or
+# gate policy requires them, so holding one grants nothing; they are stripped
+# from stored accounts at startup so the console shows only roles that matter.
+RETIRED_ROLES = ('MIGRATION_VIEWER', 'SOLUTION_ARCHITECT', 'CHIEF_ARCHITECT')
 
 EMAIL = re.compile(r'^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$')
 MIN_PASSWORD = 12
@@ -98,6 +103,19 @@ class AccountService:
     def __init__(self, repo, identity=None):
         self.repo = repo
         self.identity = identity
+
+    def prune_retired_roles(self):
+        """Remove RETIRED_ROLES from every stored account. Returns accounts changed."""
+        changed = 0
+        for user in self.repo.rows('select * from users'):
+            roles = [r for r in self.roles_of(user) if r not in RETIRED_ROLES]
+            primary = user['role'] if user['role'] not in RETIRED_ROLES else (roles[0] if roles else '')
+            if ','.join(roles) != str(user.get('granted_roles') or '') or primary != user['role']:
+                with self.repo.connect() as c:
+                    c.execute('update users set granted_roles=?,role=?,updated_at=? where id=?',
+                              (','.join(roles), primary, now(), user['id']))
+                changed += 1
+        return changed
 
     # -- registration -----------------------------------------------------
     @staticmethod

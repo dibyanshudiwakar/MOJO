@@ -47,7 +47,7 @@ class FeedbackAgent(BaseAgent):
         result = service.apply(
             context.job_id, plan_id, project_root,
             max_passes=int(context.param('max_passes', 3)),
-            execute_build=bool(context.param('execute_build', False)),
+            execute_build=context.param('execute_build', 'auto'),
             # Carries the provider and correlation id, which is what enables the
             # model-assisted stage. Without it the agent is deterministic-only.
             context=context)
@@ -64,10 +64,11 @@ class FeedbackAgent(BaseAgent):
         triage, provenance = produce(
             context, self.PROMPT,
             {'unfixed_checks': result['unfixed_checks'],
+             'unfixed_gaps': result['unfixed_gaps'],
              'fix_count': len(result['applied_fixes']),
              'passes': len(result['passes']),
              'unresolved_kinds': sorted({x['kind'] for x in result['unresolved']})},
-        ) if (result['unfixed_checks'] or result['unresolved']) else ({'recommendations': []}, {
+        ) if (result['unfixed_checks'] or result['unfixed_gaps'] or result['unresolved']) else ({'recommendations': []}, {
             # Nothing outstanding, so nothing to triage. The model is not asked
             # rather than asked and unavailable -- a clean gate is a result.
             'mode': NOT_CONSULTED, 'prompt_name': self.PROMPT,
@@ -80,6 +81,9 @@ class FeedbackAgent(BaseAgent):
             'pass_count': len(result['passes']),
             'quality_status': result['quality_status'],
             'unfixed_checks': result['unfixed_checks'],
+            # GAPs the skill names that no repair closed: reported, not failed on.
+            'unfixed_gaps': result['unfixed_gaps'],
+            'gaps_closed': len({f['check'] for f in result['applied_fixes'] if str(f['check']).startswith('SKILL_')}),
             'unresolved_count': len(result['unresolved']),
             # Whether the model stage ran, and what the gate did with its edits.
             'model_rounds': len(rounds),
@@ -97,6 +101,7 @@ class FeedbackAgent(BaseAgent):
             'applied_fixes': result['applied_fixes'],
             'passes': result['passes'],
             'unfixed_checks': result['unfixed_checks'],
+            'unfixed_gaps': result['unfixed_gaps'],
             'unresolved': result['unresolved'],
             'model_rounds': rounds,
         }, sort_keys=True)

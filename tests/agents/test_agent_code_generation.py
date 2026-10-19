@@ -20,7 +20,11 @@ def test_generation_writes_a_project_with_provenance_and_a_quality_run(repo, job
     assert manifest['analysis_hash'] and manifest['framework_hash'] and manifest['specification_hash']
     assert result.outputs['tests'], 'a generated flow should come with a generated test'
     quality = repo.one('select * from quality_runs where job_id=?', (job['id'],))
-    assert quality['status'] == 'PASS_WITH_PENDING_TOOLS'
+    # No BLOCKING item of the skill's checklist is open, so the gate does not
+    # fail; the non-blocking ones are named GAPs, which is what the skill says
+    # to do with them (previously PASS_WITH_PENDING_TOOLS, from a gate that did
+    # not check the skill's items at all).
+    assert quality['status'] == 'PASS_WITH_GAPS'
 
 
 def test_the_evidence_hash_matches_the_generated_manifest_hash(repo, job, planned, tmp_path):

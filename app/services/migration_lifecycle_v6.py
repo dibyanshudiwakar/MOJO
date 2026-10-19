@@ -2,6 +2,7 @@ import json, os, re, shutil, subprocess
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services.enterprise_v5 import SpringProjectGenerator, BuildRunner, DifferentialEvidenceEngine
+from app.services import skill_gate, build_check
 from app.services.feedback import is_externalized_config
 from app.services.policy import gate_enabled
 
@@ -208,7 +209,7 @@ class MappingAndPlanningService:
  def g3_package(self,job_id,plan_id,catalogue_id):
   p=self.repo.one('select * from migration_plans where id=? and job_id=?',(plan_id,job_id));c=self.repo.one('select * from mapping_catalogues where id=? and job_id=?',(catalogue_id,job_id))
   if not p or not c:raise ValueError('plan_or_catalogue_not_found')
-  risks=self.repo.rows('select * from migration_risks where catalogue_id=?',(catalogue_id,));items=[{'kind':'MIGRATION_PLAN','id':p['id'],'version':p['version'],'hash':p['content_hash']},{'kind':'MAPPING_CATALOGUE','id':c['id'],'version':c['version'],'hash':c['content_hash']}];package={'gate':'G3','approver_role':'SOLUTION_ARCHITECT','decision_options':['APPROVE','REJECT','CLARIFY'],'plan':p,'mapping_catalogue':c,'risks':risks,'artefacts':items,'decision':'PENDING_APPROVAL','created_at':now()};raw=json.dumps(package,sort_keys=True,default=str);package_id=uid()
+  risks=self.repo.rows('select * from migration_risks where catalogue_id=?',(catalogue_id,));items=[{'kind':'MIGRATION_PLAN','id':p['id'],'version':p['version'],'hash':p['content_hash']},{'kind':'MAPPING_CATALOGUE','id':c['id'],'version':c['version'],'hash':c['content_hash']}];package={'gate':'G3','approver_role':'PRODUCT_OWNER','decision_options':['APPROVE','REJECT','CLARIFY'],'plan':p,'mapping_catalogue':c,'risks':risks,'artefacts':items,'decision':'PENDING_APPROVAL','created_at':now()};raw=json.dumps(package,sort_keys=True,default=str);package_id=uid()
   with self.repo.connect() as db:db.execute('insert into approval_packages values(?,?,?,?,?,?,?,?,?)',(package_id,job_id,'G3','PENDING_APPROVAL',raw,digest(raw),json.dumps(items),'[]',now()))
   return {'package_id':package_id,'status':'PENDING_APPROVAL','content_hash':digest(raw),'artefacts':items}
  def generation_inputs(self,job_id,plan_id):
@@ -334,15 +335,24 @@ class MappingAndPlanningService:
   checks.append(self._check('SECRET_SCAN',not bool(re.search(r'(?i)(password|secret|token)\s*[:=]\s*["\'][^$][^"\']+',text))))
   # Externalized deployment config (config-map/, application-local.*) is
   # exempt from this one check -- see is_externalized_config.
-  endpoint_text='\n'.join(f.read_text(errors='ignore') for f in config_files if not is_externalized_config(f))
-  checks.append(self._check('HARDCODED_ENDPOINT_SCAN',not bool(re.search(r'https?://(?!localhost|example)',endpoint_text))))
+  # Comments are ignored, and so are URLs that name a standard, a namespace or a
+  # parser feature. This was a bare ``https?://`` regex over everything, which
+  # failed a project for a Javadoc mention of an XML namespace and for the line
+  # that disables DOCTYPE declarations (the standard XXE protection).
+  endpoints=skill_gate.hardcoded_endpoints([f for f in config_files if not is_externalized_config(f)])
+  checks.append({'name':'HARDCODED_ENDPOINT_SCAN','status':'FAIL' if endpoints else 'PASS',**({'evidence':endpoints[:12]} if endpoints else {})})
   checks.append(self._check('PROVENANCE',(root/'provenance-manifest.json').exists()))
   for name in ('STATIC_ANALYSIS','DEPENDENCY_CHECK','LICENCE_CHECK','SAST'):
    checks.append({'name':name,'status':'NOT_CONFIGURED','evidence':'enterprise tool adapter required'})
-  if execute_build:
-   build=self.builder.run(root);checks.append({'name':'COMPILE_AND_UNIT_TEST','status':'PASS' if build['status']=='PASS' else 'FAIL','evidence':build})
-  else:checks.append({'name':'COMPILE_AND_UNIT_TEST','status':'NOT_EXECUTED','evidence':'execute_build=false'})
-  status='FAIL' if any(x['status']=='FAIL' for x in checks) else ('PASS_WITH_PENDING_TOOLS' if any(x['status'].startswith('NOT_') for x in checks) else 'PASS');rid=uid();payload={'checks':checks,'project_root':str(root),'plan_id':plan_id}
+  # Build and start the service: "generated" has to mean "runs". ``execute_build``
+  # True/False is an explicit caller choice; the agents pass 'auto', which builds
+  # whenever Maven and Java are installed. See app/services/build_check.py.
+  checks.extend(build_check.checks(root,execute_build))
+  # The code-generation skill's own checklist (gap-checklist.md), run mechanically.
+  # BLOCKING items fail the gate; the rest are named GAPs, which is what the
+  # skill says to do with them. See app/services/skill_gate.py.
+  checks.extend(skill_gate.run(root))
+  status='FAIL' if any(x['status']=='FAIL' for x in checks) else ('PASS_WITH_GAPS' if any(x['status']=='GAP' for x in checks) else ('PASS_WITH_PENDING_TOOLS' if any(x['status'].startswith('NOT_') for x in checks) else 'PASS'));rid=uid();payload={'checks':checks,'project_root':str(root),'plan_id':plan_id}
   with self.repo.connect() as db:db.execute('insert into quality_runs values(?,?,?,?,?,?,?,?)',(rid,job_id,plan_id,status,json.dumps(payload),digest(json.dumps(payload,sort_keys=True,default=str)),now(),str(root)))
   return {'quality_run_id':rid,'status':status,'checks':checks}
  def prepare_differential(self,job_id,plan_id,cases,policy):

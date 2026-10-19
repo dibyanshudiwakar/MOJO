@@ -61,7 +61,6 @@ These roles can be self-assigned — no `GOVERNANCE_ADMIN` needed.
 | `REPOSITORY_INTAKE` | Directly invoke Repository Intake agent |
 | `DORMANCY_ANALYST` | Directly invoke Dormancy Intelligence agent |
 | `DELIVERY_ENGINEER` | Git delivery, delivery requests |
-| `MIGRATION_VIEWER` | Read-only — view jobs and artifacts |
 
 ---
 
@@ -82,8 +81,6 @@ These roles cannot be self-assigned. The first account registered gets `GOVERNAN
 | `RELEASE_MANAGER` | **Approve G5**; rollback jobs; git delivery |
 | `AGENT_REGISTRY_ADMIN` | Register agents/models; manage LLM bindings |
 | `AI_GOVERNANCE_ADMIN` | Register prompts and models in the AI registry |
-| `SOLUTION_ARCHITECT` | Access solution architect review paths |
-| `CHIEF_ARCHITECT` | Access chief architect approval paths |
 | `AUDITOR` | Read audit ledger (`GET /api/v2/audit-ledger`) |
 | `CONNECTOR_ADMIN` | Manage connectors and routing policies |
 | `KNOWLEDGE_CURATOR` | Index knowledge base |
@@ -135,7 +132,7 @@ Use this as a checklist. If a stage fails with a permission error, verify the te
 2. Any user can self-assign at signup:
    ACE_ANALYST, FRAMEWORK_ANALYST, SPECIFICATION_AUTHOR, CODE_GENERATOR,
    TEST_ENGINEER, RCA_ANALYST, REPOSITORY_INTAKE, DORMANCY_ANALYST,
-   DELIVERY_ENGINEER, MIGRATION_VIEWER
+   DELIVERY_ENGINEER
 
 3. Elevated roles require a GOVERNANCE_ADMIN to call:
    POST /api/v2/auth/grant-role

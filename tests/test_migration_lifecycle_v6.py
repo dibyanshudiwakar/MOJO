@@ -23,7 +23,10 @@ def test_mapping_plan_g3_generation_quality_and_diff(tmp_path):
  with pytest.raises(PermissionError):svc.generate_spring(j['id'],plan['plan_id'],tmp_path,'orders','com.example.orders')
  with r.connect() as c:c.execute('insert into approvals(id,job_id,gate,decision,approver_role,approver_identity,comments,conditions,evidence_ids,policy_decision,rollback_pointer,created_at,artifact_bindings) values(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid(),j['id'],'G3','APPROVE','SOLUTION_ARCHITECT','architect','approved','','[]','{}','tag/v1',now(),json.dumps({'plan':plan['content_hash']})))
  generated=svc.generate_spring(j['id'],plan['plan_id'],tmp_path,'orders','com.example.orders');assert Path(generated['manifest']).exists()
- quality=svc.quality_validate(j['id'],plan['plan_id'],generated['project_root'],False);assert quality['status']=='PASS_WITH_PENDING_TOOLS'
+ quality=svc.quality_validate(j['id'],plan['plan_id'],generated['project_root'],False)
+ # springgen's flat tree predates the skill and has no framework-restclient, the
+ # skill's BLOCKING item B4: the gate rejects it for that and nothing else blocking.
+ assert quality['status']=='FAIL' and [c['name'] for c in quality['checks'] if c['status']=='FAIL']==['SKILL_B4']
  dp=svc.prepare_differential(j['id'],plan['plan_id'],[{'id':'C1','input':{'id':1},'headers':{'x':'y'}}],{'masks':['$.headers.date']});assert dp['case_count']==1
  ev=svc.record_differential(j['id'],dp['package_id'],'C1',{'status':200,'body':{'id':1}},{'status':200,'body':{'id':2}},{});assert ev['status']=='VARIANCE';d.cleanup()
 

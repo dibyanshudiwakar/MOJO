@@ -107,7 +107,7 @@ function initRoleSelect(){
    else o.removeAttribute('hidden')})}
  api('/api/v2/auth/roles')
   .then(r=>{list.innerHTML=(r.items||[]).map(opt).join('');sync()})
-  .catch(()=>{list.innerHTML=opt('MIGRATION_VIEWER');sync()});
+  .catch(()=>{list.innerHTML=opt('ACE_ANALYST');sync()});
  trigger.onclick=e=>{
   if(e.target.classList.contains('rsel-chip-x')){
    const val=e.target.dataset.val;
@@ -1761,7 +1761,13 @@ function renderArtefact(art){
   if(art.quality){
    const qs=art.quality.status;const qcls=qs==='PASS'?'success':qs==='FAIL'?'error':'warning';
    html+=`<div class="artefact-sub">Quality Gate: <span class="badge badge-${qcls}">${esc(qs)}</span></div>`;
-   if(art.quality.checks){html+=`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${art.quality.checks.map(c=>`<tr><td>${esc(c.name)}</td><td><span class="badge badge-${c.status==='PASS'?'success':c.status==='FAIL'?'error':'neutral'}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div>`}}}
+   // A GAP is the skill's own word for a non-blocking open item: it is listed with
+   // the checklist item it comes from, what was found, and how to close it.
+   const qbadge=s=>s==='PASS'?'success':s==='FAIL'?'error':s==='GAP'?'warning':'neutral';
+   const qdetail=c=>{const ev=(c.evidence&&c.evidence.length)?(Array.isArray(c.evidence)?c.evidence:[JSON.stringify(c.evidence)]):[];
+    if(!ev.length&&!c.remediation&&!c.skill_ref)return '';
+    return `<div style="font-size:11px;color:var(--text-3)">${c.skill_ref?esc(c.skill_ref):''}</div>${ev.slice(0,4).map(e=>`<div style="font-size:11px;color:var(--text-2)">${esc(String(e))}</div>`).join('')}${c.remediation?`<div style="font-size:11px;color:var(--text-2)"><b>Fix:</b> ${esc(c.remediation)}</div>`:''}`};
+   if(art.quality.checks){html+=`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${art.quality.checks.map(c=>`<tr><td>${esc(c.name)}${qdetail(c)}</td><td><span class="badge badge-${qbadge(c.status)}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div>`}}}
  // Variances
  if(art.format==='variances'&&art.items&&art.items.length){
   html+=`<div class="table-wrap"><table><thead><tr><th>Path</th><th>Kind</th><th>Severity</th><th>Expected</th><th>Actual</th><th>Disposition</th></tr></thead><tbody>${art.items.map(v=>`<tr><td><code style="font-size:11px">${esc(v.path)}</code></td><td>${esc(v.kind)}</td><td><span class="badge badge-${v.severity==='HIGH'?'error':v.severity==='MEDIUM'?'warning':'success'}">${esc(v.severity)}</span></td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.expected)}</td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.actual)}</td><td>${esc(v.disposition)}</td></tr>`).join('')}</tbody></table></div>`}
