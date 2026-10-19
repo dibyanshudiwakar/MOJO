@@ -258,7 +258,7 @@ def test_auto_mode_grants_no_gate_approval(repo, job, ace_repo, dispatch):
 
 def test_a_severe_unsure_question_stays_open_and_the_rest_are_decided(
         repo, job, ace_repo, dispatch, analysis_with_questions, model):
-    """The rule end to end, and that asking does not hold the step."""
+    """The rule end to end, and that the step waits for the question put to a person."""
     def suggest(payload):
         qs = payload.get('questions') or []
         return {'suggestions': [
@@ -271,10 +271,22 @@ def test_a_severe_unsure_question_stays_open_and_the_rest_are_decided(
     model.overrides['agent/clarification/suggested-answers'] = suggest
     dispatch(job['id'], 'repository-intake', {'path': str(ace_repo)})
     outcome = dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
-    assert outcome['status'] == 'COMPLETED', 'a question put to a person does not hold the step'
+    # The run finished its artefact, but a question was put to a person, so the
+    # step is not finished: it parks, and completes when the question is
+    # answered -- without re-running an agent whose artefact exists.
+    assert outcome['status'] == 'CLARIFICATION_REQUIRED' and outcome['artefact_complete'] is True
+    assert repo.one('select status from agent_runs where id=?', (outcome['run_id'],))['status'] == 'COMPLETED'
     rows = repo.rows('select status,answered_by,suggestion_severity from clarifications'
                      ' where job_id=? order by rowid', (job['id'],))
     assert [r['status'] for r in rows][0] == 'OPEN'
     assert {r['status'] for r in rows[1:]} == {'ANSWERED'}
     assert rows[0]['suggestion_severity'] == 'HIGH' and rows[0]['answered_by'] == ''
     assert {r['answered_by'] for r in rows[1:]} == {automode.ACTOR}
+
+
+def test_when_every_question_is_decided_the_step_is_not_held(repo, job, ace_repo, dispatch,
+                                                            analysis_with_questions):
+    dispatch(job['id'], 'repository-intake', {'path': str(ace_repo)})
+    outcome = dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
+    assert outcome['clarification_ids']
+    assert outcome['status'] == 'COMPLETED' and outcome['artefact_complete'] is False

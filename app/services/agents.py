@@ -365,12 +365,27 @@ class AgentRegistry:
      _log_warn('%d clarification(s) left for you — high severity and not confidently answered' % (len(opened)-taken-decided))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
+  # An agent that finished its artefact but left questions for a person is not
+  # finished as far as the pipeline is concerned. Auto mode lets it produce the
+  # artefact without waiting, but the questions put to a person are real, and a
+  # step showing COMPLETED with 59 of them open said otherwise. So the *step*
+  # parks (CLARIFICATION_REQUIRED) while the *run* stays COMPLETED, and the
+  # outcome says the artefact is done: when the last question is answered the
+  # step completes with what it already produced rather than re-running the
+  # agent, which for ace-analysis is half an hour for an artefact that exists.
+  still_open=self.repo.one("select count(*) n from clarifications where run_id=? and status='OPEN'",(run['id'],))['n'] if opened else 0
+  outcome_status=result.status
+  artefact_complete=False
+  if still_open and not automode.blocks(result.status) and result.status=='COMPLETED':
+   outcome_status='CLARIFICATION_REQUIRED'
+   artefact_complete=True
+   _log_warn('Waiting on %d clarification(s) — the artefact is complete and the step finishes when they are answered' % still_open)
   _log_info('Run completed: %s — %s' % (run['id'][:12], result.status))
   detail={'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence_ids':evidence_ids,'clarification_ids':opened,'requested_tools':sorted(impl.TOOLS),'params_hash':context.params_hash,'reasoning':result.reasoning,'channel':channel,'contract_hash':a['contract_hash'],'effective_model_alias':effective_alias,'binding_source':binding_source,'skill':skill_prov}
   with self.repo.connect() as c:
    self.repo.event(c,job_id,identity,'AGENT_RUN_COMPLETED',details=detail,correlation=run['correlation_id'])
    self.ledger.append(job_id,identity,'AGENT_RUN_COMPLETED',detail,cursor=c)
-  return {'run_id':run['id'],'agent_id':agent_id,'version':version,'status':result.status,'outputs':result.outputs,'evidence':registered,'clarification_ids':opened,'next_state':result.next_state,'commands':list(result.commands),'metrics':result.metrics,'reasoning':result.reasoning,'correlation_id':run['correlation_id'],'error':result.error}
+  return {'run_id':run['id'],'agent_id':agent_id,'version':version,'status':outcome_status,'artefact_complete':artefact_complete,'outputs':result.outputs,'evidence':registered,'clarification_ids':opened,'next_state':result.next_state,'commands':list(result.commands),'metrics':result.metrics,'reasoning':result.reasoning,'correlation_id':run['correlation_id'],'error':result.error}
  def health(self):
   rows=self.repo.rows('select agent_id,version,enabled,status,last_health_status,last_health_at from agent_registry order by agent_id')
   return {'status':'UP' if all(x['enabled'] and x['status']=='APPROVED' for x in rows) else 'DEGRADED','agents':rows}

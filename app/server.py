@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
 from app.service import FactoryService
+from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
 from app.services.specification import SpecificationService
 from app.services.differential import DifferentialService
@@ -926,6 +927,9 @@ class H(BaseHTTPRequestHandler):
                 with repo.connect() as c:
                     n=c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",(d['answer'],now(),principal.identity,m.group(1))).rowcount
                 if not n: raise ValueError('clarification_not_open')
+                # Other open copies of this very question in the job are answered
+                # by this: they close, rather than asking for the same answer again.
+                settle_siblings(repo,item,d['answer'])
                 ledger.append(item['job_id'],principal.identity,'CLARIFICATION_ANSWERED',{'clarification_id':m.group(1),'answer_hash':digest(d['answer'])})
                 # A step parked at WAITING_CLARIFICATION resumes as soon as its
                 # own run's clarifications are all answered -- independent of

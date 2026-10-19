@@ -1229,6 +1229,19 @@ class PipelineService:
         if self._halt_reason(self.repo.rows('select * from pipeline_steps where pipeline_id=?', (row['pipeline_id'],))) == HELD:
             self._set_status(row['pipeline_id'], HELD)
 
+    def _complete_parked(self, step_id):
+        """Complete a step that parked on questions after finishing its artefact."""
+        with self.repo.connect() as c:
+            row = c.execute('select outputs from pipeline_steps where id=?', (step_id,)).fetchone()
+            outputs = {**json.loads((row['outputs'] if row else '') or '{}'),
+                       '_agent_status': 'COMPLETED', '_artefact_complete': False}
+            written = c.execute(
+                "update pipeline_steps set status='COMPLETED',completed_at=?,outputs=?,error='',updated_at=? "
+                "where id=? and status='WAITING_CLARIFICATION'",
+                (now(), json.dumps(outputs, default=str), now(), step_id)).rowcount
+        if written:
+            self._try_lifecycle_transition(step_id)
+
     def resume_clarification_steps(self, job_id, workflow):
         """Un-park every step whose own clarifications are now all answered.
 
@@ -1259,8 +1272,14 @@ class PipelineService:
                 "select count(*) n from clarifications where run_id=? and status='OPEN'", (run_id,))
             if remaining and remaining['n']:
                 continue
-            with self.repo.connect() as c:
-                self._requeue(c, step['id'])
+            if json.loads(step['outputs'] or '{}').get('_artefact_complete'):
+                # The agent had already produced its artefact and only the
+                # questions were outstanding, so re-running it would repeat
+                # work that exists. Finish the step with what it produced.
+                self._complete_parked(step['id'])
+            else:
+                with self.repo.connect() as c:
+                    self._requeue(c, step['id'])
             resumed = True
         if resumed:
             self.advance(pl['id'], workflow)

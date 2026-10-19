@@ -395,6 +395,7 @@ class WorkerLoop:
         # underscore so it can never collide with a real output key.
         return {**result.get('outputs', {}), '_run_id': result.get('run_id'),
                 '_agent_status': result.get('status'), '_metrics': result.get('metrics'),
+                '_artefact_complete': bool(result.get('artefact_complete')),
                 '_evidence_ids': evidence_ids,
                 '_clarification_ids': result.get('clarification_ids')}
 

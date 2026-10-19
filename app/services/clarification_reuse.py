@@ -90,6 +90,27 @@ class PriorAnswers:
         return None
 
 
+def settle_siblings(repo, item, answer):
+    """Close the other open copies of a question that has just been answered.
+
+    Within the same job and stage, a copy with the same text is the same
+    question; leaving it open asks for the answer a second time. Exact text
+    only -- this runs on a person's answer, and closing a different question
+    because it reads similarly would be worse than leaving it for them.
+    """
+    from app.repository import now
+    wanted = normalise(item['question'])
+    ids = [r['id'] for r in repo.rows(
+        "select id,question from clarifications where job_id=? and stage=? and status='OPEN' and id<>?",
+        (item['job_id'], item['stage'], item['id'])) if normalise(r['question']) == wanted]
+    if ids:
+        with repo.connect() as c:
+            for cid in ids:
+                c.execute("update clarifications set status='DUPLICATE',answer=?,answered_at=?,answered_by=?,reused_from=?"
+                          " where id=? and status='OPEN'", (answer, now(), ACTOR, item['id'], cid))
+    return len(ids)
+
+
 def origin(row):
     """The first answer in a chain of reuses."""
     return row.get('reused_from') or row['id']
