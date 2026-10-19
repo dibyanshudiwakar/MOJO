@@ -151,8 +151,22 @@ class AccountService:
                 raise ValueError('unsupported_role:' + role)
         return name, email, password, roles
 
+    @staticmethod
+    def requestable_roles():
+        """Approver roles a person may ask for at signup; an administrator decides."""
+        return list(GATE_APPROVER_ROLES)
+
+    def _requested(self, d):
+        raw = d.get('requested_roles') or []
+        wanted = list(dict.fromkeys(str(r).strip().upper() for r in raw if str(r).strip()))
+        for role in wanted:
+            if role not in GATE_APPROVER_ROLES:
+                raise ValueError('unsupported_role:' + role)
+        return wanted
+
     def sign_up(self, d):
         name, email, password, roles = self._validate(d)
+        requested = self._requested(d)
         if self.repo.one('select id from users where email=?', (email,)):
             raise ValueError('email_already_registered')
         first = not self.repo.one('select id from users limit 1')
@@ -168,6 +182,13 @@ class AccountService:
                 'password_iterations': rounds, 'role': primary, 'granted_roles': ','.join(all_roles),
                 'status': 'ACTIVE', 'failed_attempts': 0, 'locked_until': '',
                 'created_at': ts, 'updated_at': ts, 'last_login_at': ''})
+            # A request, not a grant: nothing here gives the account approval
+            # authority until an administrator decides it (decide_request).
+            for role in requested:
+                if role not in all_roles:
+                    self.repo.insert(c, 'role_requests', {
+                        'id': uid(), 'user_id': i, 'email': email, 'role': role,
+                        'status': 'PENDING', 'requested_at': ts, 'decided_by': '', 'decided_at': ''})
         return self.public(self.repo.one('select * from users where id=?', (i,)))
 
     # -- authentication ---------------------------------------------------
@@ -251,3 +272,57 @@ class AccountService:
         with self.repo.connect() as c:
             c.execute('update users set granted_roles=?,updated_at=? where id=?', (','.join(roles), now(), user['id']))
         return self.public(self.repo.one('select * from users where id=?', (user['id'],)))
+
+    # -- administration ---------------------------------------------------
+    @staticmethod
+    def grantable_roles():
+        return list(dict.fromkeys(SELF_SERVICE_ROLES + ELEVATED_ROLES))
+
+    @staticmethod
+    def _require_admin(actor_roles):
+        if 'GOVERNANCE_ADMIN' not in set(actor_roles or ()):
+            raise PermissionError('required_role_missing:GOVERNANCE_ADMIN')
+
+    def access_overview(self, actor_roles):
+        """Accounts with their roles, and the open requests for approver roles."""
+        self._require_admin(actor_roles)
+        users = [{'name': u['name'], 'email': u['email'], 'status': u['status'],
+                  'roles': list(self.roles_of(u))} for u in self.repo.rows('select * from users order by email')]
+        requests = self.repo.rows("select id,email,role,requested_at from role_requests "
+                                  "where status='PENDING' order by requested_at")
+        return {'users': users, 'requests': requests, 'grantable': self.grantable_roles(),
+                'gate_roles': list(GATE_APPROVER_ROLES)}
+
+    def revoke_role(self, actor_roles, actor, email, role):
+        self._require_admin(actor_roles)
+        role = str(role or '').strip().upper()
+        user = self.by_email(email)
+        if not user:
+            raise ValueError('account_not_found')
+        roles = [r for r in self.roles_of(user) if r != role]
+        if role == 'GOVERNANCE_ADMIN':
+            others = [u for u in self.repo.rows('select * from users') if u['id'] != user['id']
+                      and 'GOVERNANCE_ADMIN' in self.roles_of(u) and u['status'] == 'ACTIVE']
+            if not others:
+                raise ValueError('cannot_remove_the_last_governance_admin')
+        primary = user['role'] if user['role'] != role else (roles[0] if roles else '')
+        with self.repo.connect() as c:
+            c.execute('update users set granted_roles=?,role=?,updated_at=? where id=?',
+                      (','.join(roles), primary, now(), user['id']))
+        return self.public(self.repo.one('select * from users where id=?', (user['id'],)))
+
+    def decide_request(self, actor_roles, actor, request_id, decision):
+        """Approve (grants the role) or reject a signup request for an approver role."""
+        self._require_admin(actor_roles)
+        decision = str(decision or '').strip().upper()
+        if decision not in ('APPROVE', 'REJECT'):
+            raise ValueError('decision_must_be_APPROVE_or_REJECT')
+        req = self.repo.one("select * from role_requests where id=? and status='PENDING'", (request_id,))
+        if not req:
+            raise ValueError('request_not_found_or_already_decided')
+        if decision == 'APPROVE':
+            self.grant_role(actor_roles, req['email'], req['role'])
+        with self.repo.connect() as c:
+            c.execute('update role_requests set status=?,decided_by=?,decided_at=? where id=?',
+                      ('APPROVED' if decision == 'APPROVE' else 'REJECTED', actor, now(), request_id))
+        return {'id': request_id, 'email': req['email'], 'role': req['role'], 'decision': decision}

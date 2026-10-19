@@ -1299,3 +1299,15 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 /* Answered clarifications fold away so they stop competing with what is open. */
 .clarif-answered-fold>summary{cursor:pointer;color:var(--text-2);font-size:12px;padding:8px 0;list-style:revert}
 .clarif-answered-fold[open]>summary{margin-bottom:8px}
+
+/* Signup: gate approver roles are requests, not grants. */
+.rsel-divider{padding:8px 12px 4px;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3,#667085);border-top:1px solid var(--border,#e5e7eb);margin-top:4px}
+.rsel-req{font-style:normal;font-size:11px;color:var(--text-3,#667085);margin-left:6px}
+.chip-gate{background:#fff4e5;border-color:#f5c37a}
+
+/* Pending approvals the signed-in account cannot act on. */
+.withheld-card{border-color:rgba(245,158,11,.35)}
+.withheld-card .card-head{background:rgba(245,158,11,.06)}
+.withheld-list{display:flex;flex-direction:column}
+.withheld-row{display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border,#e5e7eb);font-size:13px}
+.withheld-count{color:var(--text-2);min-width:84px}

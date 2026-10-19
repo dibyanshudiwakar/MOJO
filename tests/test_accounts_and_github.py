@@ -324,3 +324,75 @@ def test_startup_cleanup_strips_retired_roles_from_stored_accounts(svc):
     user = accounts.by_email('ada@example.com')
     assert accounts.roles_of(user) == ('ACE_ANALYST',) and user['role'] == 'ACE_ANALYST'
     assert accounts.prune_retired_roles() == 0
+
+
+# -- approver roles are requested at signup and decided by an administrator --
+
+def _admin_and_user(accounts):
+    admin = accounts.sign_up({**GOOD, 'email': 'root@example.com', 'name': 'Root Admin'})   # first = bootstrap
+    user = accounts.sign_up({**GOOD, 'email': 'ben@example.com', 'name': 'Ben Reviewer',
+                             'requested_roles': ['QA_LEAD', 'PRODUCT_OWNER']})
+    return admin, user
+
+
+def test_requesting_an_approver_role_at_signup_grants_nothing(svc):
+    accounts, repo = svc
+    _, user = _admin_and_user(accounts)
+    assert user['roles'] == ['ACE_ANALYST'], 'a request is not a grant'
+    pending = repo.rows("select role from role_requests where email='ben@example.com' and status='PENDING'")
+    assert {r['role'] for r in pending} == {'QA_LEAD', 'PRODUCT_OWNER'}
+
+
+def test_only_gate_approver_roles_can_be_requested(svc):
+    accounts, _ = svc
+    for role in ('GOVERNANCE_ADMIN', 'NOT_A_ROLE'):
+        with pytest.raises(ValueError, match='unsupported_role'):
+            accounts.sign_up({**GOOD, 'email': role.lower() + '@example.com', 'requested_roles': [role]})
+
+
+def test_the_signup_page_lists_both_kinds_of_role():
+    assert 'QA_LEAD' in AccountService.requestable_roles()
+    assert not set(AccountService.requestable_roles()) & set(AccountService.assignable_roles())
+
+
+def test_an_administrator_approves_a_request_and_the_role_is_granted(svc):
+    accounts, repo = svc
+    _admin_and_user(accounts)
+    overview = accounts.access_overview(('GOVERNANCE_ADMIN',))
+    req = next(r for r in overview['requests'] if r['role'] == 'QA_LEAD')
+
+    out = accounts.decide_request(('GOVERNANCE_ADMIN',), 'root@example.com', req['id'], 'APPROVE')
+
+    assert out['decision'] == 'APPROVE'
+    assert 'QA_LEAD' in accounts.roles_of(accounts.by_email('ben@example.com'))
+    assert 'PRODUCT_OWNER' not in accounts.roles_of(accounts.by_email('ben@example.com'))
+    with pytest.raises(ValueError, match='already_decided'):
+        accounts.decide_request(('GOVERNANCE_ADMIN',), 'root@example.com', req['id'], 'APPROVE')
+
+
+def test_a_rejected_request_grants_nothing(svc):
+    accounts, _ = svc
+    _admin_and_user(accounts)
+    req = accounts.access_overview(('GOVERNANCE_ADMIN',))['requests'][0]
+    accounts.decide_request(('GOVERNANCE_ADMIN',), 'root@example.com', req['id'], 'REJECT')
+    assert req['role'] not in accounts.roles_of(accounts.by_email('ben@example.com'))
+
+
+def test_only_a_governance_admin_can_see_decide_or_revoke(svc):
+    accounts, _ = svc
+    _admin_and_user(accounts)
+    for call in (lambda: accounts.access_overview(('ACE_ANALYST',)),
+                 lambda: accounts.decide_request(('ACE_ANALYST',), 'x', 'id', 'APPROVE'),
+                 lambda: accounts.revoke_role(('ACE_ANALYST',), 'x', 'ben@example.com', 'ACE_ANALYST')):
+        with pytest.raises(PermissionError, match='required_role_missing:GOVERNANCE_ADMIN'):
+            call()
+
+
+def test_revoking_a_role_and_the_last_administrator_guard(svc):
+    accounts, _ = svc
+    _admin_and_user(accounts)
+    accounts.grant_role(('GOVERNANCE_ADMIN',), 'ben@example.com', 'QA_LEAD')
+    out = accounts.revoke_role(('GOVERNANCE_ADMIN',), 'root@example.com', 'ben@example.com', 'QA_LEAD')
+    assert 'QA_LEAD' not in out['roles']
+    with pytest.raises(ValueError, match='last_governance_admin'):
+        accounts.revoke_role(('GOVERNANCE_ADMIN',), 'root@example.com', 'root@example.com', 'GOVERNANCE_ADMIN')

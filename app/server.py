@@ -414,7 +414,7 @@ class H(BaseHTTPRequestHandler):
         u=urlparse(self.path); p=u.path; q=parse_qs(u.query)
         if p=='/api/v2/health': return self.sendj(200,{'status':'UP','version':'7.2'})
         # The registration form needs its role options before anyone has a token.
-        if p=='/api/v2/auth/roles': return self.sendj(200,{'items':accounts.assignable_roles()})
+        if p=='/api/v2/auth/roles': return self.sendj(200,{'items':accounts.assignable_roles(),'approver_items':accounts.requestable_roles()})
         # Every other API read is authenticated. Governance data (jobs,
         # approvals, evidence, the audit ledger, specifications, the prompt
         # registry, connector profiles) was previously world-readable.
@@ -425,6 +425,9 @@ class H(BaseHTTPRequestHandler):
                 return self.sendj(403,{'error':'required_role_missing:AUDITOR|GOVERNANCE_ADMIN'})
             if p in ('/api/v2/connectors','/api/v2/connector-operations','/api/v2/routing-policies') and 'CONNECTOR_ADMIN' not in principal.roles:
                 return self.sendj(403,{'error':'required_role_missing:CONNECTOR_ADMIN'})
+        if p=='/api/v2/admin/access':
+            pr=self.principal()
+            return self.sendj(200,accounts.access_overview(pr.roles))
         if p=='/api/v2/auth/me':
             pr=self.principal();user=self.current_user(pr)
             if not user: return self.stale_session()
@@ -618,6 +621,16 @@ class H(BaseHTTPRequestHandler):
                 out=accounts.grant_role(pr.roles,d.get('email'),d.get('role'))
                 ledger.append('',pr.identity,'ACCOUNT_ROLE_GRANTED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
                 return self.sendj(200,{'user':out})
+            if p=='/api/v2/auth/revoke-role':
+                pr=self.principal()
+                out=accounts.revoke_role(pr.roles,pr.identity,d.get('email'),d.get('role'))
+                ledger.append('',pr.identity,'ACCOUNT_ROLE_REVOKED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
+                return self.sendj(200,{'user':out})
+            if p=='/api/v2/auth/role-requests/decide':
+                pr=self.principal()
+                out=accounts.decide_request(pr.roles,pr.identity,d.get('id'),d.get('decision'))
+                ledger.append('',pr.identity,'ACCOUNT_ROLE_REQUEST_DECIDED',out)
+                return self.sendj(200,out)
             if p=='/api/v2/integrations/github':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()
