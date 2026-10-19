@@ -78,3 +78,46 @@ def test_a_truncated_reply_says_where_the_token_budget_went():
     message = str(raised.value)
     assert 'output_tokens=32768' in message
     assert 'thinking:5000' in message and 'text:%d' % len(DOCUMENT) in message
+
+
+# ---- reasoning effort ----------------------------------------------------------------------
+
+def test_effort_defaults_to_the_aliases_level_and_can_be_lowered_per_call():
+    """The coding alias runs at xhigh; a file listing does not need it."""
+    adapter = CvscodeClaudeAdapter(alias='coding')
+    assert adapter._request('t', {})['output_config'] == {'effort': 'xhigh'}
+    assert adapter._request('t', {}, effort='low')['output_config'] == {'effort': 'low'}
+
+
+def test_a_model_without_an_effort_parameter_never_gets_one():
+    """Haiku errors on output_config.effort, so asking for one must be ignored."""
+    adapter = CvscodeClaudeAdapter(alias='reasoning-small')
+    assert adapter.effort is None
+    assert 'output_config' not in adapter._request('t', {}, effort='low')
+
+
+def test_the_effort_asked_for_reaches_the_request():
+    sent = {}
+    adapter = CvscodeClaudeAdapter(alias='coding')
+    reply = SimpleNamespace(stop_reason='end_turn', content=[SimpleNamespace(type='text', text='{"a": 1}')])
+
+    def create(**kwargs):
+        sent.update(kwargs)
+        return reply
+
+    adapter._client = lambda: SimpleNamespace(messages=SimpleNamespace(create=create))
+    adapter.invoke('t', {}, effort='medium')
+    assert sent['output_config'] == {'effort': 'medium'}
+
+
+def test_an_empty_thinking_block_is_reported_as_reasoning_not_as_none():
+    """`thinking:0` was misread as "the model did not reason". It means the text is omitted."""
+    reply = SimpleNamespace(
+        stop_reason='max_tokens', usage=SimpleNamespace(output_tokens=32768),
+        content=[SimpleNamespace(type='thinking', thinking='', text=''),
+                 SimpleNamespace(type='text', text=DOCUMENT)])
+    adapter = CvscodeClaudeAdapter()
+    adapter._client = lambda: SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: reply))
+    with pytest.raises(RuntimeError) as raised:
+        adapter.invoke('t', {})
+    assert 'reasoned before answering' in str(raised.value)

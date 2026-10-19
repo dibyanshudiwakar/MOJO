@@ -335,8 +335,21 @@ def _diagnose(reason, failures, budget):
             'and run the step again.]' % (reason, len(failures)))
 
 
+#: How hard the model reasons, for the prompts where its answer is a structured
+#: transformation of the input rather than open-ended analysis.
+#:
+#: Reasoning is billed against ``max_tokens`` but is not in the reply. Measured
+#: against the gateway on a small file-list task: ``xhigh`` 3,615 output tokens
+#: for 4,269 visible characters, ``medium`` 2,754 for 5,222, ``low`` 2,197 for
+#: 5,249 (and no reasoning block at all). On the real project layout, 15,096
+#: visible characters spent all 32,768 tokens at the ``coding`` alias's ``xhigh``
+#: and the reply was cut off. Analysis and code authoring keep the alias default.
+LISTING_EFFORT = 'low'
+STRUCTURED_EFFORT = 'medium'
+
+
 def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
-            attempts=ATTEMPTS, validator=None):
+            attempts=ATTEMPTS, validator=None, effort=None):
     """The artefact, authored by the model. No substitute, no silent degradation.
 
     Returns ``(artefact, provenance)``. ``provenance['attempts']`` says how many
@@ -395,7 +408,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         # The correction rides in the payload rather than the template: the
         # template is the approved prompt and must not be rewritten per attempt.
         request = dict(cleared, _correction=corrections[-1]) if corrections else cleared
-        answer, provenance = gateway.reason(context, prompt_name, request, skill=skill)
+        answer, provenance = gateway.reason(context, prompt_name, request, skill=skill, effort=effort)
         provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned)})
         if corrections:
             provenance['corrections'] = list(corrections)
@@ -444,7 +457,7 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
 
 
 def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
-                 attempts=ATTEMPTS, validator=None):
+                 attempts=ATTEMPTS, validator=None, effort=None):
     """One request per item, all of them or none.
 
     This is how reading source stays inside the gateway's response limit: a
@@ -478,7 +491,7 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
             raise StepCancelled(prompt_name, index, len(pending))
         artefact, provenance = produce(context, prompt_name, payload,
                                        schema_name=schema_name, skill=skill,
-                                       attempts=attempts,
+                                       attempts=attempts, effort=effort,
                                        validator=(lambda a, k=key: validator(k, a)) if validator else None)
         produced[key] = artefact
     if not produced:

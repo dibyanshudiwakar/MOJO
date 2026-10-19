@@ -103,23 +103,26 @@ def test_the_switch_accepts_the_obvious_falsey_spellings(monkeypatch, value):
     assert automode.enabled() is False
 
 
-def test_a_question_is_put_to_a_person_only_when_severe_and_unsure():
-    """HIGH severity AND confidence below HIGH. Nothing else reaches a person."""
-    assert automode.needs_person('HIGH', 'LOW') is True
-    assert automode.needs_person('HIGH', 'MEDIUM') is True
-    assert automode.needs_person('high', '') is True
-    # A confident answer to a severe question is still the model's to make.
-    assert automode.needs_person('HIGH', 'HIGH') is False
-    # An unsure answer to a low-stakes one is not worth stopping anyone for.
-    for severity in ('MEDIUM', 'LOW', '', None):
+def test_a_question_is_put_to_a_person_only_when_critical_and_unsure():
+    """CRITICAL severity AND confidence below HIGH. Nothing else reaches a person."""
+    assert automode.needs_person('CRITICAL', 'LOW') is True
+    assert automode.needs_person('CRITICAL', 'MEDIUM') is True
+    assert automode.needs_person('critical', '') is True
+    # A confident answer to a critical question is still the model's to make.
+    assert automode.needs_person('CRITICAL', 'HIGH') is False
+    # An unsure answer to a lower-stakes one is not worth stopping anyone for --
+    # and that includes HIGH: at HIGH the model rated 59 of 104 questions from
+    # one analysis for a person.
+    for severity in ('HIGH', 'MEDIUM', 'LOW', '', None):
         for confidence in ('HIGH', 'MEDIUM', 'LOW', ''):
             assert automode.needs_person(severity, confidence) is False
 
 
 def test_accepts_follows_the_same_rule_and_rejects_nonsense():
     assert automode.accepts('LOW', 'MEDIUM') is True
-    assert automode.accepts('LOW', 'HIGH') is False
-    assert automode.accepts('HIGH', 'HIGH') is True
+    assert automode.accepts('LOW', 'HIGH') is True, 'HIGH severity is decided, not asked'
+    assert automode.accepts('LOW', 'CRITICAL') is False
+    assert automode.accepts('HIGH', 'CRITICAL') is True
     assert automode.accepts('NONSENSE', 'LOW') is False, 'a malformed answer is not a decision'
 
 
@@ -265,7 +268,7 @@ def test_a_severe_unsure_question_stays_open_and_the_rest_are_decided(
             {'question': q.get('question', ''), 'suggested_answer': 'needs the live URL',
              # The first question is the severe, unsure one.
              'confidence': 'LOW' if i == 0 else 'HIGH',
-             'severity': 'HIGH' if i == 0 else 'LOW',
+             'severity': 'CRITICAL' if i == 0 else 'LOW',
              'caveat': 'c'} for i, q in enumerate(qs)]}
 
     model.overrides['agent/clarification/suggested-answers'] = suggest
@@ -280,7 +283,7 @@ def test_a_severe_unsure_question_stays_open_and_the_rest_are_decided(
                      ' where job_id=? order by rowid', (job['id'],))
     assert [r['status'] for r in rows][0] == 'OPEN'
     assert {r['status'] for r in rows[1:]} == {'ANSWERED'}
-    assert rows[0]['suggestion_severity'] == 'HIGH' and rows[0]['answered_by'] == ''
+    assert rows[0]['suggestion_severity'] == 'CRITICAL' and rows[0]['answered_by'] == ''
     assert {r['answered_by'] for r in rows[1:]} == {automode.ACTOR}
 
 
@@ -290,3 +293,19 @@ def test_when_every_question_is_decided_the_step_is_not_held(repo, job, ace_repo
     outcome = dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
     assert outcome['clarification_ids']
     assert outcome['status'] == 'COMPLETED' and outcome['artefact_complete'] is False
+
+
+def test_a_high_severity_unsure_question_is_decided_not_asked(
+        repo, job, ace_repo, dispatch, analysis_with_questions, model):
+    """HIGH is below the line: the model decides it and the decision is recorded."""
+    def suggest(payload):
+        return {'suggestions': [
+            {'question': q.get('question', ''), 'suggested_answer': 'decided', 'confidence': 'LOW',
+             'severity': 'HIGH', 'caveat': 'c'} for q in payload.get('questions') or []]}
+
+    model.overrides['agent/clarification/suggested-answers'] = suggest
+    dispatch(job['id'], 'repository-intake', {'path': str(ace_repo)})
+    outcome = dispatch(job['id'], 'ace-analysis', {'path': str(ace_repo)})
+    rows = repo.rows('select status from clarifications where job_id=?', (job['id'],))
+    assert rows and {r['status'] for r in rows} == {'ANSWERED'}
+    assert outcome['status'] == 'COMPLETED'

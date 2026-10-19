@@ -54,7 +54,7 @@ def test_an_unmappable_construct_stops_at_the_catalogue(repo, job, dispatch, app
     assert result.outputs['mapping']
     assert result.metrics['unsupported_count'] == 1
     assert result.evidence == ()
-    assert any(x['severity'] == 'HIGH' for x in result.outputs['risk_register'])
+    assert any(x['severity'] == 'CRITICAL' for x in result.outputs['risk_register'])
 
 
 # ---- mapped in bounded groups --------------------------------------------------------------
@@ -152,8 +152,8 @@ def test_a_gap_rated_below_high_is_planned_around_and_recorded(repo, job, mixed_
                                     (result.outputs['mapping'],))])
 
 
-def test_a_high_gap_still_stops_the_plan_to_be_asked(repo, job, mixed_inputs, model):
-    _gap_severity(model, 'HIGH')
+def test_a_critical_gap_still_stops_the_plan_to_be_asked(repo, job, mixed_inputs, model):
+    _gap_severity(model, 'CRITICAL')
     result = PlanningAgent(repo).run(job['id'], params=mixed_inputs)
     assert result.status == 'CLARIFICATION_REQUIRED' and result.outputs['plan'] == ''
     assert result.metrics['accepted_risk_count'] == 0
@@ -168,7 +168,7 @@ def test_with_auto_mode_off_even_a_minor_gap_stops_the_plan(repo, job, mixed_inp
 
 
 def test_a_gap_with_no_risk_rating_is_treated_as_high():
-    """The service defaults an unrated risk to HIGH, so this must too."""
+    """An unrated gap is the worst case, so it must stop the plan."""
     mapped = {'unsupported': [{'source_reference': 'M#odd'}], 'risks': []}
     out, accepted = PlanningAgent._accept_minor_gaps(mapped)
     assert accepted == 0 and 'status' not in out['unsupported'][0]
@@ -177,7 +177,7 @@ def test_a_gap_with_no_risk_rating_is_treated_as_high():
 def test_the_worst_risk_for_a_construct_decides():
     mapped = {'unsupported': [{'source_reference': 'M#odd'}],
               'risks': [{'source_reference': 'M#odd', 'severity': 'LOW'},
-                        {'source_reference': 'M#odd', 'severity': 'HIGH'}]}
+                        {'source_reference': 'M#odd', 'severity': 'CRITICAL'}]}
     assert PlanningAgent._accept_minor_gaps(mapped)[1] == 0
 
 
@@ -197,10 +197,10 @@ def test_a_risk_is_derived_for_each_unsupported_entry():
     assert risk['category'] == 'UNSUPPORTED_MAPPING' and risk['status'] == 'OPEN'
 
 
-def test_an_unrated_unsupported_entry_defaults_to_high():
-    """HIGH is the rating that stops the plan, so a missing one fails safe."""
+def test_an_unrated_unsupported_entry_defaults_to_critical():
+    """CRITICAL is the rating that stops the plan, so a missing one fails safe."""
     merged = PlanningAgent._merge([{'unsupported': [{'source_reference': 'M#odd'}]}])
-    assert merged['risks'][0]['severity'] == 'HIGH'
+    assert merged['risks'][0]['severity'] == 'CRITICAL'
 
 
 def test_a_model_supplied_risk_is_not_duplicated_by_the_derived_one():
@@ -218,3 +218,10 @@ def test_the_current_prompt_does_not_ask_for_a_risk_register():
     latest = max((p for p in prompts if p['name'] == 'agent/planning/mapping-catalogue'),
                  key=lambda p: int(p['version']))
     assert '\"risks\"' not in latest['template'].split('Return JSON:')[1]
+
+
+def test_a_high_gap_is_planned_around_not_asked(repo, job, mixed_inputs, model):
+    """HIGH is below the line, the same as for questions."""
+    _gap_severity(model, 'HIGH')
+    result = PlanningAgent(repo).run(job['id'], params=mixed_inputs)
+    assert result.status == 'COMPLETED' and result.metrics['accepted_risk_count'] == 1

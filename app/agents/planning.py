@@ -22,9 +22,20 @@ approval cites is therefore the approver's act, not the planner's -- see
 import json
 import yaml
 from app.agents.base import AgentResult, BaseAgent, Clarification
-from app.agents.artefact import produce_many
+from app.agents.artefact import STRUCTURED_EFFORT, produce_many
 from app.services import automode
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
+
+#: Worst to least, for picking the worst of several ratings.
+SEVERITIES = ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
+#: What an unrated gap is taken to be. The worst, because it is the rating that
+#: stops the plan: a missing rating must fail safe, not slip past as minor.
+WORST = SEVERITIES[-1]
+
+
+def _rank(rating):
+    return SEVERITIES.index(rating) if rating in SEVERITIES else len(SEVERITIES)
+
 
 #: Status of a gap auto mode planned around. Distinct from OPEN on purpose:
 #: ``generate_plan`` blocks only on OPEN, and the name says who decided.
@@ -66,7 +77,8 @@ class PlanningAgent(BaseAgent):
         pieces, provenance = produce_many(
             context, self.PROMPT,
             [(i, {'semantic_model': g, 'framework_standards': standards, 'specification': brief})
-             for i, g in enumerate(groups)])
+             for i, g in enumerate(groups)],
+            effort=STRUCTURED_EFFORT)
         mapped = self._merge(pieces[i] for i in sorted(pieces))
         accepted = 0
         if automode.enabled():
@@ -159,20 +171,21 @@ class PlanningAgent(BaseAgent):
         plan leaves out. ``generate_plan`` blocks only on ``OPEN``, so this is
         the whole mechanism -- nothing is deleted and no mapping is invented.
 
-        A HIGH gap, or one with no matching risk (the service's own default
-        severity is HIGH), stays OPEN and stops the plan to be asked.
+        A CRITICAL gap, or one with no matching risk (unrated is treated as
+        the worst case), stays OPEN and stops the plan to be asked.
         """
         severity = {}
         for risk in mapped.get('risks') or []:
             ref = risk.get('source_reference') or ''
-            rank = str(risk.get('severity') or 'HIGH').upper()
+            rating = str(risk.get('severity') or WORST).upper()
             # Several risks for one construct: the worst one decides.
-            severity[ref] = 'HIGH' if 'HIGH' in (rank, severity.get(ref)) else rank
+            if ref not in severity or _rank(rating) > _rank(severity[ref]):
+                severity[ref] = rating
         accepted_refs = set()
         unsupported = []
         for entry in mapped.get('unsupported') or []:
             ref = entry.get('source_reference') or ''
-            if severity.get(ref, 'HIGH') != automode.ASK_SEVERITY:
+            if severity.get(ref, WORST) != automode.ASK_SEVERITY:
                 accepted_refs.add(ref)
                 entry = {**entry, 'status': ACCEPTED}
             unsupported.append(entry)
@@ -208,7 +221,7 @@ class PlanningAgent(BaseAgent):
                 continue
             merged['risks'].append({
                 'category': 'UNSUPPORTED_MAPPING',
-                'severity': str(entry.get('severity') or 'HIGH').upper(),
+                'severity': str(entry.get('severity') or WORST).upper(),
                 'source_reference': ref,
                 'statement': (entry.get('risk') or 'No approved Spring mapping for %s'
                               % (entry.get('ace_construct') or 'this construct'))[:400],

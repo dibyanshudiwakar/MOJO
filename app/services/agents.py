@@ -1,7 +1,7 @@
 import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
-from app.agents.artefact import ArtefactUnavailable, StepCancelled, produce
+from app.agents.artefact import ArtefactUnavailable, STRUCTURED_EFFORT, StepCancelled, produce
 from app.agents.reasoning import UNAVAILABLE
 from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
@@ -292,7 +292,7 @@ class AgentRegistry:
    for start in range(0,len(questions),SUGGESTION_BATCH):
     batch=questions[start:start+SUGGESTION_BATCH]
     try:
-     answer,prov=produce(context,'agent/clarification/suggested-answers',{'questions':batch})
+     answer,prov=produce(context,'agent/clarification/suggested-answers',{'questions':batch},effort=STRUCTURED_EFFORT)
     except ArtefactUnavailable as exc:
      sugg_prov['reason']=exc.reason
      _log_warn('Suggested answers unavailable for questions %d-%d (%s) — those answer boxes stay empty' % (
@@ -362,7 +362,7 @@ class AgentRegistry:
     if decided<len(opened)-taken:
      # Said outright so the operator is not left to infer it from the Logs and
      # the Clarifications page: these are the ones a person is being asked.
-     _log_warn('%d clarification(s) left for you — high severity and not confidently answered' % (len(opened)-taken-decided))
+     _log_warn('%d clarification(s) left for you — critical and not confidently answered' % (len(opened)-taken-decided))
   evidence_ids=[x['id'] for x in registered]
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   # An agent that finished its artefact but left questions for a person is not

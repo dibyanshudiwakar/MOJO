@@ -338,7 +338,7 @@ async function approvalInbox(){
 // ---- Clarifications page --------------------------------------------------
 // Auto mode decides most questions; the ones left OPEN are the model's own
 // "high severity and not sure" cases, so say so on the card.
-function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='HIGH'?'<span class="badge badge-error"><span class="badge-dot"></span>HIGH SEVERITY</span>':''}
+function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='CRITICAL'?'<span class="badge badge-error"><span class="badge-dot"></span>CRITICAL</span>':''}
 async function clarificationsPage(){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
  const all=cd.items||[];

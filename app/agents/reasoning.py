@@ -121,7 +121,7 @@ class ReasoningGateway:
                 ' order by created_at desc limit 1')
         return prompt, model
 
-    def reason(self, context, prompt_name, payload, skill=None):
+    def reason(self, context, prompt_name, payload, skill=None, effort=None):
         """Return ``(answer_or_None, provenance)``.
 
         ``skill`` overrides the agent's own skill for this one call (see
@@ -268,14 +268,22 @@ class ReasoningGateway:
             guidance = None
             if getattr(provider, 'accepts_skill', False) and 'skill_hash' in provenance:
                 guidance = skill if skill is not None else context.skill()
+            # Reasoning effort for this one call, only to an adapter that says it
+            # takes one -- the same arrangement as ``skill`` and for the same
+            # reason: a provider written against invoke(template, payload) must
+            # keep working.
+            options = {}
+            if effort and getattr(provider, 'accepts_effort', False):
+                options['effort'] = effort
+                provenance['effort'] = effort
             if guidance is not None:
-                answer = provider.invoke(prompt['template'], enriched_payload, skill=guidance)
+                answer = provider.invoke(prompt['template'], enriched_payload, skill=guidance, **options)
             else:
                 # No skill keyword at all. An adapter leaving accepts_skill False
                 # is declaring the two-argument signature, so passing skill= here
                 # raised TypeError and took down every provider double written
                 # against invoke(template, payload).
-                answer = provider.invoke(prompt['template'], enriched_payload)
+                answer = provider.invoke(prompt['template'], enriched_payload, **options)
             provenance['skill_included'] = guidance is not None
             recorded = self.registry.complete_request(request['request_id'], answer)
         except (PermissionError, ValueError, NotImplementedError, RuntimeError) as exc:

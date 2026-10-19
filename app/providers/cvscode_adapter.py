@@ -124,6 +124,12 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
 
     #: ``invoke`` takes ``skill=``; ReasoningGateway passes the agent's skill to adapters that say so.
     accepts_skill = True
+    #: ...and ``effort=``, a per-call override of how hard the model reasons.
+    #: Hidden reasoning is billed against ``max_tokens`` but never appears in the
+    #: reply, so a listing task at an alias's top effort can spend its whole
+    #: output budget thinking: a 15,096-character file layout used all 32,768
+    #: tokens at ``xhigh``. See ``tests/test_cvscode_adapter_parsing.py``.
+    accepts_effort = True
 
     #: Output budget per alias. 16384 was one number for every agent and it is
     #: too small for the artefacts this factory asks for: the mapping catalogue
@@ -196,18 +202,21 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             http_client=httpx2.Client(trust_env=False, timeout=httpx2.Timeout(float(self.timeout))),
         )
 
-    def _request(self, template, payload):
+    def _request(self, template, payload, effort=None):
         body = {
             'model': self.model,
             'max_tokens': self.max_tokens,
             'system': template,
             'messages': [{'role': 'user', 'content': json.dumps(payload, sort_keys=True, default=str)}],
         }
-        if self.effort:
-            body['output_config'] = {'effort': self.effort}
+        # A model with no effort parameter (Haiku errors on it) keeps none, however
+        # one is asked for.
+        chosen = (effort or self.effort) if self.effort else None
+        if chosen:
+            body['output_config'] = {'effort': chosen}
         return body
 
-    def invoke(self, template, payload, skill=None):
+    def invoke(self, template, payload, skill=None, effort=None):
         """Send the approved template + cleared payload to Claude; return a dict.
 
         A JSON-object answer is returned as-is (agents expect structured output),
@@ -227,7 +236,7 @@ class CvscodeClaudeAdapter(ProviderExecutionAdapter):
             except AttributeError:
                 pass
         try:
-            message = self._client().messages.create(**self._request(system, payload))
+            message = self._client().messages.create(**self._request(system, payload, effort))
         except Exception as exc:  # SDK/network errors surface as a governed provider failure
             raise RuntimeError('provider_error:%s:%s' % (type(exc).__name__, exc)) from exc
         if getattr(message, 'stop_reason', '') == 'refusal':
@@ -286,8 +295,15 @@ def _spend(message):
         size = len(getattr(block, 'text', '') or getattr(block, 'thinking', '') or '')
         blocks[kind] = blocks.get(kind, 0) + size
     out = getattr(getattr(message, 'usage', None), 'output_tokens', None)
-    return 'output_tokens=%s, blocks=%s' % (out if out is not None else '?',
-                                           ','.join('%s:%d' % kv for kv in sorted(blocks.items())) or 'none')
+    spend = 'output_tokens=%s, blocks=%s' % (out if out is not None else '?',
+                                            ','.join('%s:%d' % kv for kv in sorted(blocks.items())) or 'none')
+    if 'thinking' in blocks or 'redacted_thinking' in blocks:
+        # A thinking block of 0 characters is not "no thinking": the gateway
+        # omits the text, not the work. Misread once as proof reasoning was not
+        # the problem, on a reply that spent 32,768 tokens to write 15,096
+        # characters.
+        spend += ' -- the model reasoned before answering; its text is omitted but its tokens count against max_tokens'
+    return spend
 
 
 def _span(text, opener, closer):

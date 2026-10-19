@@ -28,7 +28,7 @@ does not hold.
 """
 import json
 from pathlib import Path
-from app.agents.artefact import produce, produce_many
+from app.agents.artefact import LISTING_EFFORT, produce, produce_many
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
@@ -105,7 +105,11 @@ class CodeGenerationAgent(BaseAgent):
              'backend_type': (model.get('backend_type') or {}).get('type', ''),
              'tasks': tasks,
              'semantic_model': model, 'framework_standards': standards},
-            skill=skill)
+            skill=skill,
+            # A file list, not a design problem. At the coding alias's xhigh
+            # effort the hidden reasoning alone consumed the 32,768-token budget
+            # for a 15,096-character layout.
+            effort=LISTING_EFFORT)
         # The schema requires minItems 1 on 'files', so an empty layout is a
         # retryable violation inside produce rather than something to check for
         # here -- by the time this returns there is at least one file.

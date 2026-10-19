@@ -332,8 +332,8 @@
               },
               "severity": {
                 "type": "string",
-                "enum": ["HIGH", "MEDIUM", "LOW"],
-                "description": "What a wrong answer would cost. Auto mode puts a question to a person only when this is HIGH and confidence is not."
+                "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                "description": "What a wrong answer would cost. Auto mode puts a question to a person only when this is CRITICAL and confidence is not HIGH."
               },
               "settled_by": {
                 "type": "string",
@@ -728,11 +728,12 @@
               },
               "severity": {
                 "enum": [
+                  "CRITICAL",
                   "HIGH",
                   "MEDIUM",
                   "LOW"
                 ],
-                "description": "What leaving this construct out would cost. Auto mode plans around anything below HIGH."
+                "description": "What leaving this construct out would cost. Auto mode plans around anything below CRITICAL."
               },
               "risk": {
                 "type": "string",
@@ -758,6 +759,7 @@
               },
               "severity": {
                 "enum": [
+                  "CRITICAL",
                   "HIGH",
                   "MEDIUM",
                   "LOW"

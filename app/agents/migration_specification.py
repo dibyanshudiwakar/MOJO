@@ -30,7 +30,7 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
-from app.agents.artefact import produce_many
+from app.agents.artefact import STRUCTURED_EFFORT, produce_many
 from app.services.specification import SpecificationService
 
 SCHEMA = Path(__file__).resolve().parents[2] / 'schemas' / 'migration-specification.schema.json'
@@ -115,7 +115,7 @@ class MigrationSpecificationAgent(BaseAgent):
         authored, provenance = produce_many(
             context, self.PROMPT,
             [(s, {**base, 'section': s, 'section_schema': slices[s]}) for s in SECTIONS],
-            validator=section_valid)
+            validator=section_valid, effort=STRUCTURED_EFFORT)
         spec = {s: authored[s]['content'] for s in SECTIONS}
         spec.update({'metadata': metadata, 'governance': governance,
                      'clarifications': [self._clarification(a) for a in ambiguities]})

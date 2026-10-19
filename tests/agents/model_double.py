@@ -137,7 +137,7 @@ def _mapping_catalogue(payload):
             unsupported.append({'source_reference': source,
                                 'ace_construct': name or 'UNKNOWN',
                                 'reason': 'NO_APPROVED_SPRING_PATTERN',
-                                'severity': 'HIGH',
+                                'severity': 'CRITICAL',
                                 'risk': 'No approved Spring mapping for ' + str(name),
                                 'owner': 'ACE_SME_AND_JAVA_ARCHITECT'})
 

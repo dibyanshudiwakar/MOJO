@@ -33,13 +33,13 @@ conjure one -- a person has to decide. That is the "minimal" in "zero to
 minimal".
 
 **What reaches a person.** Not everything auto mode could decide is decided:
-a question the model rates HIGH severity and is not confident about stays OPEN
+a question the model rates CRITICAL severity and is not confident about stays OPEN
 (``needs_person``). Those are asked, and they do not hold the step -- the step
 completed with the model's suggestion attached, and the open question is the
 record that a person should confirm it before the gate. ``planning`` follows the
 same rule for constructs with no approved pattern: a gap the model rates below
-HIGH is planned around and recorded as an accepted risk in the register and the
-G3 package; a HIGH one stops the plan and is asked.
+CRITICAL is planned around and recorded as an accepted risk in the register and
+the G3 package; a CRITICAL one stops the plan and is asked.
 """
 import os
 
@@ -49,8 +49,10 @@ import os
 ACTOR = 'AUTO_MODE'
 
 #: Severity at which a question can be put to a person. The model rates each
-#: question by what a wrong answer would cost (``suggestion_severity``).
-ASK_SEVERITY = 'HIGH'
+#: question by what a wrong answer would cost (``suggestion_severity``). It is
+#: CRITICAL, above HIGH: at HIGH the model rated 59 of 104 questions from one
+#: analysis for a person, which is most of the analysis, not the exception.
+ASK_SEVERITY = 'CRITICAL'
 #: Confidence that settles a high-severity question without asking. Anything
 #: less leaves it open.
 SETTLED_CONFIDENCE = 'HIGH'
@@ -73,9 +75,9 @@ def enabled():
 def needs_person(severity, confidence):
     """Whether a question is put to a person rather than decided by the model.
 
-    Only when a wrong answer would be costly (HIGH severity) *and* the model is
+    Only when a wrong answer would be catastrophic (CRITICAL severity) *and* the model is
     not sure of its own (confidence below HIGH). A confident answer to a
-    high-severity question is still a decision the model can make; an unsure
+    critical question is still a decision the model can make; an unsure
     answer to a low-stakes one is not worth stopping anyone for. Everything
     else is decided and recorded, with severity and confidence, for the gate.
 
