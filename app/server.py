@@ -1131,6 +1131,6 @@ if __name__=='__main__':
         worker=WorkerLoop(repo,agents,pipelines,repo_clone,workflow)
         threading.Thread(target=worker.run_forever,name='pipeline-worker',daemon=True).start()
         sys.stderr.write('pipeline worker running in-process (set FACTORY_DISABLE_WORKER=1 to run it separately)\n')
-    sys.stderr.write('ACE Modernization Accelerator listening on http://%s:%s\n'%(host,os.getenv('PORT','8080')))
+    sys.stderr.write('MOJO | Modernization Journey listening on http://%s:%s\n'%(host,os.getenv('PORT','8080')))
     sys.stderr.flush()
     ThreadingHTTPServer((host,int(os.getenv('PORT','8080'))),H).serve_forever()
