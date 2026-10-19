@@ -1,7 +1,7 @@
 import json
 from app.repository import uid,now
 from app.agents import load as load_implementation
-from app.agents.artefact import ArtefactUnavailable, STRUCTURED_EFFORT, StepCancelled, produce
+from app.agents.artefact import ArtefactUnavailable, STRUCTURED_EFFORT, StepCancelled, produce, run_parallel
 from app.agents.reasoning import UNAVAILABLE
 from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
@@ -289,14 +289,24 @@ class AgentRegistry:
    sugg_prov={'mode':UNAVAILABLE,'reason':''}
    questions=[{'question':cl.question,'impact':cl.impact,'stage':cl.stage}
               for i,cl in enumerate(result.clarifications) if i not in reused]
-   for start in range(0,len(questions),SUGGESTION_BATCH):
+   starts=list(range(0,len(questions),SUGGESTION_BATCH))
+   def ask(start):
+    # Each batch stands alone and fails alone, so the failure is returned, not
+    # raised: run_parallel stops everything on the first exception.
     batch=questions[start:start+SUGGESTION_BATCH]
     try:
      answer,prov=produce(context,'agent/clarification/suggested-answers',{'questions':batch},effort=STRUCTURED_EFFORT)
+     return start,len(batch),answer,prov,None
     except ArtefactUnavailable as exc:
+     return start,len(batch),None,None,exc
+   # Batches are independent, so they are asked concurrently; results are read
+   # back in batch order.
+   for start,size,answer,prov,exc in run_parallel(context,'agent/clarification/suggested-answers',
+                                                  [(lambda s=s:ask(s)) for s in starts]):
+    if exc is not None:
      sugg_prov['reason']=exc.reason
      _log_warn('Suggested answers unavailable for questions %d-%d (%s) — those answer boxes stay empty' % (
-      start+1,start+len(batch),exc.reason))
+      start+1,start+size,exc.reason))
      continue
     suggestions.extend(answer.get('suggestions') or [])
     sugg_prov={**prov,'mode':prov.get('mode',sugg_prov['mode'])}

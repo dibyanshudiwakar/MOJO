@@ -37,6 +37,8 @@ Removing the fallback does not move that boundary -- those were never fallbacks.
 """
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from pathlib import Path
 
@@ -503,6 +505,74 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
                               budget, provenance)
 
 
+def concurrency():
+    """How many model requests one agent keeps in flight (``MOJO_LLM_CONCURRENCY``).
+
+    The gateway rate-limits, and a 429 is retried with backoff, so more is not
+    always faster; 1 restores strictly sequential behaviour.
+    """
+    try:
+        return max(1, min(16, int(os.getenv('MOJO_LLM_CONCURRENCY', '4'))))
+    except ValueError:
+        return 4
+
+
+def run_parallel(context, label, calls):
+    """Run zero-argument callables concurrently; results come back in input order.
+
+    All-or-nothing, like the sequential loop it replaces: the first failure (by
+    input order) is raised, and calls that had not started are dropped rather
+    than spending model time on an artefact that can no longer be used. A stop
+    request is honoured before each call starts, so cancelling a pipeline still
+    lands within one model call. Each call carries its own retries, so a request
+    that fails and is retried does not hold the others up.
+    """
+    info, warn = _log(context)
+    calls = list(calls)
+    workers = min(concurrency(), len(calls))
+    if workers <= 1:
+        out = []
+        for index, call in enumerate(calls):
+            if _stopping(context):
+                warn('Cancelled after %d of %d artefact(s) for "%s" — discarding them'
+                     % (index, len(calls), label))
+                raise StepCancelled(label, index, len(calls))
+            out.append(call())
+        return out
+    abort = threading.Event()
+    done = []
+
+    def guarded(call):
+        if abort.is_set():
+            return _SKIPPED
+        if _stopping(context):
+            abort.set()
+            raise StepCancelled(label, len(done), len(calls))
+        try:
+            result = call()
+        except BaseException:
+            abort.set()
+            raise
+        done.append(1)
+        return result
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='llm') as pool:
+        futures = [pool.submit(guarded, c) for c in calls]
+    out = []
+    for future in futures:
+        error = future.exception()
+        if error is not None:
+            if isinstance(error, StepCancelled):
+                warn('Cancelled after %d of %d artefact(s) for "%s" — discarding them'
+                     % (len(done), len(calls), label))
+            raise error
+        out.append(future.result())
+    return out
+
+
+_SKIPPED = object()
+
+
 def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
                  attempts=ATTEMPTS, validator=None, effort=None):
     """One request per item, all of them or none.
@@ -526,20 +596,20 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
     info, warn = _log(context)
     produced, provenance = {}, {}
     pending = list(items)
-    for index, (key, payload) in enumerate(pending):
-        # The checkpoint that matters. This loop is where a long agent spends
-        # its time -- ace-analysis sends one request per source file and a real
-        # repository takes half an hour -- so checking between items is what
-        # makes cancelling a pipeline reach an agent already in flight. It lands
-        # within one model call, because the call itself is not interrupted.
-        if _stopping(context):
-            warn('Cancelled after %d of %d artefact(s) for "%s" — discarding them'
-                 % (index, len(pending), prompt_name))
-            raise StepCancelled(prompt_name, index, len(pending))
-        artefact, provenance = produce(context, prompt_name, payload,
-                                       schema_name=schema_name, skill=skill,
-                                       attempts=attempts, effort=effort,
-                                       validator=(lambda a, k=key: validator(k, a)) if validator else None)
+    # Read once, here, so the workers below only ever read the cached value.
+    precedents.for_context(context)
+
+    def asking(key, payload):
+        return lambda: produce(context, prompt_name, payload,
+                               schema_name=schema_name, skill=skill,
+                               attempts=attempts, effort=effort,
+                               validator=(lambda a, k=key: validator(k, a)) if validator else None)
+
+    # Requests are independent -- each item's payload is fixed before the first
+    # call and no answer feeds another -- so they run concurrently. The result is
+    # assembled in the order given, which is the order it always had.
+    for (key, _), (artefact, provenance) in zip(
+            pending, run_parallel(context, prompt_name, [asking(k, p) for k, p in pending])):
         produced[key] = artefact
     if not produced:
         # Not a failure. Nothing was asked because there was nothing to ask
