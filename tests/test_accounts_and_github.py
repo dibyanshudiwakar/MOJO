@@ -165,6 +165,102 @@ def test_connect_records_verified_identity(gh, monkeypatch):
     assert state['last_error'] == ''
 
 
+def test_connect_accepts_matching_email_owner(gh, monkeypatch):
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen',
+                        lambda *a, **k: _resp({'login': 'ada', 'email': 'ada@example.com'}))
+    state = service.connect(user['id'], user_email='ada@example.com')
+    assert state['status'] == 'CONNECTED' and state['last_error'] == ''
+
+
+def test_connect_accepts_matching_email_case_insensitive(gh, monkeypatch):
+    """GitHub returns mixed-case email (e.g. Ada.Lovelace@Corp.com); app stores lowercase."""
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen',
+                        lambda *a, **k: _resp({'login': 'ada', 'email': 'Ada@Example.com'}))
+    state = service.connect(user['id'], user_email='ada@example.com')
+    assert state['status'] == 'CONNECTED' and state['last_error'] == ''
+
+
+def test_connect_accepts_github_enterprise_cloud_plus_tag_email(gh, monkeypatch):
+    """GitHub Enterprise Cloud appends the org slug as a plus-tag in email addresses.
+
+    e.g. ada+orgname@example.com must match app email ada@example.com.
+    """
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+    # GHEC returns the org-scoped plus-tag email; the app stores the plain corporate one.
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen',
+                        lambda *a, **k: _resp({'login': 'ada', 'email': 'ada+orgname@example.com'}))
+    state = service.connect(user['id'], user_email='ada@example.com')
+    assert state['status'] == 'CONNECTED' and state['last_error'] == ''
+
+
+def test_connect_rejects_public_email_mismatch(gh, monkeypatch):
+    """Public email mismatch is a hard block.
+
+    In enterprise deployments all GitHub accounts use the same corporate email
+    as the app account, so a mismatch on the public /user email conclusively
+    means a different person's token.
+    """
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen',
+                        lambda *a, **k: _resp({'login': 'other-person', 'email': 'other@example.com'}))
+    with pytest.raises(PermissionError, match='github_token_owner_mismatch'):
+        service.connect(user['id'], user_email='ada@example.com')
+    assert service.config(user['id'])['status'] == 'FAILED'
+
+
+def test_connect_rejects_confirmed_mismatch_via_verified_emails(gh, monkeypatch):
+    """Hard-block when /user/emails (user:email scope) confirms the token belongs to someone else."""
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+
+    call_log = []
+    def fake_urlopen(req, **kw):
+        call_log.append(req.full_url)
+        if req.full_url.endswith('/user/emails'):
+            # Verified emails — definitely someone else's account.
+            return _resp([{'email': 'other@example.com', 'verified': True}], scopes='')
+        return _resp({'login': 'other-person', 'email': None}, scopes='user:email')
+
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen', fake_urlopen)
+    with pytest.raises(PermissionError, match='github_token_owner_mismatch'):
+        service.connect(user['id'], user_email='ada@example.com')
+    assert service.config(user['id'])['status'] == 'FAILED'
+    assert any('/user/emails' in u for u in call_log), 'must have fetched verified emails'
+
+
+def test_connect_accepts_matching_verified_email(gh, monkeypatch):
+    """Token is accepted when a verified email matches the logged-in user."""
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+
+    def fake_urlopen(req, **kw):
+        if req.full_url.endswith('/user/emails'):
+            return _resp([{'email': 'ada@example.com', 'verified': True},
+                          {'email': 'ada@personal.com', 'verified': True}], scopes='')
+        return _resp({'login': 'ada', 'email': None}, scopes='user:email')
+
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen', fake_urlopen)
+    state = service.connect(user['id'], user_email='ada@example.com')
+    assert state['status'] == 'CONNECTED' and state['last_error'] == ''
+
+
+def test_connect_warns_when_owner_email_is_unverifiable(gh, monkeypatch):
+    service, _, user = gh
+    service.save(user['id'], 'https://github.com', 'ghp_token_value')
+    # GitHub returns no email (private profile, repo-only scope — no user:email).
+    monkeypatch.setattr(github_integration.urllib.request, 'urlopen',
+                        lambda *a, **k: _resp({'login': 'ada', 'email': None}))
+    state = service.connect(user['id'], user_email='ada@example.com')
+    assert state['status'] == 'CONNECTED'
+    assert 'github_owner_unverifiable' in state['last_error']
+
+
 def test_connect_surfaces_upstream_error_for_retry(gh, monkeypatch):
     service, _, user = gh
     service.save(user['id'], 'https://github.com', 'ghp_token_value')

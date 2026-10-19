@@ -624,13 +624,13 @@ class H(BaseHTTPRequestHandler):
                 github.save(user['id'],d.get('url'),d.get('token'))
                 # Save and verify in one step: an unverified credential is not
                 # useful, and the UI needs the failure detail to offer a retry.
-                state=github.connect(user['id'])
+                state=github.connect(user['id'],user_email=user['email'])
                 ledger.append('',pr.identity,'GITHUB_INTEGRATION_CONFIGURED',{'url':state.get('url'),'status':state.get('status'),'fingerprint':state.get('token_fingerprint')})
                 return self.sendj(200,state)
             if p=='/api/v2/integrations/github/test':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()
-                return self.sendj(200,github.connect(user['id']))
+                return self.sendj(200,github.connect(user['id'],user_email=user['email']))
             if p=='/api/v2/integrations/github/disconnect':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()

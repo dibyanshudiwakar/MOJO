@@ -195,7 +195,8 @@ function githubErr(e){
  const p=String(e.message||'').split('|');
  if(p.length<3)return friendly(p[0]||'github_error');
  const reason={github_credentials_rejected:'GitHub rejected the token.',github_access_forbidden:'Token lacks the required access.',
-  github_api_not_found_check_url:'No GitHub API at that URL. Check the address.',github_unreachable:'Could not reach GitHub.'}[p[0]]||p[0].replaceAll('_',' ');
+  github_api_not_found_check_url:'No GitHub API at that URL. Check the address.',github_unreachable:'Could not reach GitHub.',
+  github_token_owner_mismatch:'This token belongs to a different GitHub account.'}[p[0]]||p[0].replaceAll('_',' ');
  return `${reason} (${p[1]}) ${p[2]}`}
 const GH_STATUS_LABEL={CONNECTED:'Connected',FAILED:'Connection failed',UNVERIFIED:'Unverified',NOT_CONFIGURED:'Not configured'};
 function cachedGithubToken(){
