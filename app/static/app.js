@@ -319,9 +319,11 @@ function table(items,actions=false){if(!items?.length)return '<div class="empty"
 function gateCard(g){return `<article class="gate-card"><div class="sectionhead"><h3>${esc(g.gate)}</h3><span class="live-dot">LIVE</span></div><form class="gate-form"><input type="hidden" name="gate" value="${esc(g.gate)}"><div class="formgrid"><label>Enabled<select name="enabled"><option value="true" ${g.enabled?'selected':''}>Enabled</option><option value="false" ${!g.enabled?'selected':''}>Disabled</option></select></label><label>Approver role<input name="required_role" value="${esc(g.required_role)}"></label><label class="wide">Allowed decisions<input name="allowed_decisions" value="${esc(g.allowed_decisions.join(','))}"></label><label>Minimum evidence<input name="min_evidence" type="number" min="0" value="${g.min_evidence}"></label><label>Quorum<input name="quorum" type="number" min="1" value="${g.quorum}"></label><label>Timeout minutes<input name="timeout_minutes" type="number" min="0" value="${g.timeout_minutes}"></label><label>Escalation profile<input name="escalation_profile" value="${esc(g.escalation_profile)}"></label><label>Bypass role<input name="bypass_role" value="${esc(g.bypass_role)}"></label><label>Downstream effect<input name="downstream_effect" value="${esc(g.downstream_effect)}"></label></div><button class="btn-primary gate-save"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save changes</button><p class="gate-meta">Last persisted update: ${esc(g.updated_at?fmtDt(g.updated_at):'not yet configured')}</p></form></article>`}
 async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox'),api('/api/v2/approvals')]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
 // ---- Learning: what each run has taught, and whether the agents are improving ----------
+let _lessons=[];
 const LESSON_LABEL={SCHEMA_CORRECTION:'Schema correction',EFFORT_STEP_DOWN:'Effort step-down',GATE_GAP:'Skill gap',GATE_FAIL:'Gate failure',REPAIR:'Feedback repair',GAP_UNREPAIRED:'Gap not repaired',RUN_FAILURE:'Run failure'};
 async function learningPage(){
- const d=await api('/api/v2/learning');
+ const d=await api('/api/v2/learning');_lessons=d.lessons;
+ const canCurate=(((session&&session.user&&session.user.roles)||[]).some(r=>r==='KNOWLEDGE_CURATOR'||r==='GOVERNANCE_ADMIN'));
  const agentRows=d.agents.length?d.agents.map(a=>{const rate=a.runs?Math.round(100*a.completed/a.runs):0;return `<tr>
    <td class="td-name">${esc(a.agent_id)}</td><td>${a.runs}</td>
    <td>${rate}%</td><td>${a.avg_seconds??'—'} s</td><td>${a.avg_attempts??'—'}</td>
@@ -334,17 +336,37 @@ async function learningPage(){
    <td style="max-width:300px;font-size:12px;color:var(--text-2)">${esc(l.resolution||'—')}</td>
    <td><b>${l.occurrences}</b>${l.jobs>=2?` <span class="badge badge-warning"><span class="badge-dot"></span>${l.jobs} jobs</span>`:''}</td>
    <td class="td-date">${esc(fmtDt(l.last_seen))}</td>
-   <td><span class="badge badge-info">${esc(l.status)}</span></td></tr>`).join('')
-  :'<tr><td colspan="7" class="empty">No lessons captured yet.</td></tr>';
+   <td><span class="badge ${l.status==='APPROVED'?'badge-success':l.status==='REJECTED'?'badge-neutral':'badge-info'}">${esc(l.status)}</span>${l.status==='APPROVED'?`<br><small style="color:var(--text-3)">used in ${l.applied||0} run${(l.applied||0)===1?'':'s'}</small>`:''}</td>
+   ${canCurate?`<td><button class="btn-sm" data-review-lesson="${esc(l.id)}">${l.status==='CAPTURED'?'Review':'Change'}</button></td>`:''}</tr>`).join('')
+  :`<tr><td colspan="${canCurate?8:7}" class="empty">No lessons captured yet.</td></tr>`;
  $('#view').innerHTML=`
   <div class="page-header page-header-row"><div><div class="page-title">Learning</div>
    <div class="page-sub">${d.summary.runs} runs recorded · ${d.summary.lessons} lessons · ${d.summary.recurring} seen in more than one job</div></div></div>
   <div class="card"><div class="card-head"><div><div class="card-title">Lessons</div>
-   <div class="card-sub">What went wrong in a run and what fixed it. One that recurs across jobs is a defect in a prompt, a skill or a gate rule, not bad luck. Lessons are captured only: nothing feeds them back into an agent until they are reviewed.</div></div><span class="live-dot">LIVE</span></div>
-   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Agent</th><th>Situation</th><th>What resolved it</th><th>Seen</th><th>Last</th><th>Status</th></tr></thead><tbody>${lessonRows}</tbody></table></div></div></div>
+   <div class="card-sub">What went wrong in a run and what fixed it. One that recurs across jobs is a defect in a prompt, a skill or a gate rule, not bad luck. A lesson only reaches an agent once a reviewer approves it; the approved guidance is then added to that agent's requests.</div></div><span class="live-dot">LIVE</span></div>
+   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Agent</th><th>Situation</th><th>What resolved it</th><th>Seen</th><th>Last</th><th>Status</th>${canCurate?'<th></th>':''}</tr></thead><tbody>${lessonRows}</tbody></table></div></div></div>
   <div class="card" style="margin-top:16px"><div class="card-head"><div><div class="card-title">Agents over time</div>
    <div class="card-sub">The figures to watch as prompts and skills change: fewer attempts, corrections, gaps and questions per run means the agent is getting it right sooner.</div></div></div>
-   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Runs</th><th>Completed</th><th>Avg time</th><th>Avg attempts</th><th>Corrections</th><th>Effort step-downs</th><th>Avg gaps</th><th>Avg questions</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div>`}
+   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Runs</th><th>Completed</th><th>Avg time</th><th>Avg attempts</th><th>Corrections</th><th>Effort step-downs</th><th>Avg gaps</th><th>Avg questions</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div>`;
+ if(canCurate)document.querySelectorAll('[data-review-lesson]').forEach(b=>b.onclick=()=>openLessonDialog(_lessons.find(x=>x.id===b.dataset.reviewLesson)))}
+
+function openLessonDialog(l){
+ if(!l)return;const f=$('#lessonForm');
+ $('#lessonTitle').textContent='Review lesson — '+(LESSON_LABEL[l.kind]||l.kind);
+ $('#lessonSub').textContent=l.agent_id+' · seen '+l.occurrences+' time'+(l.occurrences===1?'':'s')+' in '+l.jobs+' job'+(l.jobs===1?'':'s')+'. '+l.situation;
+ f.guidance.value=l.guidance||'';f.note.value='';$('#lessonError').textContent='';f.dataset.id=l.id;
+ $('#lessonRetract').hidden=l.status!=='APPROVED';$('#lessonReject').hidden=l.status==='APPROVED';
+ if(!f.guidance.value)f.guidance.placeholder='Leave blank to use the suggested wording';
+ $('#lessonDialog').showModal()}
+async function decideLesson(decision){
+ const f=$('#lessonForm'),err=$('#lessonError');err.textContent='';
+ try{await api('/api/v2/lessons/'+encodeURIComponent(f.dataset.id)+'/decide',{method:'POST',body:JSON.stringify({decision,guidance:f.guidance.value,note:f.note.value})});
+  $('#lessonDialog').close();notice('Lesson '+decision.toLowerCase()+'d');learningPage()}
+ catch(x){err.textContent=friendly(x.message)}}
+$('#lessonCancel').onclick=()=>$('#lessonDialog').close();
+$('#lessonApprove').onclick=e=>{e.preventDefault();decideLesson('APPROVE')};
+$('#lessonReject').onclick=()=>decideLesson('REJECT');
+$('#lessonRetract').onclick=()=>decideLesson('RETRACT');
 // ---- Agent Models: which model each agent runs on, with the option to change it --------
 let _agentModels=null;
 async function agentModelsPage(){

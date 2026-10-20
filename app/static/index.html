@@ -196,6 +196,21 @@
     </div>
   </form>
 </dialog>
+<dialog id="lessonDialog">
+  <h2 id="lessonTitle">Review lesson</h2>
+  <p class="authhint dlg-sub" id="lessonSub"></p>
+  <form id="lessonForm">
+    <label>Guidance given to the agent <small>(what the model will read on every request; keep it short and specific)</small><textarea name="guidance" rows="4" maxlength="300"></textarea></label>
+    <label>Note <small>(optional, kept with the decision)</small><input name="note" maxlength="200" autocomplete="off"></label>
+    <p class="authhint bad" id="lessonError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="lessonCancel">Cancel</button>
+      <button type="button" id="lessonReject">Reject</button>
+      <button type="button" id="lessonRetract">Retract</button>
+      <button id="lessonApprove">Approve</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="agentModelDialog">
   <h2 id="agentModelTitle">Change model</h2>
   <p class="authhint dlg-sub" id="agentModelSub"></p>

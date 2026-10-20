@@ -642,6 +642,12 @@ class H(BaseHTTPRequestHandler):
                 out=accounts.grant_role(pr.roles,d.get('email'),d.get('role'))
                 ledger.append('',pr.identity,'ACCOUNT_ROLE_GRANTED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
                 return self.sendj(200,{'user':out})
+            m=re.fullmatch(r'/api/v2/lessons/([a-z0-9-]+)/decide',p)
+            if m:
+                pr=self.require('KNOWLEDGE_CURATOR','GOVERNANCE_ADMIN')
+                out=learning.decide(repo,m.group(1),d.get('decision'),pr.identity,d.get('guidance',''),d.get('note',''))
+                ledger.append('',pr.identity,'LESSON_'+out['status'],{'lesson_id':out['id'],'agent_id':out['agent_id'],'kind':out['kind'],'guidance':out['guidance']})
+                return self.sendj(200,out)
             if p=='/api/v2/auth/revoke-role':
                 pr=self.principal()
                 out=accounts.revoke_role(pr.roles,pr.identity,d.get('email'),d.get('role'))

@@ -12,12 +12,15 @@ that evidence is thrown away when the next run starts. This keeps it:
   five jobs is a defect in a prompt, a skill or a gate rule, which is where a fix
   belongs.
 
-Capture only, by design. Lessons start ``CAPTURED``; nothing reads them back into
-a prompt yet. Putting unreviewed text into prompts would let one bad run teach
-every later run the wrong thing, so curation (``APPROVED`` / ``REJECTED``) comes
-before retrieval. Recording must never fail a run, so every entry point here
-swallows its own errors.
+Lessons start ``CAPTURED`` and are inert. A reviewer (``KNOWLEDGE_CURATOR`` or
+``GOVERNANCE_ADMIN``) approves or rejects each one, and only ``APPROVED`` lessons
+are read back into an agent's requests -- putting unreviewed text into prompts
+would let one bad run teach every later run the wrong thing. What is shown to the
+model is the reviewer's *guidance* text, which they may rewrite before approving,
+not the raw record. Recording and retrieval must never fail a run, so both swallow
+their own errors.
 """
+import os
 import json
 import re
 import sys
@@ -40,9 +43,18 @@ create table if not exists lessons(id text primary key, agent_id text, kind text
 '''
 
 
+#: Columns added after the table first shipped; added in place on an existing database.
+_LATER_COLUMNS = {'guidance': "text default ''", 'applied': 'integer default 0',
+                  'reviewed_by': "text default ''", 'reviewed_at': "text default ''", 'note': "text default ''"}
+
+
 def ensure(conn):
     for statement in [s for s in SCHEMA.split(';') if s.strip()]:
         conn.execute(statement)
+    have = {r[1] for r in conn.execute('pragma table_info(lessons)').fetchall()}
+    for column, kind in _LATER_COLUMNS.items():
+        if column not in have:
+            conn.execute('alter table lessons add column %s %s' % (column, kind))
 
 
 def normalise(text):
@@ -53,8 +65,20 @@ def normalise(text):
     return re.sub(r'\s+', ' ', text).strip()[:160]
 
 
+def _signature(kind, signature):
+    """Check names are identifiers, not prose: ``SKILL_M5_M16`` and ``SKILL_M7_M10`` differ
+    only in digits, which ``normalise`` would erase and merge into one lesson."""
+    signature = str(signature or '')
+    if kind in ('GATE_GAP', 'GATE_FAIL', 'GAP_UNREPAIRED'):
+        return signature.strip().lower()[:160]
+    if kind == 'REPAIR':
+        check, _, action = signature.partition('|')
+        return (check.strip().lower() + '|' + normalise(action))[:160]
+    return normalise(signature)
+
+
 def _lesson(agent_id, kind, signature, situation, resolution, evidence=None):
-    return {'agent_id': agent_id, 'kind': kind, 'signature': normalise(signature),
+    return {'agent_id': agent_id, 'kind': kind, 'signature': _signature(kind, signature),
             'situation': str(situation)[:MAX_TEXT], 'resolution': str(resolution)[:MAX_TEXT],
             'evidence': evidence or {}}
 
@@ -144,10 +168,106 @@ def record_run(repo, *, run_id, job_id, agent_id, agent_version, status, started
                        len(metrics.get('failed_checks') or []), int(clarifications or 0), str(error or '')[:300], now()))
             for lesson in found:
                 _upsert(c, lesson, job_id)
+            for lesson_id in (reasoning.get('lessons_used') or [])[:MAX_LESSONS]:
+                c.execute('update lessons set applied=coalesce(applied,0)+1 where id=?', (lesson_id,))
         return len(found)
     except Exception as exc:                       # noqa: BLE001 -- see the module docstring
         sys.stderr.write('learning: could not record run %s (%s)\n' % (run_id, exc))
         return 0
+
+
+# ---- review and retrieval ------------------------------------------------------------------
+
+#: Lessons worth putting in front of a model. Effort step-downs and run failures
+#: describe the platform, not what a prompt should say.
+INJECTED_KINDS = ('SCHEMA_CORRECTION', 'GATE_GAP', 'GATE_FAIL', 'REPAIR', 'GAP_UNREPAIRED')
+DECISIONS = {'APPROVE': APPROVED, 'REJECT': REJECTED, 'RETRACT': REJECTED}
+MAX_LESSONS = 8
+MAX_CHARS = 2400
+MAX_GUIDANCE = 300
+
+#: Said to the model alongside the guidance. Like the precedents note it lives in
+#: the payload, not the approved template, and it ranks below the instructions.
+NOTE = ('Guidance from earlier runs of this agent, reviewed and approved by a person. '
+        'Apply it where it concerns this request; the instructions and schema above take '
+        'precedence, and it never lets you skip a required field.')
+
+
+def enabled():
+    """On unless ``FACTORY_LESSONS=0``."""
+    return (os.getenv('FACTORY_LESSONS', '1') or '').strip().lower() not in ('0', 'false', 'no', 'off')
+
+
+def default_guidance(lesson):
+    """What a reviewer starts from: the lesson, as an instruction."""
+    kind, resolution = lesson.get('kind'), (lesson.get('resolution') or '').strip()
+    situation = (lesson.get('situation') or '').strip()
+    if kind == 'SCHEMA_CORRECTION':
+        return 'Earlier answers were rejected for this and had to be redone: %s' % situation.split(': ', 1)[-1]
+    if kind in ('GATE_GAP', 'GAP_UNREPAIRED'):
+        return 'The quality gate flagged this in earlier output; get it right the first time. %s %s' % (
+            situation, resolution)
+    if kind == 'REPAIR':
+        return 'Earlier output needed this repair afterwards; generate it correctly instead: %s' % resolution
+    return '%s %s' % (situation, resolution)
+
+
+def decide(repo, lesson_id, decision, actor, guidance='', note=''):
+    """Approve, reject or retract one lesson. Returns the updated row."""
+    decision = str(decision or '').strip().upper()
+    if decision not in DECISIONS:
+        raise ValueError('decision_must_be_APPROVE_REJECT_or_RETRACT')
+    with repo.connect() as c:
+        ensure(c)
+    lesson = repo.one('select * from lessons where id=?', (lesson_id,))
+    if not lesson:
+        raise ValueError('lesson_not_found')
+    status = DECISIONS[decision]
+    text = str(guidance or '').strip()[:MAX_GUIDANCE]
+    if status == APPROVED:
+        if lesson['kind'] not in INJECTED_KINDS:
+            raise ValueError('this_kind_of_lesson_describes_the_platform_not_a_prompt')
+        text = text or default_guidance(lesson)[:MAX_GUIDANCE]
+    with repo.connect() as c:
+        c.execute('update lessons set status=?, guidance=?, reviewed_by=?, reviewed_at=?, note=? where id=?',
+                  (status, text if status == APPROVED else (lesson.get('guidance') or ''),
+                   actor, now(), str(note or '')[:300], lesson_id))
+    return repo.one('select * from lessons where id=?', (lesson_id,))
+
+
+def approved_for(repo, agent_id):
+    """The approved guidance for one agent, most-recurring first, within a fixed budget."""
+    if not agent_id:
+        return []
+    with repo.connect() as c:
+        ensure(c)
+    rows = repo.rows("select id, kind, guidance, occurrences from lessons where agent_id=? and status=? "
+                     "and trim(guidance)<>'' order by occurrences desc, last_seen desc", (agent_id, APPROVED))
+    chosen, size = [], 0
+    for row in rows:
+        if len(chosen) >= MAX_LESSONS or size + len(row['guidance']) > MAX_CHARS:
+            break
+        chosen.append({'id': row['id'], 'kind': row['kind'], 'guidance': row['guidance']})
+        size += len(row['guidance'])
+    return chosen
+
+
+def for_context(context):
+    """The approved guidance for a running agent, looked up once per run."""
+    if not enabled():
+        return []
+    cached = getattr(context, '_lessons', None)
+    if cached is not None:
+        return cached
+    try:
+        found = approved_for(context.repo, getattr(context, 'agent_id', ''))
+    except Exception:                              # noqa: BLE001 -- a convenience; never fail the agent
+        found = []
+    context._lessons = found
+    logger = getattr(context, 'logger', None)
+    if found and logger:
+        logger.info('Using %d approved lesson(s) from earlier runs as guidance' % len(found))
+    return found
 
 
 def overview(repo):

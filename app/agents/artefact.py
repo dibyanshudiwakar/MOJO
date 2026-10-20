@@ -45,7 +45,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from app.agents.reasoning import MODEL_GATEWAY, NOT_CONSULTED, ReasoningGateway
-from app.services import precedents
+from app.services import learning, precedents
 from app.services.feedback import redact
 
 SCHEMA_FILE = Path(__file__).resolve().parents[2] / 'config' / 'agent-response-schemas.v1.json'
@@ -410,6 +410,10 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     learned = precedents.for_context(context)
     if learned:
         payload = {**payload, '_precedents': learned, '_precedents_note': precedents.NOTE}
+    # What reviewers approved from earlier runs of this agent (app/services/learning.py).
+    guidance = learning.for_context(context)
+    if guidance:
+        payload = {**payload, '_lessons': [g['guidance'] for g in guidance], '_lessons_note': learning.NOTE}
     cleared = scrub(payload)
     serialised = json.dumps(cleared, sort_keys=True, default=str)
     if len(serialised) > MAX_PAYLOAD_CHARS:
@@ -423,7 +427,8 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
     gateway = ReasoningGateway(context.repo)
     budget = max(1, int(attempts or 1))
     corrections, provenance = [], {'prompt_name': prompt_name, 'schema': schema_name,
-                                   'precedents': len(learned)}
+                                   'precedents': len(learned),
+                                   'lessons_used': [g['id'] for g in guidance]}
     failures, lowered = [], []
     for attempt in range(1, budget + 1):
         # Checked before each attempt, not only before the first: a retry with
@@ -442,7 +447,8 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         # template is the approved prompt and must not be rewritten per attempt.
         request = dict(cleared, _correction=corrections[-1]) if corrections else cleared
         answer, provenance = gateway.reason(context, prompt_name, request, skill=skill, effort=effort)
-        provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned)})
+        provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned),
+                           'lessons_used': [g['id'] for g in guidance]})
         if corrections:
             provenance['corrections'] = list(corrections)
         if lowered:
@@ -598,6 +604,7 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
     pending = list(items)
     # Read once, here, so the workers below only ever read the cached value.
     precedents.for_context(context)
+    learning.for_context(context)
 
     def asking(key, payload):
         return lambda: produce(context, prompt_name, payload,
