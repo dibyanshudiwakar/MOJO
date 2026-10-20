@@ -608,9 +608,15 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
     # Requests are independent -- each item's payload is fixed before the first
     # call and no answer feeds another -- so they run concurrently. The result is
     # assembled in the order given, which is the order it always had.
+    corrections, lowered, attempts_total = [], [], 0
     for (key, _), (artefact, provenance) in zip(
             pending, run_parallel(context, prompt_name, [asking(k, p) for k, p in pending])):
         produced[key] = artefact
+        # What every request needed, not only the last one's: this is what the
+        # learning record reads (app/services/learning.py).
+        corrections += provenance.get('corrections') or []
+        lowered += provenance.get('effort_lowered') or []
+        attempts_total += int(provenance.get('attempts') or 1)
     if not produced:
         # Not a failure. Nothing was asked because there was nothing to ask
         # about -- an ACE repository with no message flows in it. The caller
@@ -623,6 +629,11 @@ def produce_many(context, prompt_name, items, *, schema_name=None, skill=None,
     # same approved prompt, model and skill.
     provenance = dict(provenance)
     provenance['item_count'] = len(produced)
+    provenance['attempts_total'] = attempts_total
+    if corrections:
+        provenance['all_corrections'] = corrections
+    if lowered:
+        provenance['all_effort_lowered'] = lowered
     info('Produced %d artefact(s) for "%s", all model-authored'
          % (len(produced), prompt_name))
     return produced, provenance

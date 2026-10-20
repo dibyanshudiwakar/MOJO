@@ -7,7 +7,7 @@ from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
-from app.services import automode, precedents
+from app.services import automode, precedents, learning
 from app.services.clarification_reuse import PriorAnswers, ACTOR as REUSE_ACTOR, origin as reuse_origin
 from app.services.agent_llm_bindings import AgentLLMBindingService
 
@@ -38,7 +38,7 @@ class AgentRegistry:
    # Named columns: the positional insert this replaced broke the moment the
    # governance upgrade added run ownership and provenance columns.
    self.repo.insert(c,'agent_runs',{'id':run,'job_id':job_id,'agent_name':a['name'],'agent_version':version,'status':'RUNNING','input_evidence':json.dumps(ids),'output_evidence':'[]','correlation_id':corr,'error':'','started_at':now(),'completed_at':'','agent_id':agent_id,'operator_identity':identity or '','requested_tools':json.dumps(sorted(requested)),'iteration':int((job or {}).get('iteration') or 1)})
-  return {'id':run,'agent_id':agent_id,'correlation_id':corr,'status':'RUNNING','allowed_tools':sorted(allowed)}
+  return {'id':run,'agent_id':agent_id,'correlation_id':corr,'status':'RUNNING','allowed_tools':sorted(allowed),'started_at':(self.repo.one('select started_at from agent_runs where id=?',(run,)) or {}).get('started_at','')}
  def complete(self,run_id,output_evidence,error='',identity=None,outputs=None,provenance=None,reasoning='',status=''):
   r=self.repo.one('select * from agent_runs where id=?',(run_id,))
   if not r: raise ValueError('agent_run_not_found')
@@ -179,6 +179,8 @@ class AgentRegistry:
    raise
   except Exception as e:
    self.complete(run['id'],[],type(e).__name__+':'+str(e),identity)
+   learning.record_run(self.repo,run_id=run['id'],job_id=job_id,agent_id=agent_id,agent_version=version,status='FAILED',
+                       started_at=run.get('started_at',''),error=type(e).__name__+':'+str(e))
    with self.repo.connect() as c:self.repo.event(c,job_id,identity,'AGENT_RUN_FAILED',details={'run_id':run['id'],'agent_id':agent_id,'version':version,'error':type(e).__name__+':'+str(e)},correlation=run['correlation_id'])
    raise
   allowed=set(json.loads(a['tool_allowlist'] or '[]'));declared=set(json.loads(a['produced_outputs'] or '[]'))
@@ -374,6 +376,9 @@ class AgentRegistry:
      # the Clarifications page: these are the ones a person is being asked.
      _log_warn('%d clarification(s) left for you — critical and not confidently answered' % (len(opened)-taken-decided))
   evidence_ids=[x['id'] for x in registered]
+  learning.record_run(self.repo,run_id=run['id'],job_id=job_id,agent_id=agent_id,agent_version=version,status=result.status,
+                      started_at=run.get('started_at',''),metrics=result.metrics,reasoning=result.reasoning,outputs=result.outputs,
+                      clarifications=len(opened),error=result.error)
   self.complete(run['id'],evidence_ids,result.error,identity,result.outputs,{**skill_prov,**(result.reasoning or {})},(result.reasoning or {}).get('mode',''))
   # An agent that finished its artefact but left questions for a person is not
   # finished as far as the pipeline is concerned. Auto mode lets it produce the

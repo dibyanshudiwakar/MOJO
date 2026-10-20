@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
+from app.services import learning
 from app.service import FactoryService
 from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
@@ -452,6 +453,8 @@ class H(BaseHTTPRequestHandler):
             return self.sendj(200,agents.dependency_status(job_id,m.group(1)))
         # One row per agent: the model it runs on today, where that comes from,
         # and the aliases an administrator may move it to.
+        # What the runs have taught: per-agent trend inputs and recurring lessons.
+        if p=='/api/v2/learning': return self.sendj(200,learning.overview(repo))
         if p=='/api/v2/agent-models':
             rows={}
             for a in repo.rows('select agent_id,display_name,default_model_alias,status,enabled from agent_registry order by agent_id,version'):

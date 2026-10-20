@@ -8,7 +8,7 @@ function progressFillClass(state,pct){const s=String(state||'').toUpperCase();co
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
 function riskBadge(r){const m={high:'error',medium:'warning',low:'success'};const key=r?String(r).toLowerCase():'';if(!key||key==='none'||key==='—')return `<span style="color:var(--text-3);font-size:12px">—</span>`;const cls=m[key]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(String(r).toUpperCase())}</span>`}
-const pages=['dashboard','access','agent-models','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
+const pages=['dashboard','access','agent-models','learning','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
 let refreshTimer;
 // Every page polls with setInterval, and a poll that is rejected for a dead
 // session used to keep firing -- each tick re-showing "Your session expired" over
@@ -286,6 +286,7 @@ const NAV_ICON={
  'security-findings':_I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
  'agent-registry':_I('<rect x="2" y="8" width="20" height="12" rx="2"/><path d="M8 8V5a4 4 0 018 0v3"/><circle cx="12" cy="14" r="2"/>'),
  'agent-models':_I('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>'),
+ learning:_I('<path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>'),
  'agent-health':_I('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'),
  'agent-templates':_I('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>'),
  'knowledge-index':_I('<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>'),
@@ -303,7 +304,7 @@ const NAV_GROUPS=[
  {label:'Overview',items:[{page:'dashboard',label:'Dashboard'},{page:'metrics',label:'Metrics'}]},
  {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'jobs',label:'Jobs'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
  {label:'Governance',items:[{page:'access',label:'Access'},{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'},{page:'security-findings',label:'Security'}]},
- {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-models',label:'Agent Models'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
+ {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-models',label:'Agent Models'},{page:'learning',label:'Learning'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
  {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
 ];
 function nav(){
@@ -317,6 +318,33 @@ function navSetActive(page){
 function table(items,actions=false){if(!items?.length)return '<div class="empty">No live records</div>';const keys=Object.keys(items[0]).filter(k=>k!=='config').slice(0,9);const tdCls=k=>/_at$|^(created|updated|started|finished|timestamp)$/.test(k)?'td-date':/^(id|name|service|workspace_dir|display_name|title|gate)$/.test(k)||keys.indexOf(k)===0?'td-name':'';const fmtCell=(k,v)=>{if(/_at$|^(created|updated|started|finished|timestamp)$/.test(k)&&typeof v==='string')return fmtDt(v);return typeof v==='object'?JSON.stringify(v):String(v??'')};return `<div class="table"><table><thead><tr>${keys.map(k=>`<th>${esc(k.replaceAll('_',' '))}</th>`).join('')}${actions?'<th>Actions</th>':''}</tr></thead><tbody>${items.map(x=>`<tr>${keys.map(k=>`<td class="${tdCls(k)}" title="${esc(typeof x[k]==='object'?JSON.stringify(x[k]):String(x[k]??''))}">${esc(fmtCell(k,x[k])).slice(0,80)}</td>`).join('')}${actions?`<td><button data-test="${esc(x.id)}">Validate</button></td>`:''}</tr>`).join('')}</tbody></table></div>`}
 function gateCard(g){return `<article class="gate-card"><div class="sectionhead"><h3>${esc(g.gate)}</h3><span class="live-dot">LIVE</span></div><form class="gate-form"><input type="hidden" name="gate" value="${esc(g.gate)}"><div class="formgrid"><label>Enabled<select name="enabled"><option value="true" ${g.enabled?'selected':''}>Enabled</option><option value="false" ${!g.enabled?'selected':''}>Disabled</option></select></label><label>Approver role<input name="required_role" value="${esc(g.required_role)}"></label><label class="wide">Allowed decisions<input name="allowed_decisions" value="${esc(g.allowed_decisions.join(','))}"></label><label>Minimum evidence<input name="min_evidence" type="number" min="0" value="${g.min_evidence}"></label><label>Quorum<input name="quorum" type="number" min="1" value="${g.quorum}"></label><label>Timeout minutes<input name="timeout_minutes" type="number" min="0" value="${g.timeout_minutes}"></label><label>Escalation profile<input name="escalation_profile" value="${esc(g.escalation_profile)}"></label><label>Bypass role<input name="bypass_role" value="${esc(g.bypass_role)}"></label><label>Downstream effect<input name="downstream_effect" value="${esc(g.downstream_effect)}"></label></div><button class="btn-primary gate-save"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save changes</button><p class="gate-meta">Last persisted update: ${esc(g.updated_at?fmtDt(g.updated_at):'not yet configured')}</p></form></article>`}
 async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox'),api('/api/v2/approvals')]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
+// ---- Learning: what each run has taught, and whether the agents are improving ----------
+const LESSON_LABEL={SCHEMA_CORRECTION:'Schema correction',EFFORT_STEP_DOWN:'Effort step-down',GATE_GAP:'Skill gap',GATE_FAIL:'Gate failure',REPAIR:'Feedback repair',GAP_UNREPAIRED:'Gap not repaired',RUN_FAILURE:'Run failure'};
+async function learningPage(){
+ const d=await api('/api/v2/learning');
+ const agentRows=d.agents.length?d.agents.map(a=>{const rate=a.runs?Math.round(100*a.completed/a.runs):0;return `<tr>
+   <td class="td-name">${esc(a.agent_id)}</td><td>${a.runs}</td>
+   <td>${rate}%</td><td>${a.avg_seconds??'—'} s</td><td>${a.avg_attempts??'—'}</td>
+   <td>${a.corrections||0}</td><td>${a.step_downs||0}</td><td>${a.avg_gaps??'—'}</td><td>${a.avg_clarifications??'—'}</td></tr>`}).join('')
+  :'<tr><td colspan="9" class="empty">No runs recorded yet. They appear here as agents run.</td></tr>';
+ const lessonRows=d.lessons.length?d.lessons.map(l=>`<tr>
+   <td><span class="badge badge-neutral">${esc(LESSON_LABEL[l.kind]||l.kind)}</span></td>
+   <td class="td-name">${esc(l.agent_id)}</td>
+   <td style="max-width:360px;font-size:12px">${esc(l.situation)}</td>
+   <td style="max-width:300px;font-size:12px;color:var(--text-2)">${esc(l.resolution||'—')}</td>
+   <td><b>${l.occurrences}</b>${l.jobs>=2?` <span class="badge badge-warning"><span class="badge-dot"></span>${l.jobs} jobs</span>`:''}</td>
+   <td class="td-date">${esc(fmtDt(l.last_seen))}</td>
+   <td><span class="badge badge-info">${esc(l.status)}</span></td></tr>`).join('')
+  :'<tr><td colspan="7" class="empty">No lessons captured yet.</td></tr>';
+ $('#view').innerHTML=`
+  <div class="page-header page-header-row"><div><div class="page-title">Learning</div>
+   <div class="page-sub">${d.summary.runs} runs recorded · ${d.summary.lessons} lessons · ${d.summary.recurring} seen in more than one job</div></div></div>
+  <div class="card"><div class="card-head"><div><div class="card-title">Lessons</div>
+   <div class="card-sub">What went wrong in a run and what fixed it. One that recurs across jobs is a defect in a prompt, a skill or a gate rule, not bad luck. Lessons are captured only: nothing feeds them back into an agent until they are reviewed.</div></div><span class="live-dot">LIVE</span></div>
+   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Agent</th><th>Situation</th><th>What resolved it</th><th>Seen</th><th>Last</th><th>Status</th></tr></thead><tbody>${lessonRows}</tbody></table></div></div></div>
+  <div class="card" style="margin-top:16px"><div class="card-head"><div><div class="card-title">Agents over time</div>
+   <div class="card-sub">The figures to watch as prompts and skills change: fewer attempts, corrections, gaps and questions per run means the agent is getting it right sooner.</div></div></div>
+   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Runs</th><th>Completed</th><th>Avg time</th><th>Avg attempts</th><th>Corrections</th><th>Effort step-downs</th><th>Avg gaps</th><th>Avg questions</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div>`}
 // ---- Agent Models: which model each agent runs on, with the option to change it --------
 let _agentModels=null;
 async function agentModelsPage(){
@@ -2118,6 +2146,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  // itself right after a successful save.
  if(p==='access'){await accessPage();return}
  if(p==='agent-models'){await agentModelsPage();return}
+ if(p==='learning'){await learningPage();return}
  if(p==='approval-governance'){await approvalGovernance();return}
  if(p==='approval-inbox'){await approvalInbox();refreshTimer=setInterval(approvalInbox,5000);return}
  if(p==='agent-registry')return agentRegistryPage();
