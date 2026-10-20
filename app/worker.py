@@ -455,6 +455,6 @@ class WorkerLoop:
 if __name__ == '__main__':
     root = __import__('pathlib').Path(__file__).resolve().parent.parent
     repo = Repository(os.getenv('FACTORY_DB', str(root / 'factory-v2.db')))
-    sys.stderr.write('MOJO | Modernization Journey pipeline worker starting (standalone process)\n')
+    sys.stderr.write('ACE Migration Accelerator pipeline worker starting (standalone process)\n')
     sys.stderr.flush()
     WorkerLoop(repo, worker_id=os.getenv('WORKER_ID', 'pipeline-worker-standalone')).run_forever()
