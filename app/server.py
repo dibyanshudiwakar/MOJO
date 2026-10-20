@@ -450,6 +450,24 @@ class H(BaseHTTPRequestHandler):
             if not job_id: return self.sendj(422,{'error':'job_id_required'})
             self.authorize_job(self.principal(),job_id)
             return self.sendj(200,agents.dependency_status(job_id,m.group(1)))
+        # One row per agent: the model it runs on today, where that comes from,
+        # and the aliases an administrator may move it to.
+        if p=='/api/v2/agent-models':
+            rows={}
+            for a in repo.rows('select agent_id,display_name,default_model_alias,status,enabled from agent_registry order by agent_id,version'):
+                rows[a['agent_id']]=a
+            items=[]
+            for agent_id,a in rows.items():
+                default=a.get('default_model_alias') or ''
+                binding=llm_bindings.get(agent_id)
+                effective,source=llm_bindings.resolve(agent_id,default)
+                items.append({'agent_id':agent_id,'display_name':a.get('display_name') or agent_id,'default_alias':default,
+                              'effective_alias':effective,'source':source,
+                              'binding_status':(binding or {}).get('status',''),'binding_alias':(binding or {}).get('gateway_model_alias',''),
+                              'reason':(binding or {}).get('reason_for_change',''),'updated_by':(binding or {}).get('created_by',''),
+                              'updated_at':(binding or {}).get('updated_at',''),'enabled':bool(a.get('enabled')),'status':a.get('status') or ''})
+            aliases=[r['name'] for r in repo.rows("select distinct name from model_registry where status='APPROVED' order by name")]
+            return self.sendj(200,{'items':items,'aliases':aliases})
         m=re.fullmatch(r'/api/v2/agents/([a-z0-9-]+)/llm-binding/history',p)
         if m:
             self.require('AGENT_REGISTRY_ADMIN','GOVERNANCE_ADMIN')

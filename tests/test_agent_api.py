@@ -359,3 +359,50 @@ def test_a_report_of_a_job_outside_the_callers_project_is_refused_like_the_job_i
     # ... then the report is refused the same way, and the page is not leaked in the error.
     status, _, page = fetch_raw(base, '/api/v2/reports/%s/html' % rid, outsider)
     assert status == 403 and b'Parity report' not in page and b'CarrierNameSearch' not in page
+
+
+# ---- Agent Models: the model each agent runs on, and changing it ----------------
+
+def test_the_agent_model_table_lists_every_agent_with_its_default(server):
+    base, _ = server
+    status, body = call(base, '/api/v2/agent-models', bearer=token())
+    assert status == 200
+    assert len(body['items']) == CATALOGUE_AGENT_COUNT
+    row = next(x for x in body['items'] if x['agent_id'] == 'code-generation')
+    assert row['source'] == 'DEFAULT' and row['effective_alias'] == row['default_alias']
+    assert call(base, '/api/v2/agent-models')[0] == 401, 'the table needs a signed-in user'
+
+
+def test_an_override_changes_what_the_table_reports_and_can_be_reset(server):
+    base, _ = server
+    admin = token()
+    path = '/api/v2/agents/feedback/llm-binding'
+    # The alias must be approved in the model registry before it can be activated.
+    status, _ = call(base, '/api/v2/model-registry',
+                     {'name': 'reasoning-small', 'version': '1.0', 'status': 'APPROVED'}, admin)
+    assert status in (200, 201)
+
+    status, saved = call(base, path, {'binding_mode': 'AGENT_OVERRIDE',
+                                      'gateway_model_alias': 'reasoning-small',
+                                      'reason_for_change': 'cheaper for repairs'}, admin)
+    assert status == 201 and saved['status'] == 'DRAFT'
+    row = next(x for x in call(base, '/api/v2/agent-models', bearer=admin)[1]['items'] if x['agent_id'] == 'feedback')
+    assert row['source'] == 'DEFAULT' and row['binding_status'] == 'DRAFT', 'a draft does not change the running model'
+
+    assert call(base, path + '/validate', {}, admin)[1]['valid'] is True
+    assert call(base, path + '/activate', {}, admin)[0] == 200
+    row = next(x for x in call(base, '/api/v2/agent-models', bearer=admin)[1]['items'] if x['agent_id'] == 'feedback')
+    assert row['source'] == 'AGENT_OVERRIDE' and row['effective_alias'] == 'reasoning-small'
+    assert row['reason'] == 'cheaper for repairs'
+
+    assert call(base, path, bearer=admin, method='DELETE')[0] == 200
+    row = next(x for x in call(base, '/api/v2/agent-models', bearer=admin)[1]['items'] if x['agent_id'] == 'feedback')
+    assert row['source'] == 'DEFAULT' and row['effective_alias'] == row['default_alias']
+
+
+def test_changing_a_model_needs_an_administrator_role(server):
+    base, _ = server
+    plain = token(roles=['ACE_ANALYST'])
+    status, _ = call(base, '/api/v2/agents/feedback/llm-binding',
+                     {'binding_mode': 'AGENT_OVERRIDE', 'gateway_model_alias': 'coding'}, plain)
+    assert status == 403

@@ -196,6 +196,20 @@
     </div>
   </form>
 </dialog>
+<dialog id="agentModelDialog">
+  <h2 id="agentModelTitle">Change model</h2>
+  <p class="authhint dlg-sub" id="agentModelSub"></p>
+  <form id="agentModelForm">
+    <label>Model for this agent<select name="mode"><option value="DEFAULT">Use the catalogue default</option><option value="AGENT_OVERRIDE">Override with another model</option></select></label>
+    <label id="agentModelAliasRow">Model alias <small>(an alias approved in the model registry)</small><input name="alias" list="agentModelAliases" spellcheck="false" autocomplete="off" placeholder="reasoning-large"><datalist id="agentModelAliases"></datalist></label>
+    <label>Reason for change <small>(kept in the audit trail)</small><input name="reason" maxlength="200" autocomplete="off"></label>
+    <p class="authhint bad" id="agentModelError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="agentModelCancel">Cancel</button>
+      <button id="agentModelSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="skillRuntimeDialog">
   <h2 id="skillRuntimeDialogTitle">Add Runtime</h2>
   <p class="authhint dlg-sub">Runtimes define the target language and toolchain for migration Skills.</p>
