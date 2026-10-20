@@ -10,6 +10,15 @@ function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STAT
 function riskBadge(r){const m={high:'error',medium:'warning',low:'success'};const key=r?String(r).toLowerCase():'';if(!key||key==='none'||key==='—')return `<span style="color:var(--text-3);font-size:12px">—</span>`;const cls=m[key]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(String(r).toUpperCase())}</span>`}
 const pages=['dashboard','access','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
 let refreshTimer;
+// Every page polls with setInterval, and a poll that is rejected for a dead
+// session used to keep firing -- each tick re-showing "Your session expired" over
+// whatever the person was typing. Intervals are tracked here so that one expiry
+// stops all of them, not just the one in refreshTimer.
+const _intervals=new Set();
+const _setInterval=window.setInterval.bind(window),_clearInterval=window.clearInterval.bind(window);
+window.setInterval=(fn,ms,...a)=>{const id=_setInterval(fn,ms,...a);_intervals.add(id);return id};
+window.clearInterval=id=>{_intervals.delete(id);_clearInterval(id)};
+function stopAllTimers(){_intervals.forEach(id=>_clearInterval(id));_intervals.clear()}
 const token=()=>sessionStorage.getItem('access_token')||'';
 function claimsOf(t){try{const s=String(t).split('.');if(s.length!==3)return null;const b=s[1].replace(/-/g,'+').replace(/_/g,'/'),full=b+'='.repeat((4-b.length%4)%4);return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(full),c=>c.charCodeAt(0))))}catch(e){return null}}
 async function api(u,o={}){
@@ -19,7 +28,7 @@ async function api(u,o={}){
  // look like a server fault when the real state is "not signed in".
  const h={'Content-Type':'application/json'},t=token();if(t)h.Authorization='Bearer '+t;
  const r=await fetch(u,{...o,headers:h});let d={};try{d=await r.json()}catch(e){}
- if(r.status===401){const e=Error(d.error||'unauthorized');e.reauth=true;throw e}
+ if(r.status===401){stopAllTimers();const e=Error(d.error||'unauthorized');e.reauth=true;throw e}
  if(r.status===403){const e=Error(d.error||'forbidden');e.forbidden=true;throw e}
  if(!r.ok)throw Error(d.error||'request_failed');return d}
 // A status line reports that something just happened, so it dismisses itself
@@ -2150,7 +2159,11 @@ function renderError(e){
  // 401 means the token is missing, malformed or expired -- ask for a new one.
  // 403 means it authenticated but lacks a role, so signing in again is useless;
  // show who the caller is instead.
- if(e.reauth){sessionStorage.removeItem('access_token');session=null;renderIdentity();return authScreen('login','Your session expired. Sign in again.',true)}
+ if(e.reauth){
+  // Already signed out: a second failing request in flight must not redraw the
+  // sign-in screen, which would wipe what the person has started typing.
+  if(!session&&!token())return;
+  stopAllTimers();sessionStorage.removeItem('access_token');session=null;renderIdentity();return authScreen('login','Your session expired. Sign in again.',true)}
  if(e.forbidden){const u=session&&session.user;return notice('Not permitted: '+e.message+'. Signed in as '+((u&&u.email)||'unknown')+' with roles '+(((u&&u.roles)||[]).join(', ')||'none'),true)}
  notice(e.message,true)}
 $('#new').onclick=()=>{location.hash='new-migration'};
