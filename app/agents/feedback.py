@@ -46,7 +46,7 @@ class FeedbackAgent(BaseAgent):
         service = CodeFeedbackService(self.repo)
         result = service.apply(
             context.job_id, plan_id, project_root,
-            max_passes=int(context.param('max_passes', 3)),
+            max_passes=int(context.param('max_passes', 6)),
             execute_build=context.param('execute_build', 'auto'),
             # Carries the provider and correlation id, which is what enables the
             # model-assisted stage. Without it the agent is deterministic-only.

@@ -89,9 +89,57 @@ _REDACTIONS = (
 #: response must not be able to rewrite a project wholesale.
 MAX_PAYLOAD_FILES = 12
 MAX_FILE_CHARS = 6000
+MAX_CITED_FILE_CHARS = 30000
 MAX_EDITS = 20
 MAX_NEW_STR_CHARS = 20000
 NL = chr(10)
+
+
+#: The build is judged in stages, because a failing build is a sequence of problems: it
+#: cannot start until it compiles, and a compile failure with 20 errors reduced to 5
+#: is real progress that the pass/fail verdict cannot see.
+BUILD_CHECKS = ('COMPILE_AND_UNIT_TEST', 'STARTUP_SMOKE')
+
+
+def _build_errors(check):
+    evidence = (check or {}).get('evidence')
+    return len(evidence.get('errors') or []) if isinstance(evidence, dict) else 0
+
+
+def score(checks):
+    """(open non-build checks, build stages passed, build errors left) for one gate run.
+
+    ``stage`` is 0 while the build fails, 1 once it compiles and its tests pass but
+    the service does not start, 2 when it also starts (or no build was run).
+    """
+    by_name = {c['name']: c for c in checks}
+    others = frozenset(c['name'] for c in checks
+                       if c['status'] in ('FAIL', 'GAP') and c['name'] not in BUILD_CHECKS)
+    compile_ = by_name.get('COMPILE_AND_UNIT_TEST', {})
+    start = by_name.get('STARTUP_SMOKE', {})
+    if compile_.get('status') == 'FAIL':
+        stage, errors = 0, _build_errors(compile_)
+    elif start.get('status') == 'FAIL':
+        stage, errors = 1, _build_errors(start)
+    else:
+        stage, errors = 2, 0
+    return others, stage, errors
+
+
+def improved(before, after):
+    """Whether ``after`` is strictly better than ``before``, and worse in nothing.
+
+    Nothing that was passing may start failing; then something must have got
+    better -- a check closed, the build got a stage further, or it has fewer errors.
+    This replaces "the set of failing checks shrinks", under which a repair that
+    took the build from 20 errors to 5 was thrown away because the build still failed.
+    """
+    others_b, stage_b, errors_b = before
+    others_a, stage_a, errors_a = after
+    if not others_a <= others_b or stage_a < stage_b:
+        return False
+    return (others_a < others_b or stage_a > stage_b
+            or (stage_a == stage_b and errors_a < errors_b))
 
 
 def redact(text):
@@ -264,7 +312,10 @@ class CodeFeedbackService:
         ordered = sorted(everything, key=lambda f: 0 if f.name in cited else 1)
         files = []
         for f in ordered[:MAX_PAYLOAD_FILES]:
-            body = redact(f.read_text(errors='ignore'))[:MAX_FILE_CHARS]
+            # A file a compiler error names is shown nearly whole: the line it
+            # points at is rarely in the first 6,000 characters.
+            limit = MAX_CITED_FILE_CHARS if f.name in cited else MAX_FILE_CHARS
+            body = redact(f.read_text(errors='ignore'))[:limit]
             files.append({'path': str(f.relative_to(Path(root))).replace('\\', '/'),
                           'content': body})
         return detail, files
@@ -272,13 +323,18 @@ class CodeFeedbackService:
     def _accept_edit(self, root, edit):
         return accept_edit(root, edit)
 
-    def _claude_repair(self, context, root, checks, job_id, plan_id, quality):
+    def _claude_repair(self, context, root, checks, job_id, plan_id, quality,
+                       execute_build='auto', history=None):
         """Ask the model for edits, apply them, and keep them only if the gate improves.
 
         The gate's verdict decides, not the model's confidence. Every file the
-        edits touch is snapshotted first and restored wholesale unless the
-        failing-check set strictly shrinks and gains nothing new -- so a repair
+        edits touch is snapshotted first and restored wholesale unless the gate
+        scores strictly better and worse in nothing (``improved``) -- so a repair
         that breaks something else, or achieves nothing, leaves no trace.
+
+        The gate is re-run *with the build*. It used to be re-run without it, so a
+        build failure showed as "not executed" after any edit, the repair looked like
+        an improvement, and an edit that had never been compiled was kept.
         """
         from app.agents.reasoning import ReasoningGateway
         # FAIL and GAP both count: a repair that closes a GAP is an improvement
@@ -287,7 +343,8 @@ class CodeFeedbackService:
         detail, files = self._candidates(root, checks)
         answer, provenance = ReasoningGateway(self.repo).reason(
             context, 'agent/feedback/code-repair',
-            {'failing_checks': sorted(failed_before), 'check_detail': detail, 'files': files})
+            {'failing_checks': sorted(failed_before), 'check_detail': detail, 'files': files,
+             **({'previous_attempts': list(history)[-3:]} if history else {})})
         if not isinstance(answer, dict) or not answer.get('edits'):
             return {'attempted': bool(answer), 'applied': [], 'refused': [],
                     'outcome': 'no_edits_proposed',
@@ -308,19 +365,31 @@ class CodeFeedbackService:
             return {'attempted': True, 'applied': [], 'refused': refused,
                     'outcome': 'all_edits_refused', 'mode': provenance.get('mode', '')}
 
-        after = quality.quality_validate(job_id, plan_id, root, False)
+        after = quality.quality_validate(job_id, plan_id, root, execute_build)
         failed_after = {c['name'] for c in after['checks'] if c['status'] in ('FAIL', 'GAP')}
-        improved = failed_after < failed_before          # strict subset: fewer, nothing new
-        if not improved:
+        better = improved(score(checks), score(after['checks']))
+        tried = [a['action'] for a in accepted][:6]
+        if not better:
             for path, text in snapshot.items():
                 path.write_text(text)
             return {'attempted': True, 'applied': [], 'refused': refused,
                     'outcome': 'reverted_no_improvement',
                     'failed_before': sorted(failed_before), 'failed_after': sorted(failed_after),
-                    'mode': provenance.get('mode', '')}
+                    'mode': provenance.get('mode', ''),
+                    # Told to the next attempt so it does not propose the same thing again.
+                    '_note': {'tried': tried, 'result': 'reverted: it did not get the build further',
+                              'errors_then': self._top_errors(after['checks'])}}
         return {'attempted': True, 'applied': accepted, 'refused': refused,
                 'outcome': 'kept', 'failed_before': sorted(failed_before),
-                'failed_after': sorted(failed_after), 'mode': provenance.get('mode', '')}
+                'failed_after': sorted(failed_after), 'mode': provenance.get('mode', ''),
+                '_after': after, '_note': {'tried': tried, 'result': 'kept: the build got further'}}
+
+    @staticmethod
+    def _top_errors(checks, limit=8):
+        for c in checks:
+            if c['name'] in BUILD_CHECKS and c['status'] == 'FAIL' and isinstance(c.get('evidence'), dict):
+                return list(c['evidence'].get('errors') or [])[:limit]
+        return []
 
     # -- unresolved findings -------------------------------------------------
     def outstanding(self, job_id):
@@ -360,9 +429,13 @@ class CodeFeedbackService:
         from app.services.migration_lifecycle_v6 import MappingAndPlanningService
         quality = MappingAndPlanningService(self.repo)
         budget = max(1, int(max_passes))
-        passes, applied, model_rounds, run = [], [], [], None
+        passes, applied, model_rounds, run, history = [], [], [], None, []
+        carried = None
         for n in range(budget + 1):
-            run = quality.quality_validate(job_id, plan_id, project_root, execute_build)
+            # The model stage has just validated the tree it left behind (with the
+            # build, which takes minutes), so that run is reused rather than repeated.
+            run = carried or quality.quality_validate(job_id, plan_id, project_root, execute_build)
+            carried = None
             failed = [c['name'] for c in run['checks'] if c['status'] in ('FAIL', 'GAP')]
             if not failed or n == budget:
                 passes.append({'pass': n + 1, 'failed': failed, 'fixes': 0, 'model': None,
@@ -373,14 +446,24 @@ class CodeFeedbackService:
             model = None
             if not fixes and context is not None and getattr(context, 'provider', None) is not None:
                 model = self._claude_repair(context, project_root, run['checks'],
-                                            job_id, plan_id, quality)
+                                            job_id, plan_id, quality, execute_build, history)
                 applied += model['applied']
+                note = model.pop('_note', None)
+                if note:
+                    history.append(note)
+                # Kept: the tree is what that validation saw. Reverted: it is what
+                # ``run`` saw. Either way no second build is needed.
+                carried = model.pop('_after', None) or run
                 model_rounds.append(model)
             passes.append({'pass': n + 1, 'failed': failed, 'fixes': len(fixes),
                            'model': (model or {}).get('outcome'),
                            'quality_run_id': run['quality_run_id'], 'status': run['status']})
             if not fixes and not (model or {}).get('applied'):
-                break
+                # A reverted attempt is information, not the end: the next one is told
+                # what was tried and what the build said. Nothing proposed, or nothing
+                # that could be placed in a file, would be asked again unchanged.
+                if (model or {}).get('outcome') != 'reverted_no_improvement':
+                    break
         final_failed = [c['name'] for c in run['checks'] if c['status'] == 'FAIL']
         final_gaps = [c['name'] for c in run['checks'] if c['status'] == 'GAP']
         return {
