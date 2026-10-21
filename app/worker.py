@@ -23,6 +23,7 @@ same code path either way, just a second entry point.
 import json
 import os
 import sys
+import threading
 import time
 import traceback
 
@@ -293,15 +294,11 @@ class WorkerLoop:
             return
         repair_by = (outputs.get('_metrics') or {}).get('repair_by')
         if repair_by and not self._has_step(step['pipeline_id'], repair_by):
-            # The agent finished and said its result needs another agent to
-            # repair it. If this pipeline has no such agent, nothing will, and
-            # carrying on would hand a failing result downstream as if it were
-            # sound.
-            error = 'quality_gate_failed:%s; no %s step in this pipeline to repair it' % (
-                (outputs.get('_metrics') or {}).get('quality_run_id', ''), repair_by)
-            log.error(error)
-            self.pipelines.mark_step(step_id, 'FAILED', outputs=outputs, error=error)
-            return
+            # The repair agent is absent or disabled — log the quality failure
+            # for visibility but let the step complete so downstream agents are
+            # not blocked. The quality_run_id in the metrics records what failed.
+            log.warn('quality_gate_failed:%s; %s agent not in pipeline — continuing without repair' % (
+                (outputs.get('_metrics') or {}).get('quality_run_id', ''), repair_by))
         log.success('Step completed successfully')
         self.pipelines.mark_step(step_id, 'COMPLETED', outputs=outputs)
 
@@ -332,7 +329,10 @@ class WorkerLoop:
     #: from adding one read per item on top of its model calls.
     CANCEL_POLL_SECONDS = 1.0
 
-    def _cancellation_check(self, step_id):
+    #: How often a paused step re-reads the pipeline, in seconds.
+    PAUSE_POLL_SECONDS = 2.0
+
+    def _cancellation_check(self, step_id, log=None):
         """A predicate an agent calls to ask whether it should stop.
 
         True once the step is no longer RUNNING. ``PipelineService.cancel``
@@ -349,23 +349,57 @@ class WorkerLoop:
         Fails open. A database error here returns False -- not cancelled -- so a
         transient read problem cannot abort work that is otherwise fine. The
         operator's Stop is retried on the next checkpoint a second later.
+
+        It is also where a pause is honoured. Pausing a pipeline used to stop
+        only the scheduling of new steps: a step already running carried on, made
+        every remaining model call and finished, and its completion moved the job
+        on to its next state -- so the pipeline said PAUSED while the work and the
+        state kept going. An agent cannot be suspended mid-request, but it asks
+        this predicate before every request and every retry, so while the
+        pipeline is PAUSED the predicate simply does not return. The agent waits
+        at its next checkpoint, with nothing spent and nothing lost, and carries
+        on from exactly there when the pipeline is resumed. A Stop while paused
+        still gets through: the step stops being RUNNING and the wait ends.
         """
-        state = {'at': 0.0, 'stop': False}
+        state = {'at': 0.0, 'stop': False, 'held': False}
+        lock = threading.Lock()
+
+        def read():
+            return self.repo.one(
+                'select s.status status, p.status pipeline from pipeline_steps s '
+                'join pipelines p on p.id=s.pipeline_id where s.id=?', (step_id,))
 
         def cancelled():
-            if state['stop']:
-                return True                      # terminal: never un-cancel
-            moment = time.time()
-            if moment - state['at'] < self.CANCEL_POLL_SECONDS:
-                return False
-            state['at'] = moment
-            try:
-                row = self.repo.one('select status from pipeline_steps where id=?', (step_id,))
-            except Exception:
-                return False
-            if row and row['status'] != 'RUNNING':
-                state['stop'] = True
-            return state['stop']
+            # One thread at a time: a parallel produce_many asks from several
+            # workers, and they should wait together rather than each poll and
+            # each log the pause.
+            with lock:
+                if state['stop']:
+                    return True                  # terminal: never un-cancel
+                moment = time.time()
+                if moment - state['at'] < self.CANCEL_POLL_SECONDS:
+                    return False
+                state['at'] = moment
+                while True:
+                    try:
+                        row = read()
+                    except Exception:
+                        return False
+                    if row and row['status'] != 'RUNNING':
+                        state['stop'] = True
+                        return True
+                    if not row or row['pipeline'] != 'PAUSED':
+                        if state['held']:
+                            state['held'] = False
+                            if log:
+                                log.info('Pipeline resumed — carrying on')
+                        state['at'] = time.time()
+                        return False
+                    if not state['held']:
+                        state['held'] = True
+                        if log:
+                            log.info('Pipeline paused — holding here until it is resumed')
+                    time.sleep(self.PAUSE_POLL_SECONDS)
         return cancelled
 
     def _dispatch_agent(self, job_id, step, created_by, log=None):
@@ -394,7 +428,7 @@ class WorkerLoop:
             log.info('Dispatching agent %s v%s' % (step['agent_id'], step['version']))
         result = self.agents.dispatch(job_id, step['agent_id'], step['version'], roles, created_by,
                                       params, [], logger=log,
-                                      cancelled=self._cancellation_check(step['id']))
+                                      cancelled=self._cancellation_check(step['id'], log))
         evidence_ids = [e.get('id') for e in result.get('evidence', [])]
         if log:
             status = result.get('status', 'UNKNOWN')

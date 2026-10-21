@@ -3,7 +3,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
-from app.services import learning
+from app.services import learning, suggestions
 from app.service import FactoryService
 from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
@@ -642,6 +642,12 @@ class H(BaseHTTPRequestHandler):
                 out=accounts.grant_role(pr.roles,d.get('email'),d.get('role'))
                 ledger.append('',pr.identity,'ACCOUNT_ROLE_GRANTED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
                 return self.sendj(200,{'user':out})
+            if p=='/api/v2/clarifications/suggest':
+                pr=self.principal()
+                job_id=str(d.get('job_id') or '')
+                if not job_id: return self.sendj(422,{'error':'job_id_required'})
+                self.authorize_job(pr,job_id)
+                return self.sendj(200,suggestions.suggest_missing(agents,job_id,pr.identity,pr.roles))
             m=re.fullmatch(r'/api/v2/lessons/([a-z0-9-]+)/decide',p)
             if m:
                 pr=self.require('KNOWLEDGE_CURATOR','GOVERNANCE_ADMIN')

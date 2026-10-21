@@ -64,8 +64,17 @@ class RemediationAgent(BaseAgent):
 
     def execute(self, context):
         job = context.job()
+        root_cause_id = context.param('root_cause_id', None)
+        if not root_cause_id:
+            n = (self.repo.one('select count(*) n from root_causes where job_id=?',
+                               (context.job_id,)) or {}).get('n', 0)
+            if not n:
+                return AgentResult(status='COMPLETED',
+                                   outputs={'patch_plan': None, 'code_changes': [], 'tests': []},
+                                   metrics={'skipped': True, 'reason': 'no_root_causes'})
+            raise ValueError('missing_param:root_cause_id')
         cause = self.repo.one('select * from root_causes where id=? and job_id=?',
-                              (context.param('root_cause_id'), context.job_id))
+                              (root_cause_id, context.job_id))
         if not cause:
             raise ValueError('root_cause_not_found')
         facts = self._preconditions(context, cause)

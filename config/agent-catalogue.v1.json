@@ -57,7 +57,7 @@
       "approval_evidence_id": "",
       "supersedes_version": "",
       "enabled": true,
-      "default_model_alias": "reasoning-small"
+      "default_model_alias": "reasoning-large"
     },
     {
       "agent_id": "dormancy-intelligence",
@@ -276,7 +276,7 @@
       "approved_by": "ARCHITECTURE_BASELINE",
       "approval_evidence_id": "architecture-v1-agent-catalogue",
       "supersedes_version": null,
-      "enabled": true,
+      "enabled": false,
       "default_model_alias": "coding"
     },
     {

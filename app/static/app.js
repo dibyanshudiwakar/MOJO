@@ -8,7 +8,7 @@ function progressFillClass(state,pct){const s=String(state||'').toUpperCase();co
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
 function riskBadge(r){const m={high:'error',medium:'warning',low:'success'};const key=r?String(r).toLowerCase():'';if(!key||key==='none'||key==='—')return `<span style="color:var(--text-3);font-size:12px">—</span>`;const cls=m[key]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(String(r).toUpperCase())}</span>`}
-const pages=['dashboard','access','agent-models','learning','pipelines','approval-governance','approval-inbox','jobs','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
+const pages=['dashboard','access','agent-models','learning','pipelines','approval-governance','approval-inbox','approvals','evidence','agent-registry','agent-health','agent-templates','specifications','comparisons','variances','rca','remediations','events','versions','clarifications','intakes','dormancy','frameworks','analyses','plans','generated','quality-runs','differential-packages','differential-evidence','audit-ledger','security-findings','metrics','service-registry','prompt-registry','model-registry','model-requests','knowledge-index','delivery-operations','notifications','observability-events','retention-policies','skill-registry'];
 let refreshTimer;
 // Every page polls with setInterval, and a poll that is rejected for a dead
 // session used to keep firing -- each tick re-showing "Your session expired" over
@@ -302,7 +302,7 @@ const NAV_ICON={
 const _defIcon=_I('<circle cx="12" cy="12" r="4"/>');
 const NAV_GROUPS=[
  {label:'Overview',items:[{page:'dashboard',label:'Dashboard'},{page:'metrics',label:'Metrics'}]},
- {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'jobs',label:'Jobs'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
+ {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
  {label:'Governance',items:[{page:'access',label:'Access'},{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'},{page:'security-findings',label:'Security'}]},
  {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-models',label:'Agent Models'},{page:'learning',label:'Learning'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
  {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
@@ -485,6 +485,7 @@ async function clarificationsPage(){
  // original is listed, so the copy is not.
  const answered=all.filter(c=>c.status==='ANSWERED');
  const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
+ const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim());
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -514,12 +515,25 @@ async function clarificationsPage(){
    </div>`}
   </div>`};
  $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
+  ${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ const gen=$('#genSuggestions');
+ if(gen)gen.onclick=async()=>{
+  // One request per job: the model answers in the context of the agent and job that raised the question.
+  gen.disabled=true;gen.textContent='Generating…';
+  const jobs=[...new Set(unsuggested.map(c=>c.job_id))];let made=0,wanted=0;const why=[];
+  try{
+   for(const job_id of jobs){
+    const r=await api('/api/v2/clarifications/suggest',{method:'POST',body:JSON.stringify({job_id})});
+    made+=r.suggested;wanted+=r.requested;why.push(...(r.errors||[]))}
+   notice(`${made} of ${wanted} suggestion${wanted===1?'':'s'} generated`+(why.length?' — '+why[0]:''),made<wanted);
+   clarificationsPage()
+  }catch(e){notice(e.message,true);gen.disabled=false;gen.textContent='Generate suggestions'}};
  document.querySelectorAll('.clarif-submit-btn').forEach(btn=>{
   const item=btn.closest('.clarif-item');
   const cid=item?.dataset.clarifId;
@@ -2135,32 +2149,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  const TREND_DOWN=`<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>`;
  const TREND_WARN=`<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
  $('#metrics').innerHTML=kpiData.map(k=>`<div class="kpi-card" style="--kpi-color:${k.color};--kpi-icon-bg:${k.iconBg}"><div class="kpi-label">${esc(k.label)}<div class="kpi-icon"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">${k.icon}</svg></div></div><div class="kpi-value">${k.value??0}</div>${k.trend?`<div class="kpi-trend ${k.trendClass}">${k.trendClass==='trend-up'?TREND_UP:k.trendClass==='trend-down'?TREND_DOWN:k.trendClass==='trend-warn'?TREND_WARN:''}${esc(k.trend)}</div>`:''}</div>`).join('');
- if(p==='jobs'){
-  const jd=await api('/api/v2/jobs');const jobs=jd.items||[];
-  const jobRow=j=>{const _pct=dispPct(j.state||j.status,j.progress);const _cls=progressFillClass(j.state||j.status,j.progress||0);console.log('[progress]',j.service||j.id,'state:',j.state||j.status,'pct:',_pct+'%','css-class:',_cls.trim()||'(base)');return`<tr>
-   <td style="font-family:ui-monospace,monospace;font-size:12px;color:var(--text-2);white-space:nowrap">${esc(String(j.id||'').slice(0,14))}</td>
-   <td class="td-name">${esc(j.service||j.workspace_dir||j.id||'')}</td>
-   <td class="td-light">${esc(j.owner||j.created_by||'—')}</td>
-   <td>${stateBadge(j.state||j.status||'CREATED')}</td>
-   <td style="min-width:130px"><div style="display:flex;align-items:center;gap:8px">
-    <div class="progress-bar" style="flex:1"><div class="progress-fill${_cls}" style="width:${_pct}%"></div></div>
-    <span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${_pct}%</span>
-   </div></td>
-   <td>${riskBadge(j.risk)}</td>
-   <td><button class="btn-ghost btn-view-job" data-job-id="${esc(j.id)}" style="font-size:12px">View</button></td>
-  </tr>`};
-  const rows=jobs.map(jobRow).join('');
-  $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Migration Jobs</div><div class="page-sub">All migration jobs and their full lifecycle status</div></div><button class="btn-primary btn-new-mig"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> New Migration</button></div>
-   <div class="card"><div class="card-head"><div><div class="card-title">All Jobs (${jobs.length})</div></div><div style="display:flex;align-items:center;flex-shrink:0">
-    <button class="btn-secondary" style="font-size:12px;white-space:nowrap">Filter</button>
-</div></div>
-   <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Job ID</th><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th><th>Actions</th></tr></thead>
-   <tbody>${rows||'<tr><td colspan="7" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
-  $('#view').querySelector('.btn-new-mig')?.addEventListener('click',()=>location.hash='new-migration');
-  $('#view').addEventListener('click',e=>{const b=e.target.closest('.btn-view-job');if(b)location.hash='jobs/'+b.dataset.jobId});
-  requestAnimationFrame(()=>{document.querySelectorAll('.progress-bar').forEach(bar=>{const fill=bar.querySelector('.progress-fill');if(!fill)return;const bw=bar.getBoundingClientRect().width;const fw=fill.getBoundingClientRect().width;console.log('[progress-computed] bar-width:'+bw.toFixed(1)+'px fill-width:'+fw.toFixed(1)+'px applied-style:'+fill.style.width+' class:'+fill.className)})});
-  refreshTimer=setInterval(async()=>{const r=await api('/api/v2/jobs');const jobs2=r.items||[];const tb=document.querySelector('#view tbody');if(tb)tb.innerHTML=jobs2.map(jobRow).join('')||'<tr><td colspan="7" class="empty">No jobs yet</td></tr>'},10000);
-  return}
+ if(p==='jobs'){location.hash='pipelines';return}
  // No auto-refresh here: this page is a set of editable forms, not telemetry.
  // A 5s re-render rebuilt every gate form from the database mid-edit, so a
  // field changed more than 5s before pressing Save was silently reverted and
@@ -2178,9 +2167,16 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p==='dashboard'){
   const [jobs,approvals,pipelines]=await Promise.all([api('/api/v2/jobs'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/pipelines').catch(()=>({items:[]}))]);
 
-  const runPl=(pipelines.items||[]).find(x=>x.status==='RUNNING');
+  // The pipeline worth showing: one doing something, then one that is held, then
+  // the latest. Only RUNNING was looked for, so pausing a pipeline (or stopping at
+  // an approval) made it vanish from the dashboard.
+  const plItems=pipelines.items||[];
+  const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
   let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
-  const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${esc(x.service||x.workspace_dir||x.id)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
+  // The newest pipeline of each job, so a service can lead to the pipeline running it.
+  const plByJob={};plItems.slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(pl=>{plByJob[pl.job_id]=pl});
+  const svcName=x=>{const name=esc(x.service||x.workspace_dir||x.id);const pl=plByJob[x.id];return pl?`<a class="pl-link" href="#pipelines/${esc(pl.id)}" title="Open this pipeline">${name}</a>`:name};
+  const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
   const pendingCount=(approvals.items||[]).length;
   const APPR_LIMIT=5;
   const appRows=(approvals.items||[]).slice(0,APPR_LIMIT).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
@@ -2197,8 +2193,10 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
     :s.started_at?`Running… ${dur}`:'Waiting';
    return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
   const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
-  const pipelineBadge=runPl?`<span class="badge badge-running"><span class="badge-dot"></span>RUNNING</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">Live step execution · ${plSteps.length} steps</div></div>${pipelineBadge}</div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
+  const plStatus=runPl?String(runPl.status||''):'';
+  const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
+  const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
+  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}</div></div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2214,9 +2212,16 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state</div></div><button id="dashViewAllJobs" class="btn-ghost">View all →</button></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
+  $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
-  $('#dashViewAllJobs')?.addEventListener('click',()=>{location.hash='jobs';});
+  // Every part of the pipeline card leads to the pipeline: the title, the button,
+  // and each step. None of it was clickable.
+  if(runPl){
+   const go=()=>{location.hash='pipelines/'+runPl.id};
+   $('#dashOpenPipeline')?.addEventListener('click',go);
+   document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
+  // The header says it refreshes itself; nothing did.
+  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard')render()},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.

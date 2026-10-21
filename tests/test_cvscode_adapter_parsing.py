@@ -83,9 +83,9 @@ def test_a_truncated_reply_says_where_the_token_budget_went():
 # ---- reasoning effort ----------------------------------------------------------------------
 
 def test_effort_defaults_to_the_aliases_level_and_can_be_lowered_per_call():
-    """The coding alias runs at xhigh; a file listing does not need it."""
+    """The coding alias runs at high on Sonnet; a file listing does not need even that."""
     adapter = CvscodeClaudeAdapter(alias='coding')
-    assert adapter._request('t', {})['output_config'] == {'effort': 'xhigh'}
+    assert adapter._request('t', {})['output_config'] == {'effort': 'high'}
     assert adapter._request('t', {}, effort='low')['output_config'] == {'effort': 'low'}
 
 
@@ -121,3 +121,13 @@ def test_an_empty_thinking_block_is_reported_as_reasoning_not_as_none():
     with pytest.raises(RuntimeError) as raised:
         adapter.invoke('t', {})
     assert 'reasoned before answering' in str(raised.value)
+
+
+def test_each_alias_maps_one_tier_down():
+    """Opus-class aliases run on Sonnet; Sonnet-class on Haiku. A model move is a one-line edit."""
+    from app.providers.cvscode_adapter import resolve_alias
+    assert resolve_alias('reasoning-large')[0] == 'claude-sonnet-5-5'
+    assert resolve_alias('coding') == ('claude-sonnet-5-5', 'high')
+    assert resolve_alias('semantic-review') == ('claude-haiku-4-5@20251001', None)
+    assert resolve_alias('reasoning-small') == ('claude-haiku-4-5@20251001', None)
+    assert CvscodeClaudeAdapter(alias='semantic-review').effort is None, 'Haiku gets no effort parameter'
