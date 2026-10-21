@@ -276,7 +276,7 @@
       "approved_by": "ARCHITECTURE_BASELINE",
       "approval_evidence_id": "architecture-v1-agent-catalogue",
       "supersedes_version": null,
-      "enabled": true,
+      "enabled": false,
       "default_model_alias": "coding"
     },
     {
