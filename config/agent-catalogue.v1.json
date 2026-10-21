@@ -57,7 +57,7 @@
       "approval_evidence_id": "",
       "supersedes_version": "",
       "enabled": true,
-      "default_model_alias": "reasoning-small"
+      "default_model_alias": "reasoning-large"
     },
     {
       "agent_id": "dormancy-intelligence",
