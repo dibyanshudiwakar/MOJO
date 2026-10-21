@@ -1311,3 +1311,7 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .withheld-list{display:flex;flex-direction:column}
 .withheld-row{display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border,#e5e7eb);font-size:13px}
 .withheld-count{color:var(--text-2);min-width:84px}
+
+/* A service name that leads to its pipeline. */
+.pl-link{color:var(--primary,#2563eb);text-decoration:none;font-weight:600}
+.pl-link:hover{text-decoration:underline}
