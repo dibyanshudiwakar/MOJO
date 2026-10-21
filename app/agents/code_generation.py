@@ -161,7 +161,7 @@ class CodeGenerationAgent(BaseAgent):
         manifest = json.loads(manifest_path.read_text())
         quality = service.quality_validate(
             context.job_id, plan_id, generated['project_root'],
-            bool(context.param('execute_build', False)))
+            context.param('execute_build', 'auto'))
         files = [x['path'] for x in manifest.get('files', [])]
         tests = [x for x in files if 'src/test/' in x.replace('\\', '/')]
         failed = [x['name'] for x in quality['checks'] if x['status'] == 'FAIL']
@@ -170,7 +170,7 @@ class CodeGenerationAgent(BaseAgent):
         # The payload carries check names and counts, not generated source --
         # the project is on disk for a human to read.
         answer, triage = ReasoningGateway(self.repo).reason(context, self.PROMPT, {
-            'failed_checks': [{'name': x['name'], 'detail': str(x.get('detail', ''))[:400]}
+            'failed_checks': [{'name': x['name'], 'detail': str(x.get('detail') or x.get('evidence') or '')[:400]}
                               for x in quality['checks'] if x['status'] == 'FAIL'],
             'file_count': generated['file_count'], 'test_count': len(tests),
             'service_name': context.param('service_name')}) if failed else (None, {
@@ -187,9 +187,29 @@ class CodeGenerationAgent(BaseAgent):
         # what happened. Authoring is the model work this agent exists to do.
         provenance = dict(authoring)
         provenance['quality_triage'] = {k: triage.get(k) for k in ('mode', 'reason')}
+        gate_failed = quality['status'] == 'FAIL'
+        # The skill's non-blocking findings, named. HANDOFF-B says to print the
+        # residual open items as GAPs with a remediation path rather than refuse
+        # the hand-off, so they travel on the run for a reviewer to read.
+        gaps = [{'check': x['name'], 'skill_ref': x.get('skill_ref', ''), 'findings': x.get('evidence', [])[:5],
+                 'remediation': x.get('remediation', '')}
+                for x in quality['checks'] if x['status'] == 'GAP']
+        if gaps and context.logger:
+            context.logger.warn('%d skill GAP(s) open: %s' % (len(gaps), ', '.join(g['check'] for g in gaps)))
+        if gate_failed and context.logger:
+            context.logger.warn('Quality gate FAILED (%s) — the project is generated and handed to the '
+                                'feedback agent to repair' % ', '.join(failed))
         return AgentResult(
-            status='FAILED' if quality['status'] == 'FAIL' else 'COMPLETED',
-            error='quality_gate_failed:' + quality['quality_run_id'] if quality['status'] == 'FAIL' else '',
+            # Generation is complete either way; the gate's verdict is recorded
+            # beside it (``quality_status``, the quality run, the evidence) and is
+            # not softened. This used to return FAILED, which the pipeline worker
+            # did not read -- so the step showed COMPLETED while the run was
+            # FAILED, and the feedback agent, whose whole job is to repair a
+            # project the gate has flagged, was refused for want of a completed
+            # code-generation run. ``repair_by`` tells the worker to fail the step
+            # if nothing in the pipeline is going to do that.
+            status='COMPLETED',
+            error='',
             outputs={'source_code': generated['project_root'], 'tests': tests,
                      'manifest': str(manifest_path), 'provenance': generated['content_hash']},
             # ``generate_spring`` hashes the manifest as sorted, compact json but
@@ -208,6 +228,9 @@ class CodeGenerationAgent(BaseAgent):
                      'model_attempts': authoring.get('attempts', 0),
                      'layout_root': authoring.get('layout_root', ''),
                      'quality_status': quality['status'], 'failed_checks': failed,
+                     'gap_count': len(gaps), 'gaps': gaps,
+                     'quality_run_id': quality['quality_run_id'],
+                     'repair_by': 'feedback' if gate_failed else '',
                      # What the model said it left out, surfaced on the run so
                      # the output panel shows it beside the code.
                      'action_items': generated.get('action_items', []),

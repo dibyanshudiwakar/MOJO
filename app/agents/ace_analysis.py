@@ -75,7 +75,24 @@ class ACEAnalysisAgent(BaseAgent):
         # The merge stays deterministic: it is list concatenation, and leaving
         # it in code is what stops the assembly inventing, dropping or
         # reordering a construct the per-file answers established.
+        for fragment in fragments.values():
+            self._literals_as_text(fragment)
         return parser.merge([fragments[rel] for rel, _, _ in sources if rel in fragments]), provenance
+
+    @staticmethod
+    def _literals_as_text(fragment):
+        """Everything downstream reads an assignment's literal as text.
+
+        The model writes ``SET x = 1`` as the number 1, which the schema now
+        accepts; the code generator searches the literal for addresses and
+        credentials, so it is stored as the text the ESQL had.
+        """
+        for module in (fragment or {}).get('esql') or []:
+            for assignment in (module or {}).get('assignments') or []:
+                literal = assignment.get('literal')
+                if literal is not None and not isinstance(literal, str):
+                    assignment['literal'] = ('true' if literal is True else 'false' if literal is False
+                                             else str(literal))
 
     def _focused_skill(self, context, by_path):
         """Narrow the skill to the references the files at hand actually need."""

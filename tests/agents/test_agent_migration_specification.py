@@ -112,7 +112,8 @@ def _agent_with(repo, job, analysis, wrong_section_once=False):
 def test_it_asks_one_request_per_section(repo, job, analysis):
     from app.agents.migration_specification import SECTIONS
     recorder, _ = _agent_with(repo, job, analysis)
-    assert [p['section'] for p in recorder.payloads] == list(SECTIONS)
+    # Asked concurrently, so the order they arrive in is not fixed -- each exactly once.
+    assert sorted(p['section'] for p in recorder.payloads) == sorted(SECTIONS)
 
 
 def test_recorded_facts_are_attached_not_sent_to_the_model_to_retype(repo, job, analysis):
@@ -131,8 +132,10 @@ def test_an_answer_for_the_wrong_section_is_corrected_not_accepted(repo, job, an
     recorder, result = _agent_with(repo, job, analysis, wrong_section_once=True)
     # The first section was answered as another one, so it was asked again.
     assert len(recorder.payloads) == 7
-    assert recorder.payloads[1]['section'] == recorder.payloads[0]['section']
-    assert '_correction' in recorder.payloads[1] and 'section must be' in recorder.payloads[1]['_correction']
+    # Requests run concurrently, so position says nothing: find the retry by its correction.
+    retries = [p for p in recorder.payloads if '_correction' in p]
+    assert len(retries) == 1 and 'section must be' in retries[0]['_correction']
+    assert sum(1 for p in recorder.payloads if p['section'] == retries[0]['section']) == 2
     assert result.status == 'COMPLETED'
 
 

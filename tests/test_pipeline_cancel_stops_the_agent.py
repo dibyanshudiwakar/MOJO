@@ -127,8 +127,15 @@ def _context(repo, job, provider, cancelled):
         job['id'], provider=provider, cancelled=cancelled)
 
 
-def test_produce_many_stops_between_items_and_discards_what_it_had(env):
-    """The checkpoint that matters: this loop is where a long agent lives."""
+def test_produce_many_stops_between_items_and_discards_what_it_had(env, monkeypatch):
+    """The checkpoint that matters: this loop is where a long agent lives.
+
+    Pinned to one request at a time: "exactly two calls were spent" is a
+    statement about a sequential loop. With requests in flight together, a few
+    more can already be running when Stop lands; that case is
+    tests/agents/test_parallel.py::test_a_stop_request_cancels_before_the_next_call_starts.
+    """
+    monkeypatch.setenv('MOJO_LLM_CONCURRENCY', '1')
     repo, job, pipelines, workflow = env
     provider = _Counting()
     stop = {'now': False}

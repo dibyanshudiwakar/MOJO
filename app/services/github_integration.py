@@ -125,11 +125,14 @@ class GitHubIntegrationService:
         """
         return self._token(user_id)
 
-    def connect(self, user_id):
+    def connect(self, user_id, user_email=None):
         """Verify the stored credential against the configured GitHub.
 
         Returns a status the UI can render, and on failure records and returns
         the upstream detail so the operator can retry with a correction.
+
+        user_email: when provided, the token's GitHub identity must resolve to
+        this address, preventing one user from registering another's token.
         """
         row = self.repo.one('select * from user_integrations where user_id=? and provider=?', (user_id, 'github'))
         if not row:
@@ -143,7 +146,6 @@ class GitHubIntegrationService:
             with urllib.request.urlopen(request, timeout=TIMEOUT, context=ssl.create_default_context()) as resp:
                 body = json.loads(resp.read().decode('utf-8') or '{}')
                 scopes = resp.headers.get('X-OAuth-Scopes', '') or ''
-                return self._record(row['id'], user_id, 'CONNECTED', body.get('login', ''), scopes, '')
         except urllib.error.HTTPError as exc:
             detail = self._detail(exc)
             reason = {401: 'github_credentials_rejected', 403: 'github_access_forbidden',
@@ -154,6 +156,90 @@ class GitHubIntegrationService:
             detail = str(getattr(exc, 'reason', exc))
             self._record(row['id'], user_id, 'FAILED', '', '', 'github_unreachable: ' + detail)
             raise ConnectionError('github_unreachable|0|' + detail)
+
+        # GitHub credentials accepted. Now verify the token belongs to this user.
+        owner_note = ''
+        if user_email:
+            try:
+                owner_note = self._check_owner(user_email, body, scopes, token, api_base(row['base_url']))
+            except PermissionError as exc:
+                self._record(row['id'], user_id, 'FAILED', body.get('login', ''), scopes, str(exc))
+                raise
+        return self._record(row['id'], user_id, 'CONNECTED', body.get('login', ''), scopes, owner_note)
+
+    # Scopes that grant access to /user/emails on GitHub.com and GHEC.
+    _EMAIL_SCOPES = frozenset(('user', 'user:email', 'read:user'))
+
+    @staticmethod
+    def _base_email(email):
+        """Normalise an email for ownership comparison.
+
+        GitHub Enterprise Cloud appends the organisation slug as a plus-tag
+        (e.g. somya.paliwal+cvsh@cvshealth.com).  Stripping the tag lets us
+        compare it against the plain corporate address stored in the app.
+        """
+        local, _, domain = email.lower().strip().partition('@')
+        return local.partition('+')[0] + '@' + domain
+
+    def _check_owner(self, user_email, github_body, scopes, token, base_url):
+        """Verify the token's GitHub identity matches the logged-in user's email.
+
+        Strategy (most reliable source wins, comparison is always case-insensitive):
+
+        1. All emails via /user/emails when any email-granting scope is present.
+           Includes SAML/SCIM-provisioned addresses which may not be marked
+           verified=true on GitHub Enterprise Cloud.
+        2. Public profile email from /user response — reliable in enterprise
+           deployments where accounts use the same corporate email for both the
+           app and GitHub.
+        3. No email accessible at all — allow with an audit note; the
+           account_login is still captured for administrator review.
+
+        Error messages include the GitHub-returned email so mismatches are
+        diagnosable without server logs.
+        """
+        # Normalise the app email once; all GitHub emails are normalised on the fly.
+        normalized = self._base_email(user_email)
+        login = github_body.get('login') or 'unknown'
+
+        # Emails from /user/emails — include all (not just verified=true) because
+        # SAML-provisioned addresses on GitHub Enterprise Cloud are often
+        # verified=false even though they genuinely belong to the account.
+        scope_set = {s.strip() for s in scopes.split(',')} if scopes else set()
+        if scope_set & self._EMAIL_SCOPES:
+            all_emails = set()
+            try:
+                req = urllib.request.Request(
+                    base_url + '/user/emails', method='GET',
+                    headers={'Authorization': 'Bearer ' + token,
+                             'Accept': 'application/vnd.github+json',
+                             'X-GitHub-Api-Version': '2022-11-28',
+                             'User-Agent': USER_AGENT})
+                with urllib.request.urlopen(req, timeout=TIMEOUT, context=ssl.create_default_context()) as r:
+                    for entry in json.loads(r.read().decode('utf-8') or '[]'):
+                        if isinstance(entry, dict) and entry.get('email'):
+                            all_emails.add(self._base_email(entry['email']))
+            except Exception:
+                pass  # best-effort; fall through to public-email check
+            if all_emails:
+                if normalized not in all_emails:
+                    raise PermissionError(
+                        'github_token_owner_mismatch|@%s|GitHub emails (%s) do not include %s'
+                        % (login, ', '.join(sorted(all_emails)), user_email))
+                return ''
+
+        # Public profile email from /user — strip plus-tag and compare.
+        public_email = self._base_email(github_body.get('email') or '')
+        if public_email and public_email != '@':
+            if normalized != public_email:
+                raise PermissionError(
+                    'github_token_owner_mismatch|@%s|GitHub profile email %s does not match %s'
+                    % (login, public_email, user_email))
+            return ''
+
+        # No email accessible at all — allow with an audit note.
+        return ('github_owner_unverifiable: token owner @%s has no accessible email; '
+                'add user:email or read:user scope to enforce ownership' % login)
 
     @staticmethod
     def _detail(exc):

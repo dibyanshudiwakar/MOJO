@@ -123,7 +123,7 @@ class MigrationOrchestratorAgent(BaseAgent):
             return {'plan_id': (plan or {}).get('id'), 'output_root': seed.get('output_root'),
                     'service_name': seed.get('service_name') or job['service'],
                     'package_name': seed.get('package_name', 'com.example.migration'),
-                    'execute_build': seed.get('execute_build', False)}
+                    'execute_build': seed.get('execute_build', 'auto')}
         if agent_id == 'test-engineering':
             return {'plan_id': (plan or {}).get('id'), 'cases': seed.get('cases'),
                     'policy': seed.get('policy', {}), 'ace_adapter': seed.get('ace_adapter'),

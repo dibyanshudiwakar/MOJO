@@ -51,7 +51,6 @@ ALL_REQUIRED_ROLES = [
 
     # ── Delivery & support ────────────────────────────────────────────────────
     "DELIVERY_ENGINEER",       # Git delivery
-    "MIGRATION_VIEWER",        # Read-only job/artifact view
     "CONNECTOR_ADMIN",         # Manage connectors
     "SERVICE_REGISTRAR",       # Register services
 ]

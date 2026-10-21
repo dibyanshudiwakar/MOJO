@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
+from app.services import learning
 from app.service import FactoryService
 from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
@@ -35,7 +36,7 @@ specs=SpecificationService(repo,ROOT/'schemas/migration-specification.schema.jso
 diff=DifferentialService(repo)
 rca=RCAService(repo)
 agents=AgentRegistry(repo)
-workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); skill7=SkillRegistryService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity); github=GitHubIntegrationService(repo)
+workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); skill7=SkillRegistryService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity);accounts.prune_retired_roles(); github=GitHubIntegrationService(repo)
 pipelines=PipelineService(repo); repo_clone=RepoCloneService(repo); agent_admin=AgentAdminService(repo); llm_bindings=AgentLLMBindingService(repo); templates_svc=AgentTemplateService(repo)
 # Registration and sign-in cannot require a token, since obtaining one is what
 # they are for. Everything else under /api/ stays authenticated.
@@ -414,7 +415,7 @@ class H(BaseHTTPRequestHandler):
         u=urlparse(self.path); p=u.path; q=parse_qs(u.query)
         if p=='/api/v2/health': return self.sendj(200,{'status':'UP','version':'7.2'})
         # The registration form needs its role options before anyone has a token.
-        if p=='/api/v2/auth/roles': return self.sendj(200,{'items':accounts.assignable_roles()})
+        if p=='/api/v2/auth/roles': return self.sendj(200,{'items':accounts.assignable_roles(),'approver_items':accounts.requestable_roles()})
         # Every other API read is authenticated. Governance data (jobs,
         # approvals, evidence, the audit ledger, specifications, the prompt
         # registry, connector profiles) was previously world-readable.
@@ -425,6 +426,9 @@ class H(BaseHTTPRequestHandler):
                 return self.sendj(403,{'error':'required_role_missing:AUDITOR|GOVERNANCE_ADMIN'})
             if p in ('/api/v2/connectors','/api/v2/connector-operations','/api/v2/routing-policies') and 'CONNECTOR_ADMIN' not in principal.roles:
                 return self.sendj(403,{'error':'required_role_missing:CONNECTOR_ADMIN'})
+        if p=='/api/v2/admin/access':
+            pr=self.principal()
+            return self.sendj(200,accounts.access_overview(pr.roles))
         if p=='/api/v2/auth/me':
             pr=self.principal();user=self.current_user(pr)
             if not user: return self.stale_session()
@@ -447,6 +451,26 @@ class H(BaseHTTPRequestHandler):
             if not job_id: return self.sendj(422,{'error':'job_id_required'})
             self.authorize_job(self.principal(),job_id)
             return self.sendj(200,agents.dependency_status(job_id,m.group(1)))
+        # One row per agent: the model it runs on today, where that comes from,
+        # and the aliases an administrator may move it to.
+        # What the runs have taught: per-agent trend inputs and recurring lessons.
+        if p=='/api/v2/learning': return self.sendj(200,learning.overview(repo))
+        if p=='/api/v2/agent-models':
+            rows={}
+            for a in repo.rows('select agent_id,display_name,default_model_alias,status,enabled from agent_registry order by agent_id,version'):
+                rows[a['agent_id']]=a
+            items=[]
+            for agent_id,a in rows.items():
+                default=a.get('default_model_alias') or ''
+                binding=llm_bindings.get(agent_id)
+                effective,source=llm_bindings.resolve(agent_id,default)
+                items.append({'agent_id':agent_id,'display_name':a.get('display_name') or agent_id,'default_alias':default,
+                              'effective_alias':effective,'source':source,
+                              'binding_status':(binding or {}).get('status',''),'binding_alias':(binding or {}).get('gateway_model_alias',''),
+                              'reason':(binding or {}).get('reason_for_change',''),'updated_by':(binding or {}).get('created_by',''),
+                              'updated_at':(binding or {}).get('updated_at',''),'enabled':bool(a.get('enabled')),'status':a.get('status') or ''})
+            aliases=[r['name'] for r in repo.rows("select distinct name from model_registry where status='APPROVED' order by name")]
+            return self.sendj(200,{'items':items,'aliases':aliases})
         m=re.fullmatch(r'/api/v2/agents/([a-z0-9-]+)/llm-binding/history',p)
         if m:
             self.require('AGENT_REGISTRY_ADMIN','GOVERNANCE_ADMIN')
@@ -618,19 +642,35 @@ class H(BaseHTTPRequestHandler):
                 out=accounts.grant_role(pr.roles,d.get('email'),d.get('role'))
                 ledger.append('',pr.identity,'ACCOUNT_ROLE_GRANTED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
                 return self.sendj(200,{'user':out})
+            m=re.fullmatch(r'/api/v2/lessons/([a-z0-9-]+)/decide',p)
+            if m:
+                pr=self.require('KNOWLEDGE_CURATOR','GOVERNANCE_ADMIN')
+                out=learning.decide(repo,m.group(1),d.get('decision'),pr.identity,d.get('guidance',''),d.get('note',''))
+                ledger.append('',pr.identity,'LESSON_'+out['status'],{'lesson_id':out['id'],'agent_id':out['agent_id'],'kind':out['kind'],'guidance':out['guidance']})
+                return self.sendj(200,out)
+            if p=='/api/v2/auth/revoke-role':
+                pr=self.principal()
+                out=accounts.revoke_role(pr.roles,pr.identity,d.get('email'),d.get('role'))
+                ledger.append('',pr.identity,'ACCOUNT_ROLE_REVOKED',{'email':out['email'],'role':d.get('role'),'roles':out['roles']})
+                return self.sendj(200,{'user':out})
+            if p=='/api/v2/auth/role-requests/decide':
+                pr=self.principal()
+                out=accounts.decide_request(pr.roles,pr.identity,d.get('id'),d.get('decision'))
+                ledger.append('',pr.identity,'ACCOUNT_ROLE_REQUEST_DECIDED',out)
+                return self.sendj(200,out)
             if p=='/api/v2/integrations/github':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()
                 github.save(user['id'],d.get('url'),d.get('token'))
                 # Save and verify in one step: an unverified credential is not
                 # useful, and the UI needs the failure detail to offer a retry.
-                state=github.connect(user['id'])
+                state=github.connect(user['id'],user_email=user['email'])
                 ledger.append('',pr.identity,'GITHUB_INTEGRATION_CONFIGURED',{'url':state.get('url'),'status':state.get('status'),'fingerprint':state.get('token_fingerprint')})
                 return self.sendj(200,state)
             if p=='/api/v2/integrations/github/test':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()
-                return self.sendj(200,github.connect(user['id']))
+                return self.sendj(200,github.connect(user['id'],user_email=user['email']))
             if p=='/api/v2/integrations/github/disconnect':
                 pr=self.principal();user=self.current_user(pr)
                 if not user: return self.stale_session()
@@ -1131,6 +1171,6 @@ if __name__=='__main__':
         worker=WorkerLoop(repo,agents,pipelines,repo_clone,workflow)
         threading.Thread(target=worker.run_forever,name='pipeline-worker',daemon=True).start()
         sys.stderr.write('pipeline worker running in-process (set FACTORY_DISABLE_WORKER=1 to run it separately)\n')
-    sys.stderr.write('ACE Modernization Accelerator listening on http://%s:%s\n'%(host,os.getenv('PORT','8080')))
+    sys.stderr.write('ACE Migration Accelerator listening on http://%s:%s\n'%(host,os.getenv('PORT','8080')))
     sys.stderr.flush()
     ThreadingHTTPServer((host,int(os.getenv('PORT','8080'))),H).serve_forever()

@@ -70,7 +70,9 @@ def _project(root, yaml_text=None, java_text=None):
     proj = root / 'springboot-output'
     (proj / 'src/main/resources').mkdir(parents=True, exist_ok=True)
     (proj / 'src/main/java').mkdir(parents=True, exist_ok=True)
-    (proj / 'pom.xml').write_text('<project xmlns="http://maven.apache.org/POM/4.0.0"/>')
+    (proj / 'pom.xml').write_text(
+        '<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies><dependency>'
+        '<artifactId>framework-restclient</artifactId></dependency></dependencies></project>')
     (proj / 'provenance-manifest.json').write_text('{}')
     (proj / 'src/main/resources/application.yml').write_text(
         yaml_text if yaml_text is not None else 'spring:\n  name: svc\n')
@@ -200,7 +202,7 @@ def test_untrusted_model_paths_are_refused(env, monkeypatch):
     model = _StubModel([
         {'path': '../../evil.java', 'old_str': 'a', 'new_str': 'b', 'why': 'traversal'},
         {'path': '/tmp/evil.java', 'old_str': 'a', 'new_str': 'b', 'why': 'absolute'},
-        {'path': 'pom.xml', 'old_str': '<project', 'new_str': '<bad', 'why': 'wrong suffix'},
+        {'path': 'README.md', 'old_str': '#', 'new_str': '##', 'why': 'wrong suffix'},
     ])
 
     out = CodeFeedbackService(repo).apply(
@@ -210,6 +212,44 @@ def test_untrusted_model_paths_are_refused(env, monkeypatch):
     assert first['outcome'] == 'all_edits_refused'
     assert len(first['refused']) == 3
     assert 'http://maven.apache.org/POM/4.0.0' in (proj / 'pom.xml').read_text()
+
+
+def test_a_pom_edit_is_accepted_so_a_missing_dependency_can_be_repaired(env, monkeypatch):
+    """A build that fails on a missing dependency is fixed in pom.xml, nowhere else."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, set(), set()])
+    model = _StubModel([{'path': 'pom.xml', 'old_str': '<dependencies>',
+                         'new_str': '<dependencies><dependency><artifactId>x</artifactId></dependency>',
+                         'why': 'missing dependency'}])
+
+    out = CodeFeedbackService(repo).apply(
+        job['id'], plan_id, str(proj), max_passes=2, context=_ctx(repo, job['id'], model))
+
+    assert [r['outcome'] for r in out['model_rounds']] == ['kept']
+    assert '<artifactId>x</artifactId>' in (proj / 'pom.xml').read_text()
+
+
+def test_the_build_errors_and_the_files_they_cite_reach_the_model(env, monkeypatch):
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp)
+    seen = {'n': 0}
+
+    def fake(self, job_id, plan_id, project_root, execute_build='auto'):
+        seen['n'] += 1
+        return {'quality_run_id': 'qr', 'status': 'FAIL', 'checks': [
+            {'name': 'COMPILE_AND_UNIT_TEST', 'status': 'FAIL', 'evidence': {
+                'reason': 'build failed', 'errors': ['[ERROR] Svc.java:[1,1] cannot find symbol']}}]}
+
+    monkeypatch.setattr(MappingAndPlanningService, 'quality_validate', fake)
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(
+        job['id'], plan_id, str(proj), max_passes=1, context=_ctx(repo, job['id'], model))
+
+    detail = model.payload['check_detail']['COMPILE_AND_UNIT_TEST']
+    assert 'cannot find symbol' in detail
+    assert model.payload['files'][0]['path'].endswith('Svc.java'), 'the cited file comes first'
 
 
 def test_payload_sent_to_the_model_passes_the_gateway_dlp_rules(env, monkeypatch):

@@ -51,3 +51,32 @@ def test_coverage_is_reported_for_undetected_areas(repo, job, ace_repo):
 def test_analysis_requires_a_path(repo, job):
     with pytest.raises(ValueError, match='missing_param:path'):
         ACEAnalysisAgent(repo).run(job['id'])
+
+
+# ---- a numeric literal ----------------------------------------------------------------------
+#
+# The model wrote `SET x = 1` as the JSON number 1 and the whole file failed three
+# times on "literal: is int; expected ['string', 'null']".
+
+def _assignment_schema():
+    from pathlib import Path
+    schemas = json.loads((Path(__file__).resolve().parents[2] / 'config' / 'agent-response-schemas.v1.json')
+                         .read_text(encoding='utf-8'))
+    node = schemas['agent/ace-analysis/semantic-model'] if 'agent/ace-analysis/semantic-model' in schemas \
+        else schemas['schemas']['agent/ace-analysis/semantic-model']
+    return node['properties']['esql']['items']['properties']['assignments']['items']
+
+
+@pytest.mark.parametrize('literal', ['text', 1, 2.5, True, None])
+def test_the_schema_accepts_a_text_number_or_boolean_literal(literal):
+    from jsonschema import Draft202012Validator
+    errors = list(Draft202012Validator(_assignment_schema()).iter_errors(
+        {'target': ['OutputRoot', 'x'], 'kind': 'LITERAL', 'literal': literal, 'esql': 'SET x = 1;'}))
+    assert errors == []
+
+
+def test_a_numeric_literal_is_stored_as_the_text_the_esql_had():
+    fragment = {'esql': [{'assignments': [{'literal': 1}, {'literal': 2.5}, {'literal': True},
+                                          {'literal': False}, {'literal': '"s"'}, {'literal': None}, {}]}]}
+    ACEAnalysisAgent._literals_as_text(fragment)
+    assert [a.get('literal') for a in fragment['esql'][0]['assignments']] == ['1', '2.5', 'true', 'false', '"s"', None, None]

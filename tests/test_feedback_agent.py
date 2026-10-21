@@ -35,7 +35,12 @@ def _project(root, yaml_text=None, java_text=None):
     proj = root / 'springboot-output'
     (proj / 'src/main/resources').mkdir(parents=True, exist_ok=True)
     (proj / 'src/main/java').mkdir(parents=True, exist_ok=True)
-    (proj / 'pom.xml').write_text('<project xmlns="http://maven.apache.org/POM/4.0.0"/>')
+    # framework-restclient: the skill's BLOCKING item B4, without which the gate
+    # fails whatever else the repair loop fixes. The xmlns stays: a test below
+    # checks the pom's Maven namespace URL is not rewritten as an endpoint.
+    (proj / 'pom.xml').write_text(
+        '<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies><dependency>'
+        '<artifactId>framework-restclient</artifactId></dependency></dependencies></project>')
     (proj / 'src/main/resources/application.yml').write_text(
         yaml_text if yaml_text is not None else 'spring:\n  name: svc\n')
     (proj / 'src/main/java/Svc.java').write_text(
@@ -63,6 +68,24 @@ def test_embedded_secret_and_endpoint_are_repaired_and_the_gate_agrees(env):
     text = (proj / 'src/main/resources/application.yml').read_text()
     assert '${PASSWORD}' in text and 'hunter2' not in text
     assert '${EXTERNAL_ENDPOINT}' in text
+
+
+def test_the_skills_unambiguous_gaps_are_closed_and_the_rest_are_reported(env):
+    """The skill says to auto-fix what is unambiguous and name the rest."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp)
+    (proj / 'provenance-manifest.json').write_text('{}')
+    quality = MappingAndPlanningService(repo)
+    before = {c['name']: c['status'] for c in quality.quality_validate(job['id'], plan_id, str(proj))['checks']}
+    assert before['SKILL_M5_M16'] == 'GAP' and before['SKILL_A0'] == 'GAP'
+
+    out = CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=3)
+
+    assert {'SKILL_M5_M16', 'SKILL_A0'} <= {f['check'] for f in out['applied_fixes']}
+    assert 'SKILL_M5_M16' not in out['unfixed_gaps'] and 'SKILL_A0' not in out['unfixed_gaps']
+    # What needs a person or the model is reported, and does not fail the agent.
+    assert 'SKILL_R3' in out['unfixed_gaps'] and out['unfixed_checks'] == []
+    assert out['quality_status'] == 'PASS_WITH_GAPS'
 
 
 def test_only_the_scanned_file_types_are_touched(env):

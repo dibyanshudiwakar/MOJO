@@ -1,12 +1,11 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ACE Modernization Accelerator</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/styles.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ACE Migration Accelerator</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/styles.css"></head><body>
 <div class="app">
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <div class="brand-logo">
         <div class="brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div>
         <div class="brand-text">
-          <div class="brand-eyebrow">ACE</div>
-          <div class="brand-name">Modernization Accelerator</div>
+          <div class="brand-name">ACE Migration Accelerator</div>
         </div>
       </div>
     </div>
@@ -18,7 +17,7 @@
     <header class="topbar">
       <div class="topbar-left">
         <button class="hamburger" id="hamburgerBtn" aria-label="Open menu"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-        <div class="breadcrumb"><span>ACE Modernization Accelerator</span><span class="breadcrumb-sep">›</span><span class="breadcrumb-current" id="title">DASHBOARD</span></div>
+        <div class="breadcrumb"><span>ACE Migration Accelerator</span><span class="breadcrumb-sep">›</span><span class="breadcrumb-current" id="title">DASHBOARD</span></div>
       </div>
       <div class="topbar-actions">
         <button id="ghIndicator" type="button" class="ghchip" hidden></button>
@@ -194,6 +193,35 @@
     <div class="dlg-footer">
       <button type="button" id="modelCancel">Cancel</button>
       <button id="modelSubmit">Save</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="lessonDialog">
+  <h2 id="lessonTitle">Review lesson</h2>
+  <p class="authhint dlg-sub" id="lessonSub"></p>
+  <form id="lessonForm">
+    <label>Guidance given to the agent <small>(what the model will read on every request; keep it short and specific)</small><textarea name="guidance" rows="4" maxlength="300"></textarea></label>
+    <label>Note <small>(optional, kept with the decision)</small><input name="note" maxlength="200" autocomplete="off"></label>
+    <p class="authhint bad" id="lessonError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="lessonCancel">Cancel</button>
+      <button type="button" id="lessonReject">Reject</button>
+      <button type="button" id="lessonRetract">Retract</button>
+      <button id="lessonApprove">Approve</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="agentModelDialog">
+  <h2 id="agentModelTitle">Change model</h2>
+  <p class="authhint dlg-sub" id="agentModelSub"></p>
+  <form id="agentModelForm">
+    <label>Model for this agent<select name="mode"><option value="DEFAULT">Use the catalogue default</option><option value="AGENT_OVERRIDE">Override with another model</option></select></label>
+    <label id="agentModelAliasRow">Model alias <small>(an alias approved in the model registry)</small><input name="alias" list="agentModelAliases" spellcheck="false" autocomplete="off" placeholder="reasoning-large"><datalist id="agentModelAliases"></datalist></label>
+    <label>Reason for change <small>(kept in the audit trail)</small><input name="reason" maxlength="200" autocomplete="off"></label>
+    <p class="authhint bad" id="agentModelError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="agentModelCancel">Cancel</button>
+      <button id="agentModelSubmit">Save</button>
     </div>
   </form>
 </dialog>

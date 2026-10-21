@@ -147,8 +147,11 @@
                     "literal": {
                       "type": [
                         "string",
+                        "number",
+                        "boolean",
                         "null"
-                      ]
+                      ],
+                      "description": "A numeric or boolean literal may arrive as a JSON number or boolean; the agent stores it as text."
                     },
                     "kind": {
                       "enum": [

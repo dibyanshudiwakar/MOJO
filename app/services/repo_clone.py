@@ -253,7 +253,7 @@ class RepoCloneService:
                     else:
                         shutil.copy2(item, dest)
                 self._run(['add', '-A'], cwd=str(scratch), env=env)
-                self._run(['-c', 'user.email=ace-migration-factory@local', '-c', 'user.name=ACE Modernization Accelerator', 'commit', '-m', commit_message, '--allow-empty'], cwd=str(scratch), env=env)
+                self._run(['-c', 'user.email=ace-migration-factory@local', '-c', 'user.name=ACE Migration Accelerator', 'commit', '-m', commit_message, '--allow-empty'], cwd=str(scratch), env=env)
                 self._run(['push', '-u', 'origin', ref], cwd=str(scratch), env=env)
                 commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=str(scratch), capture_output=True, text=True, timeout=30)
             return {'branch': ref, 'commit': commit.stdout.strip() if commit.returncode == 0 else ''}

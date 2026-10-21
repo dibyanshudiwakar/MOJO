@@ -48,6 +48,9 @@ os.environ.setdefault('FACTORY_SEED_MODEL_GATEWAY', '1')
 # minutes across the retry tests. tests/agents/test_artefact_retry.py asserts
 # the real delays separately, without sleeping.
 os.environ.setdefault('MOJO_RETRY_BACKOFF_SECONDS', '0,0')
+# The gate builds and starts a generated service when Maven is installed. Tests
+# of everything else must not shell out to it; test_build_check turns it on.
+os.environ.setdefault('FACTORY_BUILD', 'off')
 
 
 @pytest.fixture(autouse=True)

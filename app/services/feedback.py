@@ -36,6 +36,7 @@ import re
 from pathlib import Path
 
 from app.repository import now
+from app.services import skill_repair
 
 #: Exactly the suffixes and size bound ``quality_validate`` reads, so a fix
 #: cannot miss a file the gate will go on to scan, or edit one it will not.
@@ -90,6 +91,7 @@ MAX_PAYLOAD_FILES = 12
 MAX_FILE_CHARS = 6000
 MAX_EDITS = 20
 MAX_NEW_STR_CHARS = 20000
+NL = chr(10)
 
 
 def redact(text):
@@ -148,7 +150,7 @@ def accept_edit(root, edit):
         return None, 'path_unresolvable:%s' % rel
     if target != base and base not in target.parents:
         return None, 'path_outside_project:%s' % rel
-    if target.suffix.lower() not in SCANNED_SUFFIXES:
+    if target.suffix.lower() not in SCANNED_SUFFIXES and target.name != 'pom.xml':
         return None, 'suffix_not_editable:%s' % rel
     if not target.is_file():
         return None, 'file_not_found:%s' % rel
@@ -224,15 +226,44 @@ class CodeFeedbackService:
             fixes += self._fix_endpoints(root)
         if 'PROVENANCE' in failed:
             fixes += self._fix_provenance(root, job_id, plan_id)
+        # The skill's GAPs whose fix the skill spells out (skill_repair.REPAIRABLE).
+        if any(name in skill_repair.REPAIRABLE for name in failed):
+            fixes += skill_repair.repair(root, failed)
         return fixes
 
     # -- model-assisted repair -----------------------------------------------
+    @staticmethod
+    def _evidence_text(check):
+        """What a failing check says, in words the model can act on."""
+        ev = check.get('evidence', '')
+        if isinstance(ev, dict):
+            lines = list(ev.get('errors') or [])
+            if ev.get('reason'):
+                lines.insert(0, str(ev['reason']))
+            return NL.join(lines)[:3000]
+        if isinstance(ev, list):
+            return NL.join(str(x) for x in ev)[:1500]
+        return str(ev)[:400]
+
     def _candidates(self, root, checks):
-        """Files worth showing the model, with their check detail, redacted."""
-        detail = {c['name']: str(c.get('evidence', ''))[:400] for c in checks
-                  if c['status'] == 'FAIL'}
+        """Files worth showing the model, with their check detail, redacted.
+
+        Files the checks name come first (a compiler error cites its file), then
+        the rest up to the cap, so a build error is shown the source it is about.
+        """
+        open_checks = [c for c in checks if c['status'] in ('FAIL', 'GAP')]
+        detail = {}
+        for c in open_checks:
+            detail[c['name']] = self._evidence_text(c)
+            if c.get('remediation'):
+                detail[c['name']] += NL + 'Remediation: ' + str(c['remediation'])
+        cited = ' '.join(detail.values())
+        everything = list(_files(root))
+        pom = Path(root).rglob('pom.xml')
+        everything += [p for p in pom if p.stat().st_size < MAX_FILE_BYTES]
+        ordered = sorted(everything, key=lambda f: 0 if f.name in cited else 1)
         files = []
-        for f in list(_files(root))[:MAX_PAYLOAD_FILES]:
+        for f in ordered[:MAX_PAYLOAD_FILES]:
             body = redact(f.read_text(errors='ignore'))[:MAX_FILE_CHARS]
             files.append({'path': str(f.relative_to(Path(root))).replace('\\', '/'),
                           'content': body})
@@ -250,7 +281,9 @@ class CodeFeedbackService:
         that breaks something else, or achieves nothing, leaves no trace.
         """
         from app.agents.reasoning import ReasoningGateway
-        failed_before = {c['name'] for c in checks if c['status'] == 'FAIL'}
+        # FAIL and GAP both count: a repair that closes a GAP is an improvement
+        # the gate can see, and one that opens a new GAP is not.
+        failed_before = {c['name'] for c in checks if c['status'] in ('FAIL', 'GAP')}
         detail, files = self._candidates(root, checks)
         answer, provenance = ReasoningGateway(self.repo).reason(
             context, 'agent/feedback/code-repair',
@@ -276,7 +309,7 @@ class CodeFeedbackService:
                     'outcome': 'all_edits_refused', 'mode': provenance.get('mode', '')}
 
         after = quality.quality_validate(job_id, plan_id, root, False)
-        failed_after = {c['name'] for c in after['checks'] if c['status'] == 'FAIL'}
+        failed_after = {c['name'] for c in after['checks'] if c['status'] in ('FAIL', 'GAP')}
         improved = failed_after < failed_before          # strict subset: fewer, nothing new
         if not improved:
             for path, text in snapshot.items():
@@ -302,7 +335,7 @@ class CodeFeedbackService:
                    for c in causes])
 
     # -- the loop ------------------------------------------------------------
-    def apply(self, job_id, plan_id, project_root, max_passes=3, execute_build=False,
+    def apply(self, job_id, plan_id, project_root, max_passes=3, execute_build='auto',
               context=None):
         """Fix, re-validate, repeat until the gate is clean or the budget is spent.
 
@@ -330,7 +363,7 @@ class CodeFeedbackService:
         passes, applied, model_rounds, run = [], [], [], None
         for n in range(budget + 1):
             run = quality.quality_validate(job_id, plan_id, project_root, execute_build)
-            failed = [c['name'] for c in run['checks'] if c['status'] == 'FAIL']
+            failed = [c['name'] for c in run['checks'] if c['status'] in ('FAIL', 'GAP')]
             if not failed or n == budget:
                 passes.append({'pass': n + 1, 'failed': failed, 'fixes': 0, 'model': None,
                                'quality_run_id': run['quality_run_id'], 'status': run['status']})
@@ -349,6 +382,7 @@ class CodeFeedbackService:
             if not fixes and not (model or {}).get('applied'):
                 break
         final_failed = [c['name'] for c in run['checks'] if c['status'] == 'FAIL']
+        final_gaps = [c['name'] for c in run['checks'] if c['status'] == 'GAP']
         return {
             'quality_run_id': run['quality_run_id'],
             'quality_status': run['status'],
@@ -357,6 +391,7 @@ class CodeFeedbackService:
             'passes': passes,
             'model_rounds': model_rounds,
             'unfixed_checks': final_failed,
+            'unfixed_gaps': final_gaps,
             'unresolved': self.outstanding(job_id),
             'project_root': str(project_root),
         }
