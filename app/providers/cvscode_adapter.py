@@ -64,12 +64,15 @@ MODEL_SHAPES = {
 FALLBACK_SHAPE = {'effort': 'high'}
 
 #: alias -> (model id, effort override). Effort None means "use the model's
-#: shape default"; ``coding`` asks for xhigh because code generation and
-#: agentic work are where the top of the effort range actually pays for itself.
+#: shape default". Each tier is one step down from where it was: what ran on Opus
+#: runs on Sonnet, and what ran on Sonnet runs on Haiku. ``coding`` is held at
+#: ``high`` rather than the ``xhigh`` it asked of Opus: xhigh was only ever
+#: measured against Opus, and an effort level a model does not accept is a hard
+#: request failure, not a quality loss.
 ALIAS_MODELS = {
-    'reasoning-large': ('claude-opus-5-5', 'high'),
-    'coding': ('claude-opus-5-5', 'xhigh'),
-    'semantic-review': ('claude-sonnet-5-5', 'high'),
+    'reasoning-large': ('claude-sonnet-5-5', 'high'),
+    'coding': ('claude-sonnet-5-5', 'high'),
+    'semantic-review': ('claude-haiku-4-5@20251001', None),
     'reasoning-small': ('claude-haiku-4-5@20251001', None),
 }
 
