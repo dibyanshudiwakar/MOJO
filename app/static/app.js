@@ -2192,7 +2192,11 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p==='dashboard'){
   const [jobs,approvals,pipelines]=await Promise.all([api('/api/v2/jobs'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/pipelines').catch(()=>({items:[]}))]);
 
-  const runPl=(pipelines.items||[]).find(x=>x.status==='RUNNING');
+  // The pipeline worth showing: one doing something, then one that is held, then
+  // the latest. Only RUNNING was looked for, so pausing a pipeline (or stopping at
+  // an approval) made it vanish from the dashboard.
+  const plItems=pipelines.items||[];
+  const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
   let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
   const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${esc(x.service||x.workspace_dir||x.id)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
   const pendingCount=(approvals.items||[]).length;
@@ -2211,8 +2215,10 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
     :s.started_at?`Running… ${dur}`:'Waiting';
    return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
   const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
-  const pipelineBadge=runPl?`<span class="badge badge-running"><span class="badge-dot"></span>RUNNING</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">Live step execution · ${plSteps.length} steps</div></div>${pipelineBadge}</div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
+  const plStatus=runPl?String(runPl.status||''):'';
+  const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
+  const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
+  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}</div></div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2231,6 +2237,14 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state</div></div><button id="dashViewAllJobs" class="btn-ghost">View all →</button></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   $('#dashViewAllJobs')?.addEventListener('click',()=>{location.hash='jobs';});
+  // Every part of the pipeline card leads to the pipeline: the title, the button,
+  // and each step. None of it was clickable.
+  if(runPl){
+   const go=()=>{location.hash='pipelines/'+runPl.id};
+   $('#dashOpenPipeline')?.addEventListener('click',go);
+   document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
+  // The header says it refreshes itself; nothing did.
+  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard')render()},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.
