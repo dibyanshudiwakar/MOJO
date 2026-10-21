@@ -485,6 +485,7 @@ async function clarificationsPage(){
  // original is listed, so the copy is not.
  const answered=all.filter(c=>c.status==='ANSWERED');
  const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
+ const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim());
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -514,12 +515,25 @@ async function clarificationsPage(){
    </div>`}
   </div>`};
  $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
+  ${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ const gen=$('#genSuggestions');
+ if(gen)gen.onclick=async()=>{
+  // One request per job: the model answers in the context of the agent and job that raised the question.
+  gen.disabled=true;gen.textContent='Generating…';
+  const jobs=[...new Set(unsuggested.map(c=>c.job_id))];let made=0,wanted=0;const why=[];
+  try{
+   for(const job_id of jobs){
+    const r=await api('/api/v2/clarifications/suggest',{method:'POST',body:JSON.stringify({job_id})});
+    made+=r.suggested;wanted+=r.requested;why.push(...(r.errors||[]))}
+   notice(`${made} of ${wanted} suggestion${wanted===1?'':'s'} generated`+(why.length?' — '+why[0]:''),made<wanted);
+   clarificationsPage()
+  }catch(e){notice(e.message,true);gen.disabled=false;gen.textContent='Generate suggestions'}};
  document.querySelectorAll('.clarif-submit-btn').forEach(btn=>{
   const item=btn.closest('.clarif-item');
   const cid=item?.dataset.clarifId;
