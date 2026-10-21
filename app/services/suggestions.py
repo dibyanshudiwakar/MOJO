@@ -68,10 +68,14 @@ def suggest_missing(registry, job_id, identity='system', roles=(), provider=None
             if error is not None:
                 result['errors'].append('%s: %s' % (agent_id, error.reason))
                 continue
-            by_question = {s.get('question'): s for s in (answer.get('suggestions') or []) if isinstance(s, dict)}
+            batch_suggs = [s for s in (answer.get('suggestions') or []) if isinstance(s, dict)]
+            by_question = {str(s.get('question') or '').strip().lower(): s for s in batch_suggs}
+            by_ordinal = dict(enumerate(batch_suggs)) if len(batch_suggs) == len(batch) else {}
             with repo.connect() as c:
-                for row in batch:
-                    s = by_question.get(row['question'])
+                for idx, row in enumerate(batch):
+                    s = by_question.get(str(row['question'] or '').strip().lower())
+                    if s is None:
+                        s = by_ordinal.get(idx)
                     if not s or not str(s.get('suggested_answer') or '').strip():
                         continue
                     c.execute("update clarifications set suggested_answer=?, suggestion_mode=?, "

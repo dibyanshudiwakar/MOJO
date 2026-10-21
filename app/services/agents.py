@@ -288,6 +288,7 @@ class AgentRegistry:
    # on every retry -- so the request itself has to be bounded. Each batch
    # also fails on its own, so one bad batch costs its own suggestions only.
    suggestions=[]
+   by_ordinal={}
    sugg_prov={'mode':UNAVAILABLE,'reason':''}
    questions=[{'question':cl.question,'impact':cl.impact,'stage':cl.stage}
               for i,cl in enumerate(result.clarifications) if i not in reused]
@@ -311,8 +312,11 @@ class AgentRegistry:
       start+1,start+size,exc.reason))
      continue
     suggestions.extend(answer.get('suggestions') or [])
+    batch_dicts=[s for s in (answer.get('suggestions') or []) if isinstance(s,dict)]
+    if len(batch_dicts)==size:
+     for j,s in enumerate(batch_dicts):by_ordinal[start+j]=s
     sugg_prov={**prov,'mode':prov.get('mode',sugg_prov['mode'])}
-   by_question={s.get('question'):s for s in suggestions if isinstance(s,dict)}
+   by_question={str(s.get('question') or '').strip().lower():s for s in suggestions if isinstance(s,dict)}
    # In auto mode a suggestion for an agent that is *going on anyway* is not a
    # proposal awaiting review -- it is the decision. Accepted here, attributed
    # to AUTO_MODE so the audit trail never implies a person reviewed it, and
@@ -328,11 +332,14 @@ class AgentRegistry:
    auto=automode.enabled() and not automode.blocks(result.status)
    decided=0
    taken_before=taken
-   if by_question:
+   if by_question or by_ordinal:
     with self.repo.connect() as c:
+     q_idx=0
      for i,(cl,cid) in enumerate(zip(result.clarifications,opened)):
       if i in reused:continue
-      s=by_question.get(cl.question)
+      s=by_question.get(str(cl.question or '').strip().lower())
+      if s is None:s=by_ordinal.get(q_idx)
+      q_idx+=1
       if not s or not str(s.get('suggested_answer') or '').strip():continue
       # The same question in different words, or about a sibling construct --
       # which no text comparison can tell from a genuinely different one. The
