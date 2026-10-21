@@ -545,7 +545,7 @@ class PipelineService:
                                  'package_name': package_name or 'com.example.migrated'},
             # project_root is normally resolved from code-generation's output by
             # PARAM_SOURCES; this is the fallback for the same location.
-            'feedback': {'project_root': base + '/springboot-output', 'max_passes': 3},
+            'feedback': {'project_root': base + '/springboot-output', 'max_passes': 6},
             # Both static checks are opt-in at the agent level (``context.param(name,
             # False)``); seeding them True here is what turns them on for a pipeline
             # run, so the parity/hardcoding HTML reports actually get generated

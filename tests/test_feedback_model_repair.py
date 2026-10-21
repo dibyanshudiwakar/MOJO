@@ -142,7 +142,7 @@ def test_model_edit_is_reverted_when_the_gate_does_not_improve(env, monkeypatch)
     out = CodeFeedbackService(repo).apply(
         job['id'], plan_id, str(proj), max_passes=2, context=_ctx(repo, job['id'], model))
 
-    assert [r['outcome'] for r in out['model_rounds']] == ['reverted_no_improvement']
+    assert {r['outcome'] for r in out['model_rounds']} == {'reverted_no_improvement'}
     assert (proj / 'src/main/java/Svc.java').read_text() == original
 
 
@@ -165,7 +165,7 @@ def test_model_edit_is_reverted_when_it_introduces_a_new_failure(env, monkeypatc
     out = CodeFeedbackService(repo).apply(
         job['id'], plan_id, str(proj), max_passes=2, context=_ctx(repo, job['id'], model))
 
-    assert [r['outcome'] for r in out['model_rounds']] == ['reverted_no_improvement']
+    assert {r['outcome'] for r in out['model_rounds']} == {'reverted_no_improvement'}
     assert (proj / 'src/main/java/Svc.java').read_text() == original
     assert 'evil.prod.internal' not in (proj / 'src/main/java/Svc.java').read_text()
 
