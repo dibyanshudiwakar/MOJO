@@ -1908,7 +1908,71 @@ function renderArtefact(art){
    const smLabels={flows:'Message Flows',subflows:'Subflows',esql:'ESQL Modules',maps:'Maps',schemas:'Schemas',policies:'Policies',interfaces:'Interfaces'};
    html+=`<div class="artefact-sub" style="margin-top:12px">Semantic Model</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Count</th></tr></thead><tbody>${smTable.map(r=>`<tr><td>${esc(smLabels[r.area]||r.area)}</td><td>${r.count}</td></tr>`).join('')}</tbody></table></div>`}
   return html}
- // Markdown content (framework-baseline, ace-analysis)
+ // Framework Baseline Template: chips + section rows; full data opens in modal
+ if(art.title==='Framework Baseline Template'){
+  window._fbArt=art;
+  const fbSections=art.sections||[];
+  const fbConflicts=fbSections.find(s=>s.heading==='Conflicts');
+  const fbStandards=fbSections.find(s=>s.heading==='Standards');
+  const conflictItems=fbConflicts?.items||[];
+  const standardsObj=fbStandards?.json||{};
+  const standardsKeys=Object.keys(standardsObj);
+  const templateLines=(art.markdown||'').split('\n').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${templateLines}</span><span class="plan-stat-l">Template Lines</span></div><div class="plan-stat-chip ${conflictItems.length>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${conflictItems.length}</span><span class="plan-stat-l">Conflicts</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${standardsKeys.length}</span><span class="plan-stat-l">Standards</span></div></div>`;
+  let fbSecs='';
+  if(conflictItems.length)fbSecs+=`<div class="plan-si" data-fb-tab="conflicts"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="11"/><circle cx="10" cy="14" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Conflicts</div><div class="plan-si-meta">${conflictItems.length} conflict${conflictItems.length!==1?'s':''} · conventions that differ from the target framework</div></div></div><span class="plan-si-caret">›</span></div>`;
+  fbSecs+=`<div class="plan-si" data-fb-tab="template"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Template</div><div class="plan-si-meta">${templateLines} lines · Spring Boot project template</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(standardsKeys.length)fbSecs+=`<div class="plan-si" data-fb-tab="standards"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg><div><div class="plan-si-name">Standards</div><div class="plan-si-meta">${standardsKeys.length} standard${standardsKeys.length!==1?'s':''} · coding conventions and patterns</div></div></div><span class="plan-si-caret">›</span></div>`;
+  fbSecs+=`<div class="plan-si" data-fb-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full baseline output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${fbSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Repository Intake: summary + section rows; full data opens in modal
+ if(art.title==='Repository Intake Report'){
+  window._riArt=art;
+  const riSections=art.sections||[];
+  const getRI=h=>riSections.find(s=>s.heading===h);
+  const riSummary=getRI('Summary');
+  const riRepo=getRI('Repository');
+  const riGaps=getRI('Gaps');
+  const riFlows=getRI('Flows');
+  const riESQL=getRI('ESQL Modules');
+  const riSchemas=getRI('Schemas');
+  const flowCount=riFlows?.items?.length||0;
+  const esqlCount=riESQL?.items?.length||0;
+  const schemaCount=riSchemas?.items?.length||0;
+  const gapCount=riGaps?.items?.length||0;
+  const repoContent=riRepo?.content||'';
+  const repoItems=riRepo?.items||[];
+  html+=`<div style="margin-bottom:12px">`;
+  if(repoContent)html+=`<div class="meta-row"><div class="meta-key">Repository</div><div class="meta-val">${esc(repoContent)}</div></div>`;
+  repoItems.forEach(item=>{const parts=typeof item==='string'?item.split(/:\s*/,2):[item,''];html+=`<div class="meta-row"><div class="meta-key">${esc(parts[0])}</div><div class="meta-val">${esc(parts[1]||String(item))}</div></div>`;});
+  const flowItems=riFlows?.items||[];
+  const esqlItems=riESQL?.items||[];
+  flowItems.forEach((item,i)=>html+=`<div class="meta-row"><div class="meta-key">Flow ${i+1}</div><div class="meta-val">${esc(typeof item==='string'?item:JSON.stringify(item))}</div></div>`);
+  esqlItems.forEach((item,i)=>html+=`<div class="meta-row"><div class="meta-key">ESQL ${i+1}</div><div class="meta-val">${esc(typeof item==='string'?item:JSON.stringify(item))}</div></div>`);
+  html+=`</div>`;
+  let riSecs='';
+  if(gapCount)riSecs+=`<div class="plan-si" data-ri-tab="gaps"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Gaps</div><div class="plan-si-meta">${gapCount} gap${gapCount!==1?'s':''} · items requiring attention</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(schemaCount)riSecs+=`<div class="plan-si" data-ri-tab="schemas"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="5" height="5" rx="1"/><rect x="11" y="4" width="5" height="5" rx="1"/><rect x="4" y="11" width="5" height="5" rx="1"/><rect x="11" y="11" width="5" height="5" rx="1"/></svg><div><div class="plan-si-name">Schemas</div><div class="plan-si-meta">${schemaCount} schema${schemaCount!==1?'s':''} · MRM and XSD definitions</div></div></div><span class="plan-si-caret">›</span></div>`;
+  riSecs+=`<div class="plan-si" data-ri-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full intake output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${riSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Dormancy Intelligence: chips + inline signals + rationale + raw section row
+ if(art.title==='Dormancy Assessment'){
+  window._diArt=art;
+  const diSections=art.sections||[];
+  const getS=h=>diSections.find(s=>s.heading===h);
+  const classification=getS('Classification')?.content||'';
+  const confidence=getS('Confidence')?.content||'';
+  const signals=getS('Signals')?.table||[];
+  const rationale=getS('Rationale')?.content||'';
+  const clsCls=classification==='DORMANT'?'plan-stat-warn':classification.startsWith('ACTIVE')?'plan-stat-ok':'';
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip ${clsCls}"><span class="plan-stat-n" style="font-size:12px;letter-spacing:.3px">${esc(classification||'—')}</span><span class="plan-stat-l">Classification</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${esc(confidence||'—')}</span><span class="plan-stat-l">Confidence</span></div></div>`;
+  if(signals.length)html+=`<div class="artefact-sub" style="margin-top:2px">Signals</div><div class="table-wrap"><table><thead><tr><th>Signal</th><th>Value</th></tr></thead><tbody>${signals.map(r=>`<tr><td>${esc(r.signal)}</td><td>${esc(String(r.value))}</td></tr>`).join('')}</tbody></table></div>`;
+  if(rationale)html+=`<div class="artefact-sub" style="margin-top:10px">Rationale</div><div style="font-size:13px;color:var(--text);line-height:1.6;margin:4px 0 8px">${esc(rationale)}</div>`;
+  html+=`<div class="plan-sections"><div class="plan-si" data-di-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · complete assessment output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div>`;
+  return html}
+ // Markdown content (fallback for other markdown artefacts)
  if(art.markdown){
   html+=`<div class="artefact-md"><pre class="artefact-pre">${esc(art.markdown)}</pre></div>`}
  // Migration Specification: summary chips + section rows; full data opens in modal
@@ -1993,8 +2057,57 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
+function renderCloneOutputPane(outputs,params){
+ const branch=outputs.branch||params.branch||'—';
+ const commit=outputs.commit||'';
+ const shortCommit=commit?commit.slice(0,8):'—';
+ const role=params.role||'';
+ const repoUrl=params.repo_url||'';
+ const repoName=repoUrl?repoUrl.replace(/\.git$/,'').split('/').filter(Boolean).pop()||repoUrl:'—';
+ const roleLabels={ACE:'ACE Integration',FRAMEWORK:'Spring Boot Framework',TARGET:'Target Migration'};
+ const roleLabel=roleLabels[role]||role||'—';
+ // Chips — same plan-stats-row pattern as Planning / Migration Spec
+ let html=`<div class="plan-stats-row">
+  <div class="plan-stat-chip plan-stat-ok">
+   <span class="plan-stat-n" style="font-size:15px;font-family:monospace;letter-spacing:.5px">${esc(shortCommit)}</span>
+   <span class="plan-stat-l">Commit</span>
+  </div>
+  ${role?`<div class="plan-stat-chip"><span class="plan-stat-n" style="font-size:13px">${esc(roleLabel)}</span><span class="plan-stat-l">Repository Type</span></div>`:''}
+ </div>`;
+ // Info rows — use plan-si visual style (same card look as Planning sections) but static
+ html+=`<div class="plan-sections">
+  <div class="plan-si" style="cursor:default">
+   <div class="plan-si-l">
+    <svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="7" y1="3" x2="7" y2="12"/><circle cx="14" cy="5.5" r="2.5"/><circle cx="7" cy="15.5" r="2.5"/><path d="M14 8a7 7 0 01-7 7"/></svg>
+    <div style="min-width:0">
+     <div class="plan-si-name">Branch</div>
+     <div class="plan-si-meta" style="font-family:monospace;font-size:11px;word-break:break-all;white-space:normal;line-height:1.5;margin-top:2px">${esc(branch)}</div>
+    </div>
+   </div>
+  </div>
+  <div class="plan-si" style="cursor:default">
+   <div class="plan-si-l" style="min-width:0;flex:1">
+    <svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 17c-3.5 1-3.5-2-5-2.5m10 4.5v-3.1a2.4 2.4 0 00-.65-1.85c2.2-.25 4.5-1.1 4.5-4.9a3.8 3.8 0 00-1.05-2.65 3.6 3.6 0 00-.06-2.6s-.83-.26-2.72 1.03a9.4 9.4 0 00-4.9 0C7.23 3.4 6.4 3.66 6.4 3.66a3.6 3.6 0 00-.06 2.6A3.8 3.8 0 005.3 8.91c0 3.78 2.3 4.63 4.5 4.88A2.4 2.4 0 009 15.65V18.5"/></svg>
+    <div style="min-width:0;flex:1">
+     <div class="plan-si-name" style="word-break:break-all">${esc(repoName)}</div>
+     <div class="plan-si-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>Source repository${role?' · '+esc(roleLabel):''}</span>
+      ${repoUrl?`<a href="${esc(repoUrl)}" target="_blank" rel="noopener" style="color:var(--primary);font-weight:600;text-decoration:none">Open ↗</a>`:''}
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>`;
+ // Technical Details — clean bordered card, label+action on top row, value below
+ const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+ html+=`<details class="op-raw-section" style="margin-top:6px"><summary>${chev} Technical Details</summary>`;
+ html+=`<div style="margin-top:10px">`;
+ if(commit)html+=`<div class="meta-row"><div class="meta-key">Full SHA</div><div class="meta-val" style="flex:1;display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><span style="flex:1;word-break:break-all">${esc(commit)}</span><button id="cloneCopySHA" class="plan-copy-btn" style="font-size:10px;padding:3px 10px;flex-shrink:0">Copy</button></div></div>`;
+ if(role)html+=`<div class="meta-row"><div class="meta-key">Role</div><div class="meta-val">${esc(role)}</div></div>`;
+ html+=`</div></details>`;
+ return html}
 
 // ==== Planning Output Modal ================================================
 function openPlanningModal(tab){
@@ -2214,6 +2327,173 @@ function renderMSYamlTab(art){
 function renderMSRawTab(){
  const data=window._msOutputs||window._msArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full output</span><button id="msmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+// ==== Repository Intake Output Modal ======================================
+function openRIModal(tab){
+ const art=window._riArt;if(!art)return;
+ let m=document.getElementById('riModal');
+ if(!m){
+  m=document.createElement('div');m.id='riModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const riSections=art.sections||[];
+ const getRI=h=>riSections.find(s=>s.heading===h);
+ const gapItems=getRI('Gaps')?.items||[];
+ const schemaItems=getRI('Schemas')?.items||[];
+ const TABS=[
+  gapItems.length&&{key:'gaps',label:'Gaps',count:gapItems.length},
+  schemaItems.length&&{key:'schemas',label:'Schemas',count:schemaItems.length},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'repository');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="rimClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Repository Intake Report</div>
+    <div class="plan-modal-sub">${schemaItems.length} schema${schemaItems.length!==1?'s':''}${gapItems.length?' · '+gapItems.length+' gap'+(gapItems.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-rim-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="rimBody">${renderRIModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('rimClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('rimBody').innerHTML=renderRIModalTab(art,btn.dataset.rimTab);
+  wireRIModalTab(btn.dataset.rimTab)})});
+ wireRIModalTab(activeTab)}
+function renderRIModalTab(art,tab){
+ const riSections=art.sections||[];
+ const getRI=h=>riSections.find(s=>s.heading===h);
+ if(tab==='gaps')return renderRIListTab(getRI('Gaps')?.items||[],'Gaps');
+ if(tab==='schemas')return renderRIListTab(getRI('Schemas')?.items||[],'Schemas');
+ if(tab==='raw')return renderRIRawTab();
+ return ''}
+function wireRIModalTab(tab){
+ const copyBtn=document.getElementById('rimCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._riOutputs||window._riArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderRIListTab(items,label){
+ if(!items.length)return`<p class="authhint">No ${esc(label)} found.</p>`;
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((item,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num" style="background:var(--accent-bg,rgba(37,99,235,.1));color:var(--accent)">${i+1}</span><span class="ace-ambig-q" style="font-family:monospace;font-size:11px">${esc(typeof item==='string'?item:JSON.stringify(item))}</span></div>`).join('')}</div></div>`}
+function renderRIRawTab(){
+ const data=window._riOutputs||window._riArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full intake output</span><button id="rimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Framework Baseline Output Modal =====================================
+function openFBModal(tab){
+ const art=window._fbArt;if(!art)return;
+ let m=document.getElementById('fbModal');
+ if(!m){
+  m=document.createElement('div');m.id='fbModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const fbSections=art.sections||[];
+ const conflictItems=fbSections.find(s=>s.heading==='Conflicts')?.items||[];
+ const standardsObj=fbSections.find(s=>s.heading==='Standards')?.json||{};
+ const standardsCount=Object.keys(standardsObj).length;
+ const templateLines=(art.markdown||'').split('\n').length;
+ const TABS=[
+  conflictItems.length&&{key:'conflicts',label:'Conflicts',count:conflictItems.length},
+  {key:'template',label:'Template',count:null},
+  standardsCount&&{key:'standards',label:'Standards',count:standardsCount},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'template');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="fbmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Framework Baseline</div>
+    <div class="plan-modal-sub">${templateLines} template lines · ${standardsCount} standards${conflictItems.length?' · '+conflictItems.length+' conflict'+(conflictItems.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-fbm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="fbmBody">${renderFBModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('fbmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('fbmBody').innerHTML=renderFBModalTab(art,btn.dataset.fbmTab);
+  wireFBModalTab(btn.dataset.fbmTab)})});
+ wireFBModalTab(activeTab)}
+function renderFBModalTab(art,tab){
+ if(tab==='conflicts')return renderFBConflictsTab(art);
+ if(tab==='template')return renderFBTemplateTab(art);
+ if(tab==='standards')return renderFBStandardsTab(art);
+ if(tab==='raw')return renderFBRawTab();
+ return ''}
+function wireFBModalTab(tab){
+ const copyTpl=document.getElementById('fbmCopyTpl');
+ if(copyTpl)copyTpl.onclick=()=>{
+  try{navigator.clipboard.writeText(window._fbArt?.markdown||'').then(()=>{copyTpl.textContent='Copied ✓';setTimeout(()=>{copyTpl.textContent='Copy Markdown'},1500)}).catch(()=>{})}catch(e){}}
+ const copyJson=document.getElementById('fbmCopyJson');
+ if(copyJson)copyJson.onclick=()=>{
+  const data=window._fbOutputs||window._fbArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyJson.textContent='Copied ✓';setTimeout(()=>{copyJson.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderFBConflictsTab(art){
+ const items=art.sections?.find(s=>s.heading==='Conflicts')?.items||[];
+ if(!items.length)return'<p class="authhint">No conflicts detected.</p>';
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((item,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num" style="background:var(--warn-s);color:var(--warn)">${i+1}</span><span class="ace-ambig-q">${esc(typeof item==='string'?item:JSON.stringify(item))}</span></div>`).join('')}</div></div>`}
+function renderFBTemplateTab(art){
+ if(!art.markdown)return'<p class="authhint">No template available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Markdown · Spring Boot project template</span><button id="fbmCopyTpl" class="plan-copy-btn">Copy Markdown</button></div><pre class="plan-raw-pre">${esc(art.markdown)}</pre>`}
+function renderFBStandardsTab(art){
+ const standards=art.sections?.find(s=>s.heading==='Standards')?.json||{};
+ if(!Object.keys(standards).length)return'<p class="authhint">No standards available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Standards · coding conventions and patterns</span></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(standards)}</div>`}
+function renderFBRawTab(){
+ const data=window._fbOutputs||window._fbArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full baseline output</span><button id="fbmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Dormancy Intelligence Output Modal ==================================
+function openDIModal(tab){
+ const art=window._diArt;if(!art)return;
+ let m=document.getElementById('diModal');
+ if(!m){
+  m=document.createElement('div');m.id='diModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const diSections=art.sections||[];
+ const classification=diSections.find(s=>s.heading==='Classification')?.content||'';
+ const confidence=diSections.find(s=>s.heading==='Confidence')?.content||'';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="dimClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Dormancy Assessment</div>
+    <div class="plan-modal-sub">${esc(classification)} · ${esc(confidence)} confidence</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   <button class="plan-modal-tab active" data-dim-tab="raw">Raw Output</button>
+  </div>
+  <div class="plan-modal-body" id="dimBody">${renderDIRawTab()}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('dimClose').onclick=()=>m.classList.remove('open');
+ wireDIModalTab('raw')}
+function wireDIModalTab(tab){
+ const copyBtn=document.getElementById('dimCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._diOutputs||window._diArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderDIRawTab(){
+ const data=window._diOutputs||window._diArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete assessment output</span><button id="dimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
 // ===========================================================================
 
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
@@ -2304,6 +2584,10 @@ async function openStepOutput(pipelineId,stepId,step){
  if(detail.artefact?.format==='plan')window._planOutputs=outputs;
  if(detail.artefact?.title==='ACE Analysis')window._aceOutputs=outputs;
  if(detail.artefact?.format==='yaml')window._msOutputs=outputs;
+ if(detail.artefact?.title==='Repository Intake Report')window._riOutputs=outputs;
+ if(detail.artefact?.title==='Dormancy Assessment')window._diOutputs=outputs;
+ if(detail.artefact?.title==='Framework Baseline Template')window._fbOutputs=outputs;
+ const _outputPaneHtml=detail.kind==='CLONE'?renderCloneOutputPane(outputs,params):renderOutputPane(outputs,detail.artefact);
  panel.innerHTML=`
   <div class="op-header">
    <div class="op-title-row">
@@ -2327,7 +2611,7 @@ async function openStepOutput(pipelineId,stepId,step){
   </div>
   <div class="op-body">
    <div class="op-pane" id="pane-output">
-    ${renderOutputPane(outputs,detail.artefact)}
+    ${_outputPaneHtml}
    </div>
    ${clarifications.length?`<div class="op-pane" id="pane-clarify">${renderClarifyPane(clarifications)}</div>`:''}
    <div class="op-pane" id="pane-logs">${logsHtml}</div>
@@ -2357,6 +2641,12 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.plan-si[data-plan-tab]').forEach(item=>{item.addEventListener('click',()=>openPlanningModal(item.dataset.planTab))});
  panel.querySelectorAll('.plan-si[data-ace-tab]').forEach(item=>{item.addEventListener('click',()=>openACEModal(item.dataset.aceTab))});
  panel.querySelectorAll('.plan-si[data-ms-tab]').forEach(item=>{item.addEventListener('click',()=>openMSModal(item.dataset.msTab))});
+ panel.querySelectorAll('.plan-si[data-ri-tab]').forEach(item=>{item.addEventListener('click',()=>openRIModal(item.dataset.riTab))});
+ panel.querySelectorAll('.plan-si[data-fb-tab]').forEach(item=>{item.addEventListener('click',()=>openFBModal(item.dataset.fbTab))});
+ panel.querySelectorAll('.plan-si[data-di-tab]').forEach(item=>{item.addEventListener('click',()=>openDIModal(item.dataset.diTab))});
+ const cloneCopyBtn=panel.querySelector('#cloneCopySHA');
+ if(cloneCopyBtn)cloneCopyBtn.onclick=()=>{
+  try{navigator.clipboard.writeText(outputs.commit||'').then(()=>{cloneCopyBtn.textContent='Copied ✓';setTimeout(()=>{cloneCopyBtn.textContent='Copy SHA'},1500)}).catch(()=>{})}catch(e){}};
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
   try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};
