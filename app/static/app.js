@@ -369,6 +369,26 @@ $('#lessonReject').onclick=()=>decideLesson('REJECT');
 $('#lessonRetract').onclick=()=>decideLesson('RETRACT');
 // ---- Agent Models: which model each agent runs on, with the option to change it --------
 let _agentModels=null;
+// ---- Metrics: the overall run analysis ------------------------------------------------
+const secText=n=>n==null?'':n<60?n+'s':Math.floor(n/60)+'m '+(n%60)+'s';
+async function metricsPage(soft){
+ const d=await api('/api/v2/run-analysis');
+ if(location.hash!=='#metrics')return;
+ const sm=d.summary;
+ const tile=(label,value,sub)=>`<div class="kpi-card" style="--kpi-color:#2558C4;--kpi-icon-bg:#DDE9F7"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value}</div>${sub?`<div class="kpi-trend trend-neutral">${esc(sub)}</div>`:''}</div>`;
+ const statusSub=Object.entries(sm.by_status||{}).map(([k,v])=>v+' '+k.toLowerCase().replace(/_/g,' ')).join(' · ');
+ const tiles=`<div class="run-tiles">${tile('Pipelines',sm.pipelines,statusSub)}${tile('Agent runs',sm.runs,sm.completed+' completed · '+sm.failed+' not')}${tile('Success rate',sm.success_rate==null?'—':sm.success_rate+'%','')}${tile('Average run time',sm.avg_seconds==null?'—':secText(Math.round(sm.avg_seconds)),'per agent run')}${tile('Open clarifications',sm.open_clarifications,'')}</div>`;
+ const head=d.columns.map(c=>`<th class="rm-col" title="${esc(c)}">${esc(c)}</th>`).join('');
+ const rows=d.pipelines.map(pl=>`<tr class="tr-clickable" data-pl="${esc(pl.id)}"><td class="rm-name td-name">${esc(wsName(pl.name)||pl.name)}<div class="td-svc-id">${stateBadge(String(pl.status||''))}</div></td>${d.columns.map(c=>{const x=pl.steps[c];return x?`<td class="rm-cell">${stateBadge(String(x.status))}${x.seconds!=null?`<div class="td-svc-id">${secText(x.seconds)}</div>`:''}</td>`:'<td class="rm-cell rm-empty">·</td>'}).join('')}</tr>`).join('');
+ const matrix=d.pipelines.length?`<div class="table-wrap run-matrix"><table><thead><tr><th class="rm-name">Pipeline</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty">No pipelines have run yet.</div>';
+ const agentRows=d.agents.length?d.agents.map(a=>{const rate=a.runs?Math.round(100*(a.completed||0)/a.runs):0;return `<tr><td class="td-name">${esc(a.agent_id)}</td><td>${a.runs}</td><td>${a.completed||0}</td><td>${a.runs-(a.completed||0)}</td><td>${rate}%</td><td>${a.avg_seconds==null?'—':secText(Math.round(a.avg_seconds))}</td><td>${a.avg_attempts??'—'}</td><td>${a.corrections||0}</td><td>${a.avg_gaps??'—'}</td><td>${a.avg_clarifications??'—'}</td></tr>`}).join(''):'<tr><td colspan="10" class="empty">No runs recorded yet. They appear here as agents run.</td></tr>';
+ const body=`<div id="metricsBody" style="display:contents">${tiles}
+  <div class="card"><div class="card-head"><div><div class="card-title">Run matrix</div><div class="card-sub">Each pipeline against the agent steps it ran. Select a row to open the pipeline.</div></div></div><div class="card-body">${matrix}</div></div>
+  <div class="card"><div class="card-head"><div><div class="card-title">By agent</div><div class="card-sub">Every recorded run, grouped by agent</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Runs</th><th>Completed</th><th>Not completed</th><th>Success</th><th>Avg time</th><th>Avg attempts</th><th>Corrections</th><th>Avg gaps</th><th>Avg questions</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div></div>`;
+ if(soft&&$('#metricsBody'))$('#metricsBody').outerHTML=body;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Metrics</div><div class="page-sub">Overall run analysis across pipelines and agents</div></div></div><div style="display:flex;flex-direction:column;gap:20px">${body}</div>`;
+ document.querySelectorAll('.run-matrix tr[data-pl]').forEach(tr=>{tr.onclick=()=>{location.hash='pipelines/'+tr.dataset.pl}});
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash==='#metrics'&&!document.hidden)metricsPage(true).catch(()=>{})},30000)}}
 async function agentModelsPage(){
  const d=await api('/api/v2/agent-models');_agentModels=d;
  const canManage=canManageAgents();
@@ -2430,6 +2450,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
  if(p==='access'){await accessPage();return}
  if(p==='agent-models'){await agentModelsPage();return}
  if(p==='learning'){await learningPage();return}
+ if(p==='metrics'){$('#metrics').innerHTML='';await metricsPage();return}
  if(p==='approval-governance'){await approvalGovernance();return}
  if(p==='approval-inbox'){await approvalInbox();refreshTimer=setInterval(approvalInbox,5000);return}
  if(p==='agent-registry')return agentRegistryPage();
