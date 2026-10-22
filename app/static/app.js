@@ -2394,7 +2394,7 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
   btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
-let renderSeq=0,dashPipelineOpen=false,renderSoft=false;const sugTried=new Set();
+let renderSeq=0,renderSoft=false;const dashOpenJobs=new Set();const sugTried=new Set();
 async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=false;if(!soft){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker()}if(!token()||!session)return authScreen('login');renderIdentity();
  const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
@@ -2444,12 +2444,13 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
   // an approval) made it vanish from the dashboard.
   if(seq!==renderSeq)return;
   const plItems=pipelines.items||[];
-  const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
-  let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
   // The newest pipeline of each job, so a service can lead to the pipeline running it.
   const plByJob={};plItems.slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(pl=>{plByJob[pl.job_id]=pl});
   const svcName=x=>{const name=esc(x.service||x.workspace_dir||x.id);const pl=plByJob[x.id];return pl?`<a class="pl-link" href="#pipelines/${esc(pl.id)}" title="Open this pipeline">${name}</a>`:name};
-  const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
+  const progressOf=x=>{const st=String(x.state||x.status||'').toUpperCase();const v=Math.max(0,Math.min(100,Number(dispPct(st,x.progress))||0));return st==='COMPLETED'||v>=100?100:Math.max(v,6)};
+  const jobRows=(jobs.items||[]).slice(0,12).map(x=>{const pl=plByJob[x.id];const st=x.state||x.status||'CREATED';const pct=progressOf(x);const open=pl&&dashOpenJobs.has(x.id);
+   const caps=pl?`<div class="job-caps"><button class="btn-ghost job-steps-btn" data-job="${esc(x.id)}" data-pl="${esc(pl.id)}" aria-expanded="${!!open}">${open?'Hide steps':'Steps'}</button><button class="btn-ghost job-open-btn" data-pl="${esc(pl.id)}">Open pipeline →</button></div>`:'<span class="td-light">No pipeline yet</span>';
+   return `<tr class="job-row"><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(st)}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(st,x.progress||0)}" style="width:${pct}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${pct===100?100:Math.min(pct,99)}%</span></div></td><td>${caps}</td></tr>${pl?`<tr class="job-steps-row" data-job="${esc(x.id)}"${open?'':' hidden'}><td colspan="5"><div class="pipeline-board job-steps-board" style="padding:10px 4px"><div class="empty">Loading steps…</div></div></td></tr>`:''}`}).join('');
   const pendingCount=(approvals.items||[]).length;
   const APPR_LIMIT=5;
   const appRows=(approvals.items||[]).slice(0,APPR_LIMIT).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
@@ -2459,18 +2460,6 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
   // so this read undefined and every step that had started showed "Running…"
   // for good -- including the completed ones. With the right field it can also
   // say how long each one took, which is the point of the card.
-  const stepCards=plSteps.slice(0,12).map(s=>{
-   const st=s.status||'PENDING';const dot=`<div class="stepdot"></div>`;
-   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
-   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`
-    :s.started_at?`Running… ${dur}`:'Waiting';
-   return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
-  if(seq!==renderSeq)return;
-  const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
-  const plStatus=runPl?String(runPl.status||''):'';
-  const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
-  const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}<button id="dashTogglePipeline" class="btn-ghost" aria-expanded="${dashPipelineOpen}">${dashPipelineOpen?'Hide steps':'Show steps'}</button></div></div><div class="pipeline-board" id="dashPipelineBoard" style="padding:14px 16px"${dashPipelineOpen?'':' hidden'}>${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2486,19 +2475,28 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
+  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
   const metaText=`Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
   const painted=soft&&$('#dashSecJobs');
-  if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecPipeline').innerHTML=stepViewerCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
-  else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div><div id="dashSecPipeline" style="display:contents">${stepViewerCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
+  if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
+  else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   // Every part of the pipeline card leads to the pipeline: the title, the button,
   // and each step. None of it was clickable.
-  if(runPl){
-   const go=()=>{location.hash='pipelines/'+runPl.id};
-   $('#dashTogglePipeline')?.addEventListener('click',e=>{dashPipelineOpen=!dashPipelineOpen;const b=$('#dashPipelineBoard');if(b)b.hidden=!dashPipelineOpen;e.currentTarget.textContent=dashPipelineOpen?'Hide steps':'Show steps';e.currentTarget.setAttribute('aria-expanded',String(dashPipelineOpen))});
-   $('#dashOpenPipeline')?.addEventListener('click',go);
-   document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
+  const stepHtml=steps=>steps.slice(0,12).map(s=>{
+   const st=s.status||'PENDING';
+   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
+   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`:s.started_at?`Running… ${dur}`:'Waiting';
+   return `<div class="pipeline-step ${esc(st)}"><div class="stepdot"></div><div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('')||'<div class="empty">No steps</div>';
+  const fillSteps=async(row,plId)=>{const board=row.querySelector('.job-steps-board');
+   try{const pl=await api('/api/v2/pipelines/'+plId);if(seq!==renderSeq&&!soft)return;board.innerHTML=stepHtml(pl.steps||[]);
+    board.querySelectorAll('.pipeline-step').forEach(el=>{el.style.cursor='pointer';el.onclick=()=>{location.hash='pipelines/'+plId}});startDurationTicker()}
+   catch(_){board.innerHTML='<div class="empty">Steps unavailable</div>'}};
+  document.querySelectorAll('.job-open-btn').forEach(b=>{b.onclick=()=>{location.hash='pipelines/'+b.dataset.pl}});
+  document.querySelectorAll('.job-steps-btn').forEach(b=>{const row=document.querySelector('.job-steps-row[data-job="'+b.dataset.job+'"]');
+   if(dashOpenJobs.has(b.dataset.job))fillSteps(row,b.dataset.pl);
+   b.onclick=()=>{const open=row.hidden;row.hidden=!open;b.textContent=open?'Hide steps':'Steps';b.setAttribute('aria-expanded',String(open));
+    if(open){dashOpenJobs.add(b.dataset.job);fillSteps(row,b.dataset.pl)}else dashOpenJobs.delete(b.dataset.job)}});
   // The header says it refreshes itself; nothing did.
   if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
