@@ -1900,11 +1900,13 @@ function renderArtefact(art){
   const ambigCount=ambigItems.length;
   html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${flowCount}</span><span class="plan-stat-l">Message Flows</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${esqlCount}</span><span class="plan-stat-l">ESQL Modules</span></div><div class="plan-stat-chip ${ambigCount>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${ambigCount}</span><span class="plan-stat-l">Ambiguities</span></div></div>`;
   let secs='';
-  if(smTable.length)secs+=`<div class="plan-si" data-ace-tab="model"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="16" height="12" rx="1.5"/><line x1="2" y1="9" x2="18" y2="9"/><line x1="7" y1="9" x2="7" y2="17"/></svg><div><div class="plan-si-name">Semantic Model</div><div class="plan-si-meta">${smTable.map(r=>r.area+': '+r.count).join(' · ')}</div></div></div><span class="plan-si-caret">›</span></div>`;
   if(ambigCount)secs+=`<div class="plan-si" data-ace-tab="ambiguities"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="7" x2="10" y2="10.5"/><circle cx="10" cy="13.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Ambiguities</div><div class="plan-si-meta">${ambigCount} open question${ambigCount!==1?'s':''} · require expert input</div></div></div><span class="plan-si-caret">›</span></div>`;
   if(art.markdown)secs+=`<div class="plan-si" data-ace-tab="report"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Analysis Report</div><div class="plan-si-meta">Full analysis · coverage, patterns, and recommendations</div></div></div><span class="plan-si-caret">›</span></div>`;
   secs+=`<div class="plan-si" data-ace-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full analysis output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  if(smTable.length){
+   const smLabels={flows:'Message Flows',subflows:'Subflows',esql:'ESQL Modules',maps:'Maps',schemas:'Schemas',policies:'Policies',interfaces:'Interfaces'};
+   html+=`<div class="artefact-sub" style="margin-top:12px">Semantic Model</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Count</th></tr></thead><tbody>${smTable.map(r=>`<tr><td>${esc(smLabels[r.area]||r.area)}</td><td>${r.count}</td></tr>`).join('')}</tbody></table></div>`}
   return html}
  // Markdown content (framework-baseline, ace-analysis)
  if(art.markdown){
@@ -1983,7 +1985,7 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=artefact?.format==='plan'?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
 
 // ==== Planning Output Modal ================================================
@@ -2093,7 +2095,7 @@ function openACEModal(tab){
  const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
  const smTable=smSection?.table||[];
  const ambigItems=ambigSection?.items||[];
- const TABS=[[smTable.length,'model','Semantic Model',null],[ambigItems.length,'ambiguities','Ambiguities',ambigItems.length],[art.markdown?1:0,'report','Analysis Report',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const TABS=[[ambigItems.length,'ambiguities','Ambiguities',ambigItems.length],[art.markdown?1:0,'report','Analysis Report',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
  const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'raw');
  const smSub=smTable.length?smTable.map(r=>r.area+': '+r.count).join(' · '):'ACE semantic model';
  m.innerHTML=`<div class="plan-modal">
@@ -2144,7 +2146,7 @@ function renderACEReportTab(art){
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Full ACE Analysis Report</span></div><pre class="plan-raw-pre">${esc(art.markdown)}</pre>`}
 function renderACERawTab(){
  const data=window._aceOutputs||window._aceArt||{};
- return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete analysis output</span><button id="acmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete analysis output</span><button id="acmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
 // ===========================================================================
 
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};

@@ -1375,6 +1375,7 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .plan-copy-btn{background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:12px;padding:5px 12px;border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s,border-color .12s}
 .plan-copy-btn:hover{background:var(--primary-light);color:var(--primary);border-color:var(--primary)}
 .plan-raw-pre{flex:1;min-height:0;margin:0;padding:16px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;color:var(--text);overflow:auto;white-space:pre;background:var(--bg)}
+.plan-raw-pre.op-json{white-space:pre-wrap;word-break:break-all}
 
 /* ── ACE Analysis output: ambiguity list ─────────────────────────────────── */
 .ace-ambig-list{display:flex;flex-direction:column;gap:0;padding:8px 0}
