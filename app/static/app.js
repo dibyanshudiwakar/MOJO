@@ -476,7 +476,7 @@ async function approvalInbox(){
 // Auto mode decides most questions; the ones left OPEN are the model's own
 // "high severity and not sure" cases, so say so on the card.
 function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='CRITICAL'?'<span class="badge badge-error"><span class="badge-dot"></span>CRITICAL</span>':''}
-async function clarificationsPage(){
+async function clarificationsPage(soft){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
  if(location.hash!=='#clarifications')return;
  const all=cd.items||[];
@@ -517,14 +517,15 @@ async function clarificationsPage(){
     ${c.answered_at?`<span class="clarif-answered-meta">${esc(fmtDt(c.answered_at))}${c.answered_by?' · '+esc(c.answered_by):''}</span>`:''}
    </div>`}
   </div>`};
- $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
-  ${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
+ const clarifBody=`${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ if(soft&&$('#clarifBody'))$('#clarifBody').innerHTML=clarifBody;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div><div id="clarifBody" style="display:contents">${clarifBody}</div>`;
  document.querySelectorAll('.clarif-use-sug').forEach(b=>{b.onclick=()=>{const it=b.closest('.clarif-item');const ta=it?.querySelector('.clarif-textarea');if(ta){ta.value=it.querySelector('.clarif-sug-body').textContent;ta.focus()}}});
  // Ask the model to improve placeholders once per job per session, unprompted.
  const sugTodo=[...new Set(unsuggested.map(c=>c.job_id))].filter(j=>j&&!sugTried.has(j));
@@ -562,7 +563,7 @@ async function clarificationsPage(){
     notice('Answer submitted. If this was the last open clarification, the pipeline will resume automatically.');
    }catch(e){notice(e.message,true);btn.disabled=false;btn.textContent='Submit Answer'}}});
  // Skipped while anything is being typed: a re-render replaces every textarea.
- refreshTimer=setInterval(()=>{if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage()},15000)}
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash!=='#clarifications'||document.hidden)return;if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage(true).catch(()=>{})},15000)}}
 // ---- New migration wizard -------------------------------------------------
 let wizard=null;
 const WIZARD_STEPS=['Migration & Workspace','IBM ACE Repository','Migration Framework Repository','Spring Boot Output','Review','Select Agents'];
@@ -2393,8 +2394,8 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
   btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
-let renderSeq=0,dashPipelineOpen=false;const sugTried=new Set();
-async function render(){const seq=++renderSeq;if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
+let renderSeq=0,dashPipelineOpen=false,renderSoft=false;const sugTried=new Set();
+async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=false;if(!soft){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker()}if(!token()||!session)return authScreen('login');renderIdentity();
  const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
  // state and do not want the dashboard metrics bar refetched under them on
@@ -2402,7 +2403,7 @@ async function render(){const seq=++renderSeq;if($('#overrideConfigDialog').open
  if(p==='new-migration')return migrationWizard();
  if(p==='pipelines'){try{notice('');$('#title').textContent='Pipelines';await pipelineList()}catch(e){return renderError(e)}return}
  if(p.startsWith('pipelines/')){try{notice('');await pipelineDetail(p.slice('pipelines/'.length))}catch(e){return renderError(e)}return}
- try{notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+ try{if(!soft)notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
  const [d,agentHealth]=await Promise.all([api('/api/v2/dashboard'),api('/api/v2/agent-registry/health').catch(()=>({items:[]}))]);
  if(seq!==renderSeq)return;
  const _ah=agentHealth.items||agentHealth.agents||[];
@@ -2485,7 +2486,11 @@ async function render(){const seq=++renderSeq;if($('#overrideConfigDialog').open
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
+  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
+  const metaText=`Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
+  const painted=soft&&$('#dashSecJobs');
+  if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecPipeline').innerHTML=stepViewerCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
+  else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div><div id="dashSecPipeline" style="display:contents">${stepViewerCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   // Every part of the pipeline card leads to the pipeline: the title, the button,
   // and each step. None of it was clickable.
@@ -2495,7 +2500,7 @@ async function render(){const seq=++renderSeq;if($('#overrideConfigDialog').open
    $('#dashOpenPipeline')?.addEventListener('click',go);
    document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
   // The header says it refreshes itself; nothing did.
-  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&seq===renderSeq)render()},30000);
+  if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.
