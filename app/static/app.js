@@ -1888,6 +1888,24 @@ function renderArtefact(art){
  if(!art)return '';
  const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
  let html=`<div class="artefact-title">${esc(art.title||'Agent Output')}</div>`;
+ // ACE Analysis: summary chips + clickable section rows; full data opens in modal
+ if(art.title==='ACE Analysis'){
+  window._aceArt=art;
+  const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+  const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+  const smTable=smSection?.table||[];
+  const ambigItems=ambigSection?.items||[];
+  const flowCount=(smTable.find(r=>r.area==='flows')||{}).count||0;
+  const esqlCount=(smTable.find(r=>r.area==='esql')||{}).count||0;
+  const ambigCount=ambigItems.length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${flowCount}</span><span class="plan-stat-l">Message Flows</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${esqlCount}</span><span class="plan-stat-l">ESQL Modules</span></div><div class="plan-stat-chip ${ambigCount>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${ambigCount}</span><span class="plan-stat-l">Ambiguities</span></div></div>`;
+  let secs='';
+  if(smTable.length)secs+=`<div class="plan-si" data-ace-tab="model"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="16" height="12" rx="1.5"/><line x1="2" y1="9" x2="18" y2="9"/><line x1="7" y1="9" x2="7" y2="17"/></svg><div><div class="plan-si-name">Semantic Model</div><div class="plan-si-meta">${smTable.map(r=>r.area+': '+r.count).join(' · ')}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(ambigCount)secs+=`<div class="plan-si" data-ace-tab="ambiguities"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="7" x2="10" y2="10.5"/><circle cx="10" cy="13.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Ambiguities</div><div class="plan-si-meta">${ambigCount} open question${ambigCount!==1?'s':''} · require expert input</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(art.markdown)secs+=`<div class="plan-si" data-ace-tab="report"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Analysis Report</div><div class="plan-si-meta">Full analysis · coverage, patterns, and recommendations</div></div></div><span class="plan-si-caret">›</span></div>`;
+  secs+=`<div class="plan-si" data-ace-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full analysis output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
  // Markdown content (framework-baseline, ace-analysis)
  if(art.markdown){
   html+=`<div class="artefact-md"><pre class="artefact-pre">${esc(art.markdown)}</pre></div>`}
@@ -2061,6 +2079,72 @@ function renderPlanRisksTab(risks){
 function renderPlanRawTab(){
  const data=window._planOutputs||window._planArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+
+// ==== ACE Analysis Output Modal ============================================
+function openACEModal(tab){
+ const art=window._aceArt;if(!art)return;
+ let m=document.getElementById('aceModal');
+ if(!m){
+  m=document.createElement('div');m.id='aceModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+ const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+ const smTable=smSection?.table||[];
+ const ambigItems=ambigSection?.items||[];
+ const TABS=[[smTable.length,'model','Semantic Model',null],[ambigItems.length,'ambiguities','Ambiguities',ambigItems.length],[art.markdown?1:0,'report','Analysis Report',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'raw');
+ const smSub=smTable.length?smTable.map(r=>r.area+': '+r.count).join(' · '):'ACE semantic model';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="acmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">ACE Analysis</div>
+    <div class="plan-modal-sub">${esc(smSub)}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-acm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="acmBody">${renderACEModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('acmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('acmBody').innerHTML=renderACEModalTab(art,btn.dataset.acmTab);
+  wireACEModalTab(btn.dataset.acmTab)})});
+ wireACEModalTab(activeTab)}
+function renderACEModalTab(art,tab){
+ if(tab==='model')return renderACEModelTab(art);
+ if(tab==='ambiguities')return renderACEAmbiguitiesTab(art);
+ if(tab==='report')return renderACEReportTab(art);
+ if(tab==='raw')return renderACERawTab();
+ return ''}
+function wireACEModalTab(tab){
+ const copyBtn=document.getElementById('acmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._aceOutputs||window._aceArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderACEModelTab(art){
+ const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+ const rows=smSection?.table||[];
+ if(!rows.length)return'<p class="authhint">No semantic model data available.</p>';
+ const labels={flows:'Message Flows',subflows:'Subflows',esql:'ESQL Modules',maps:'Maps',schemas:'Schemas',policies:'Policies',interfaces:'Interfaces'};
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Construct Area</th><th>Count</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(labels[r.area]||r.area)}</td><td>${r.count}</td></tr>`).join('')}</tbody></table></div>`}
+function renderACEAmbiguitiesTab(art){
+ const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+ const items=ambigSection?.items||[];
+ if(!items.length)return'<p class="authhint">No ambiguities detected.</p>';
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((q,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num">${i+1}</span><span class="ace-ambig-q">${esc(q)}</span></div>`).join('')}</div></div>`}
+function renderACEReportTab(art){
+ if(!art.markdown)return'<p class="authhint">No analysis report available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Full ACE Analysis Report</span></div><pre class="plan-raw-pre">${esc(art.markdown)}</pre>`}
+function renderACERawTab(){
+ const data=window._aceOutputs||window._aceArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete analysis output</span><button id="acmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
 // ===========================================================================
 
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
@@ -2149,6 +2233,7 @@ async function openStepOutput(pipelineId,stepId,step){
  // behind it instead of showing a duration frozen at whenever it was opened.
  const _dur=durationTag(detail,'op-exec-val',detail.status in LIVE_STEP_STATUS);
  if(detail.artefact?.format==='plan')window._planOutputs=outputs;
+ if(detail.artefact?.title==='ACE Analysis')window._aceOutputs=outputs;
  panel.innerHTML=`
   <div class="op-header">
    <div class="op-title-row">
@@ -2200,6 +2285,7 @@ async function openStepOutput(pipelineId,stepId,step){
   tab.classList.add('active');
   panel.querySelector('#pane-'+tab.dataset.tab)?.classList.add('active')}});
  panel.querySelectorAll('.plan-si[data-plan-tab]').forEach(item=>{item.addEventListener('click',()=>openPlanningModal(item.dataset.planTab))});
+ panel.querySelectorAll('.plan-si[data-ace-tab]').forEach(item=>{item.addEventListener('click',()=>openACEModal(item.dataset.aceTab))});
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
   try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};
