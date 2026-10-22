@@ -478,6 +478,7 @@ async function approvalInbox(){
 function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='CRITICAL'?'<span class="badge badge-error"><span class="badge-dot"></span>CRITICAL</span>':''}
 async function clarificationsPage(){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
+ if(location.hash!=='#clarifications')return;
  const all=cd.items||[];
  const jobMap={};(jd.items||[]).forEach(j=>{jobMap[j.id]=j.service||j.workspace_dir||j.id});
  const open=all.filter(c=>c.status==='OPEN');
@@ -485,7 +486,9 @@ async function clarificationsPage(){
  // original is listed, so the copy is not.
  const answered=all.filter(c=>c.status==='ANSWERED');
  const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
- const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim());
+ // Standards-baseline rows are placeholders until the model has had its turn.
+ const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim()||c.suggestion_mode==='STANDARDS_BASELINE');
+ const sugSource=c=>c.suggestion_mode==='STANDARDS_BASELINE'?'Platform standard':c.suggestion_mode==='PRIOR_ANSWER'?'Earlier answer':"Model's suggestion";
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -500,7 +503,7 @@ async function clarificationsPage(){
    </div>
    <div class="clarif-type">${questionType}</div>
    ${c.impact?`<div class="clarif-impact">Impact: ${esc(c.impact)}</div>`:''}
-   ${isOpen&&c.suggested_answer?`<div class="clarif-impact">Model's suggestion${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: ${esc(c.suggested_answer)}</div>`:''}
+   ${isOpen&&c.suggested_answer?`<div class="clarif-impact clarif-sug"><span class="clarif-sug-text">${esc(sugSource(c))}${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: <span class="clarif-sug-body">${esc(c.suggested_answer)}</span></span> <button class="btn-ghost clarif-use-sug" type="button">Use this answer</button></div>`:''}
    ${isOpen?`<div class="clarif-form">
     <textarea class="clarif-textarea" placeholder="Enter your answer…" rows="3"></textarea>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
@@ -522,6 +525,11 @@ async function clarificationsPage(){
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ document.querySelectorAll('.clarif-use-sug').forEach(b=>{b.onclick=()=>{const it=b.closest('.clarif-item');const ta=it?.querySelector('.clarif-textarea');if(ta){ta.value=it.querySelector('.clarif-sug-body').textContent;ta.focus()}}});
+ // Ask the model to improve placeholders once per job per session, unprompted.
+ const sugTodo=[...new Set(unsuggested.map(c=>c.job_id))].filter(j=>j&&!sugTried.has(j));
+ if(sugTodo.length){sugTodo.forEach(j=>sugTried.add(j));(async()=>{try{for(const j of sugTodo)await api('/api/v2/clarifications/suggest',{method:'POST',body:JSON.stringify({job_id:j})})}catch(_){}
+  if(location.hash==='#clarifications'&&!document.querySelector('.clarif-textarea:focus'))clarificationsPage()})()}
  const gen=$('#genSuggestions');
  if(gen)gen.onclick=async()=>{
   // One request per job: the model answers in the context of the agent and job that raised the question.
@@ -2385,7 +2393,8 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
   btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
-async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
+let renderSeq=0,dashPipelineOpen=false;const sugTried=new Set();
+async function render(){const seq=++renderSeq;if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
  const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
  // state and do not want the dashboard metrics bar refetched under them on
@@ -2395,6 +2404,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p.startsWith('pipelines/')){try{notice('');await pipelineDetail(p.slice('pipelines/'.length))}catch(e){return renderError(e)}return}
  try{notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
  const [d,agentHealth]=await Promise.all([api('/api/v2/dashboard'),api('/api/v2/agent-registry/health').catch(()=>({items:[]}))]);
+ if(seq!==renderSeq)return;
  const _ah=agentHealth.items||agentHealth.agents||[];
  const agentsRunning=d.running_agents??0;
  const totalAgents=_ah.length||15;
@@ -2431,6 +2441,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // The pipeline worth showing: one doing something, then one that is held, then
   // the latest. Only RUNNING was looked for, so pausing a pipeline (or stopping at
   // an approval) made it vanish from the dashboard.
+  if(seq!==renderSeq)return;
   const plItems=pipelines.items||[];
   const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
   let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
@@ -2453,11 +2464,12 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
    const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`
     :s.started_at?`Running… ${dur}`:'Waiting';
    return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
+  if(seq!==renderSeq)return;
   const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
   const plStatus=runPl?String(runPl.status||''):'';
   const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
   const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}</div></div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
+  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}<button id="dashTogglePipeline" class="btn-ghost" aria-expanded="${dashPipelineOpen}">${dashPipelineOpen?'Hide steps':'Show steps'}</button></div></div><div class="pipeline-board" id="dashPipelineBoard" style="padding:14px 16px"${dashPipelineOpen?'':' hidden'}>${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2479,10 +2491,11 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // and each step. None of it was clickable.
   if(runPl){
    const go=()=>{location.hash='pipelines/'+runPl.id};
+   $('#dashTogglePipeline')?.addEventListener('click',e=>{dashPipelineOpen=!dashPipelineOpen;const b=$('#dashPipelineBoard');if(b)b.hidden=!dashPipelineOpen;e.currentTarget.textContent=dashPipelineOpen?'Hide steps':'Show steps';e.currentTarget.setAttribute('aria-expanded',String(dashPipelineOpen))});
    $('#dashOpenPipeline')?.addEventListener('click',go);
    document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
   // The header says it refreshes itself; nothing did.
-  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard')render()},30000);
+  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&seq===renderSeq)render()},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.

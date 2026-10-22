@@ -59,5 +59,25 @@ def test_a_model_failure_is_reported_not_raised(repo, job, model, open_without_s
         raise ArtefactUnavailable(suggestions.PROMPT, 'provider_execution_failed:provider_error:boom', 3, {})
     monkeypatch.setattr(suggestions, 'produce', unavailable)
     result = suggestions.suggest_missing(AgentRegistry(repo), job['id'], provider=model)
-    assert result['suggested'] == 0 and 'boom' in result['errors'][0]
-    assert _suggested(repo, job) == [], 'and nothing was invented in its place'
+    assert 'boom' in result['errors'][0], 'the model failure is still reported'
+    assert result['baseline'] == len(open_without_suggestions)
+    assert len(_suggested(repo, job)) == len(open_without_suggestions), 'but no question is left bare'
+    modes = {r['suggestion_mode'] for r in repo.rows(
+        "select suggestion_mode from clarifications where job_id=? and status='OPEN'", (job['id'],))}
+    assert modes == {'STANDARDS_BASELINE'}, 'and it says plainly that this is the platform standard'
+
+
+def test_a_standards_placeholder_is_replaced_once_the_model_answers(repo, job, model, open_without_suggestions,
+                                                                   monkeypatch):
+    real = suggestions.produce
+
+    def unavailable(*args, **kwargs):
+        raise ArtefactUnavailable(suggestions.PROMPT, 'provider_execution_failed:provider_error:boom', 3, {})
+    monkeypatch.setattr(suggestions, 'produce', unavailable)
+    suggestions.suggest_missing(AgentRegistry(repo), job['id'], provider=model)
+    monkeypatch.setattr(suggestions, 'produce', real)
+
+    suggestions.suggest_missing(AgentRegistry(repo), job['id'], provider=model)
+    modes = {r['suggestion_mode'] for r in repo.rows(
+        "select suggestion_mode from clarifications where job_id=? and status='OPEN'", (job['id'],))}
+    assert 'STANDARDS_BASELINE' not in modes
