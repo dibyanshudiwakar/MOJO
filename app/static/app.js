@@ -1896,14 +1896,19 @@ function renderArtefact(art){
   const vBadge=art.validation_status==='VALID'?'<span class="badge badge-success" style="margin-left:8px"><span class="badge-dot"></span>VALID</span>':'<span class="badge badge-error" style="margin-left:8px"><span class="badge-dot"></span>INVALID</span>';
   html+=`<div class="artefact-yaml-header">Migration Specification ${vBadge}</div><div class="artefact-yaml"><pre class="artefact-pre">${esc(art.yaml)}</pre></div>`;
   if(art.validation_errors&&art.validation_errors.length){html+=`<div class="artefact-errors"><div class="artefact-sub">Validation Errors</div><ul>${art.validation_errors.map(e=>`<li>${esc(e.path||'')} — ${esc(e.message||JSON.stringify(e))}</li>`).join('')}</ul></div>`}}
- // Plan: task table, mappings table, risk register
+ // Plan: summary chips + clickable section rows; full data opens in modal
  if(art.format==='plan'){
-  if(art.tasks&&art.tasks.length){
-   html+=`<div class="artefact-sub">Implementation Tasks (${art.tasks.length})</div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Boundary</th><th>Tests</th></tr></thead><tbody>${art.tasks.map(t=>`<tr><td><code>${esc(t.id)}</code></td><td style="font-size:11px">${esc(t.source)}</td><td><code>${esc(t.pattern)}</code></td><td>${esc(t.module)}</td><td><span class="badge badge-${t.boundary==='GENERATED'?'info':'warning'}">${esc(t.boundary)}</span></td><td style="font-size:11px">${(t.tests||[]).map(x=>esc(x)).join(', ')}</td></tr>`).join('')}</tbody></table></div>`}
-  if(art.mappings&&art.mappings.length){
-   html+=`<details class="op-raw-section"><summary>${chev} Construct Mappings (${art.mappings.length})</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody>${art.mappings.map(m=>`<tr><td style="font-size:11px">${esc(m.source)}</td><td>${esc(m.construct)}</td><td><code>${esc(m.pattern)}</code></td><td>${esc(m.module)}</td></tr>`).join('')}</tbody></table></div></details>`}
-  if(art.risk_register&&art.risk_register.length){
-   html+=`<div class="artefact-sub">Risk Register (${art.risk_register.length})</div><div class="table-wrap"><table><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${art.risk_register.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td style="font-size:11px">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}}
+  window._planArt=art;
+  const tasks=art.tasks||[],mappings=art.mappings||[],risks=art.risk_register||[];
+  const genCount=tasks.filter(t=>t.boundary==='GENERATED').length;
+  const protCount=tasks.filter(t=>t.boundary==='HAND_WRITTEN_PROTECTED').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${tasks.length}</span><span class="plan-stat-l">Components to Migrate</span></div><div class="plan-stat-chip plan-stat-ok"><span class="plan-stat-n">${genCount}</span><span class="plan-stat-l">Auto-Migrated</span></div><div class="plan-stat-chip plan-stat-warn"><span class="plan-stat-n">${protCount}</span><span class="plan-stat-l">Need Review</span></div></div>`;
+  let secs='';
+  if(tasks.length)secs+=`<div class="plan-si" data-plan-tab="tasks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="11" rx="1.5"/><line x1="3" y1="9" x2="17" y2="9"/><line x1="7" y1="9" x2="7" y2="16"/></svg><div><div class="plan-si-name">Migration Tasks</div><div class="plan-si-meta">${tasks.length} component${tasks.length!==1?'s':''} · what gets built and how it will be tested</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(mappings.length)secs+=`<div class="plan-si" data-plan-tab="mappings"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="10" r="2.5"/><circle cx="15" cy="10" r="2.5"/><line x1="7.5" y1="10" x2="12.5" y2="10"/></svg><div><div class="plan-si-name">How Each Component Maps</div><div class="plan-si-meta">${mappings.length} rows · original ACE node → new Spring Boot equivalent</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(risks.length)secs+=`<div class="plan-si" data-plan-tab="risks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Risk Register</div><div class="plan-si-meta">${risks.length} risk${risks.length!==1?'s':''} · severity levels and mitigation</div></div></div><span class="plan-si-caret">›</span></div>`;
+  secs+=`<div class="plan-si" data-plan-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full plan output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`}
  // Code generation: file list with content
  if(art.format==='code'&&art.files&&art.files.length){
   html+=`<div class="artefact-sub">Generated Files (${art.files.length})</div>`;
@@ -1960,7 +1965,104 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`}
+ const rawSection=artefact?.format==='plan'?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
+
+// ==== Planning Output Modal ================================================
+function openPlanningModal(tab){
+ const art=window._planArt;if(!art)return;
+ let m=document.getElementById('planModal');
+ if(!m){
+  m=document.createElement('div');m.id='planModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const tasks=art.tasks||[],mappings=art.mappings||[],risks=art.risk_register||[];
+ const genCount=tasks.filter(t=>t.boundary==='GENERATED').length;
+ const protCount=tasks.filter(t=>t.boundary==='HAND_WRITTEN_PROTECTED').length;
+ const TABS=[[tasks.length,'tasks','Migration Tasks',tasks.length],[mappings.length,'mappings','How Each Component Maps',mappings.length],[risks.length,'risks','Risk Register',risks.length],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'raw');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="pmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">${esc(art.title||'Planning Output')}</div>
+    <div class="plan-modal-sub">${tasks.length} component${tasks.length!==1?'s':''} to migrate · ${genCount} auto-migrated · ${protCount} need review</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-pm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="pmBody">${renderPlanModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('pmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('pmBody').innerHTML=renderPlanModalTab(art,btn.dataset.pmTab);
+  wirePlanModalTab(art,btn.dataset.pmTab)})});
+ wirePlanModalTab(art,activeTab)}
+function renderPlanModalTab(art,tab){
+ if(tab==='tasks')return renderPlanTasksTab(art.tasks||[]);
+ if(tab==='mappings')return renderPlanMappingsTab(art.mappings||[]);
+ if(tab==='risks')return renderPlanRisksTab(art.risk_register||[]);
+ if(tab==='raw')return renderPlanRawTab();
+ return ''}
+function wirePlanModalTab(art,tab){
+ if(tab==='tasks'||tab==='mappings'){
+  const sEl=document.getElementById('pmSearch'),bEl=document.getElementById('pmBoundary'),mEl=document.getElementById('pmModule'),tBody=document.getElementById('pmTbody'),cnt=document.getElementById('pmCount');
+  if(!sEl||!tBody)return;
+  const rerender=()=>{
+   const s=sEl.value.toLowerCase(),bf=bEl?bEl.value:'',mf=mEl?mEl.value:'';
+   const rows=tab==='tasks'?planTaskRows(art.tasks||[],s,bf,mf):planMappingRows(art.mappings||[],s,mf);
+   tBody.innerHTML=rows;
+   if(cnt){const total=tab==='tasks'?(art.tasks||[]).length:(art.mappings||[]).length;cnt.textContent=`${tBody.querySelectorAll('tr').length} of ${total}`}};
+  sEl.addEventListener('input',rerender);
+  if(bEl)bEl.addEventListener('change',rerender);
+  if(mEl)mEl.addEventListener('change',rerender)}
+ const copyBtn=document.getElementById('pmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._planOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function planTaskRows(tasks,search,boundary,mod){
+ return tasks.filter(t=>{
+  if(boundary&&t.boundary!==boundary)return false;
+  if(mod&&t.module!==mod)return false;
+  if(search&&!`${t.id} ${t.source} ${t.pattern} ${t.module}`.toLowerCase().includes(search))return false;
+  return true}).map(t=>`<tr>
+  <td><code class="plan-id">${esc(t.id)}</code></td>
+  <td><span class="plan-src" title="${esc(t.source)}">${esc(t.source)}</span></td>
+  <td>${esc(t.pattern)}</td>
+  <td><span class="badge badge-success">${esc(t.module)}</span></td>
+  <td><span class="badge ${t.boundary==='GENERATED'?'badge-info':'badge-warning'}">${t.boundary==='GENERATED'?'Auto-Migrated':'Needs Review'}</span></td>
+  <td class="plan-tests-cell">${(t.tests||[]).map(x=>esc(x)).join(', ')}</td>
+ </tr>`).join('')}
+function planMappingRows(mappings,search,mod){
+ return mappings.filter(m=>{
+  if(mod&&m.module!==mod)return false;
+  if(search&&!`${m.source} ${m.construct} ${m.pattern} ${m.module}`.toLowerCase().includes(search))return false;
+  return true}).map(m=>`<tr>
+  <td><span class="plan-src" title="${esc(m.source)}">${esc(m.source)}</span></td>
+  <td><code class="plan-ace-badge">${esc(m.construct)}</code></td>
+  <td>${esc(m.pattern)}</td>
+  <td><span class="badge badge-success">${esc(m.module)}</span></td>
+ </tr>`).join('')}
+function renderPlanTasksTab(tasks){
+ const mods=[...new Set(tasks.map(t=>t.module).filter(Boolean))];
+ return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search ID, source, pattern…"><select id="pmBoundary" class="plan-sel"><option value="">All Migration Types</option><option value="GENERATED">Auto-Migrated</option><option value="HAND_WRITTEN_PROTECTED">Needs Review</option></select><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${tasks.length} of ${tasks.length}</span></div>
+ <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Migration Type</th><th>Tests</th></tr></thead><tbody id="pmTbody">${planTaskRows(tasks,'','','')}</tbody></table></div>`}
+function renderPlanMappingsTab(mappings){
+ const mods=[...new Set(mappings.map(m=>m.module).filter(Boolean))];
+ return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search source, ACE construct…"><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${mappings.length} of ${mappings.length}</span></div>
+ <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody id="pmTbody">${planMappingRows(mappings,'','')}</tbody></table></div>`}
+function renderPlanRisksTab(risks){
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-tests-cell">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
+function renderPlanRawTab(){
+ const data=window._planOutputs||window._planArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+// ===========================================================================
+
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
 function renderClarifyPane(clarifications){
  if(!clarifications.length)return '<p class="authhint">No clarifications recorded for this step.</p>';
@@ -2046,6 +2148,7 @@ async function openStepOutput(pipelineId,stepId,step){
  // Live for a step still running or parked, so the drawer agrees with the card
  // behind it instead of showing a duration frozen at whenever it was opened.
  const _dur=durationTag(detail,'op-exec-val',detail.status in LIVE_STEP_STATUS);
+ if(detail.artefact?.format==='plan')window._planOutputs=outputs;
  panel.innerHTML=`
   <div class="op-header">
    <div class="op-title-row">
@@ -2096,6 +2199,7 @@ async function openStepOutput(pipelineId,stepId,step){
   panel.querySelectorAll('.op-pane').forEach(p=>p.classList.remove('active'));
   tab.classList.add('active');
   panel.querySelector('#pane-'+tab.dataset.tab)?.classList.add('active')}});
+ panel.querySelectorAll('.plan-si[data-plan-tab]').forEach(item=>{item.addEventListener('click',()=>openPlanningModal(item.dataset.planTab))});
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
   try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};

@@ -1315,3 +1315,63 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 /* A service name that leads to its pipeline. */
 .pl-link{color:var(--primary,#2563eb);text-decoration:none;font-weight:600}
 .pl-link:hover{text-decoration:underline}
+
+/* ── Planning output: drawer summary ─────────────────────────────────────── */
+.plan-stats-row{display:flex;gap:8px;margin:4px 0 12px}
+.plan-stat-chip{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 6px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);gap:2px;min-width:0}
+.plan-stat-chip.plan-stat-ok{background:var(--success-bg);border-color:transparent}
+.plan-stat-chip.plan-stat-warn{background:var(--warning-bg);border-color:transparent}
+.plan-stat-n{font-size:22px;font-weight:700;line-height:1;color:var(--text)}
+.plan-stat-chip.plan-stat-ok .plan-stat-n{color:var(--success-text)}
+.plan-stat-chip.plan-stat-warn .plan-stat-n{color:var(--warning-text)}
+.plan-stat-l{font-size:10px;color:var(--text-2);text-align:center;line-height:1.3}
+.plan-sections{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.plan-si{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s;user-select:none}
+.plan-si:hover{background:var(--primary-light);border-color:var(--primary)}
+.plan-si-l{display:flex;align-items:center;gap:10px}
+.plan-si-ico{width:18px;height:18px;flex-shrink:0;color:var(--text-3)}
+.plan-si:hover .plan-si-ico{color:var(--primary)}
+.plan-si-name{font-size:13px;font-weight:600;color:var(--text)}
+.plan-si-meta{font-size:11px;color:var(--text-3);margin-top:1px}
+.plan-si-caret{font-size:16px;color:var(--text-3);line-height:1;flex-shrink:0;font-weight:300}
+.plan-si:hover .plan-si-caret{color:var(--primary)}
+.plan-hint{font-size:11px;color:var(--text-3);text-align:center;padding:4px 0 2px}
+
+/* ── Planning output: full-screen modal ──────────────────────────────────── */
+.plan-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.48);backdrop-filter:blur(3px);z-index:300;display:flex;align-items:stretch;opacity:0;pointer-events:none;transition:opacity .2s ease}
+.plan-modal-bg.open{opacity:1;pointer-events:auto}
+.plan-modal{background:var(--card);flex:1;display:flex;flex-direction:column;margin:24px;border-radius:var(--r-lg);overflow:hidden;transform:translateY(14px);transition:transform .2s ease;box-shadow:0 16px 48px rgba(0,0,0,.18)}
+.plan-modal-bg.open .plan-modal{transform:translateY(0)}
+.plan-modal-hd{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+.plan-modal-back{background:none;border:1px solid var(--border);color:var(--text-2);font-size:12px;font-weight:500;padding:5px 12px;border-radius:var(--r);cursor:pointer;flex-shrink:0;transition:background .12s,color .12s,border-color .12s}
+.plan-modal-back:hover{background:var(--bg);color:var(--text);border-color:var(--text-2)}
+.plan-modal-hd-info{flex:1;min-width:0}
+.plan-modal-title{font-size:15px;font-weight:700;color:var(--text)}
+.plan-modal-sub{font-size:11px;color:var(--text-3);margin-top:2px}
+.plan-modal-tabs{display:flex;gap:0;padding:0 16px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.plan-modal-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-2);font-size:13px;font-weight:500;padding:10px 14px;cursor:pointer;white-space:nowrap;transition:color .12s,border-color .12s;display:inline-flex;align-items:center;gap:6px;margin-bottom:-1px}
+.plan-modal-tab:hover{color:var(--text)}
+.plan-modal-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.plan-tab-badge{background:var(--border-2);color:var(--text-2);font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;line-height:1.4}
+.plan-modal-tab.active .plan-tab-badge{background:var(--primary-light);color:var(--primary)}
+.plan-modal-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.plan-tb{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-2);flex-shrink:0}
+.plan-tb-l{display:flex;gap:8px;align-items:center}
+.plan-search{height:30px;padding:0 10px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;background:var(--card);color:var(--text);width:300px;transition:border-color .12s,box-shadow .12s}
+.plan-search:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.plan-sel{height:30px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;background:var(--card);color:var(--text);cursor:pointer;width:152px}
+.plan-count{margin-left:auto;font-size:12px;color:var(--text-3);white-space:nowrap;flex-shrink:0}
+.plan-tbl-wrap{flex:1;min-height:0;overflow:auto}
+.plan-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.plan-tbl th{text-align:left;padding:8px 14px;font-size:11px;font-weight:600;color:var(--text-2);background:var(--card);border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0;z-index:1}
+.plan-tbl td{padding:8px 14px;border-bottom:1px solid var(--border-2);vertical-align:top}
+.plan-tbl tbody tr:hover td{background:var(--bg)}
+.plan-id{font-family:ui-monospace,'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text)}
+.plan-src{font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;color:var(--text-2);display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plan-ace-badge{font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;background:var(--purple-bg);color:var(--purple-text);padding:2px 6px;border-radius:4px;white-space:nowrap;display:inline-block}
+.plan-tests-cell{font-size:11px;color:var(--text-2);max-width:220px;line-height:1.5}
+.plan-raw-tb{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border-2);flex-shrink:0}
+.plan-raw-lbl{font-size:12px;color:var(--text-2)}
+.plan-copy-btn{background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:12px;padding:5px 12px;border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.plan-copy-btn:hover{background:var(--primary-light);color:var(--primary);border-color:var(--primary)}
+.plan-raw-pre{flex:1;min-height:0;margin:0;padding:16px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;color:var(--text);overflow:auto;white-space:pre;background:var(--bg)}
