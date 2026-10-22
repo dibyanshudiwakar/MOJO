@@ -313,7 +313,11 @@ class MappingAndPlanningService:
   for item in result['manifest']:
    path=item['path'];file=root/path
    if not file.suffix.lower() in self.REGISTERED_SUFFIXES:continue
-   try:content=file.read_text(encoding='utf-8')
+   # Read through the same extended-length form the writer used. A plain read of
+   # a path past MAX_PATH raises FileNotFoundError on Windows, and skipping it
+   # here dropped every file deep in the package tree -- all the Java -- so the
+   # hardcoding check reported "no_ms_java_files" for a project full of it.
+   try:content=_long(file).read_text(encoding='utf-8')
    except OSError:continue
    rows.append((uid(),job_id,plan_id,path,content,json.dumps({'plan_id':plan_id,'path':path,'content_hash':item['hash']}),'GENERATED_REGION_LOCKED',item['hash'],now()))
   with self.repo.connect() as c:
