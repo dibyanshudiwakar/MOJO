@@ -1911,11 +1911,19 @@ function renderArtefact(art){
  // Markdown content (framework-baseline, ace-analysis)
  if(art.markdown){
   html+=`<div class="artefact-md"><pre class="artefact-pre">${esc(art.markdown)}</pre></div>`}
- // YAML content (migration-specification)
- if(art.yaml){
-  const vBadge=art.validation_status==='VALID'?'<span class="badge badge-success" style="margin-left:8px"><span class="badge-dot"></span>VALID</span>':'<span class="badge badge-error" style="margin-left:8px"><span class="badge-dot"></span>INVALID</span>';
-  html+=`<div class="artefact-yaml-header">Migration Specification ${vBadge}</div><div class="artefact-yaml"><pre class="artefact-pre">${esc(art.yaml)}</pre></div>`;
-  if(art.validation_errors&&art.validation_errors.length){html+=`<div class="artefact-errors"><div class="artefact-sub">Validation Errors</div><ul>${art.validation_errors.map(e=>`<li>${esc(e.path||'')} — ${esc(e.message||JSON.stringify(e))}</li>`).join('')}</ul></div>`}}
+ // Migration Specification: summary chips + section rows; full data opens in modal
+ if(art.format==='yaml'){
+  window._msArt=art;
+  const msErrors=art.validation_errors||[];
+  const msValid=art.validation_status==='VALID';
+  const msLines=(art.yaml||'').split('\n').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${msLines}</span><span class="plan-stat-l">YAML Lines</span></div><div class="plan-stat-chip ${msErrors.length>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${msErrors.length}</span><span class="plan-stat-l">Validation Errors</span></div><div class="plan-stat-chip ${msValid?'plan-stat-ok':'plan-stat-warn'}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.5px">${msValid?'VALID':'INVALID'}</span><span class="plan-stat-l">Status</span></div></div>`;
+  let msSecs='';
+  if(msErrors.length)msSecs+=`<div class="plan-si" data-ms-tab="errors"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="11"/><circle cx="10" cy="14" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Validation Errors</div><div class="plan-si-meta">${msErrors.length} error${msErrors.length!==1?'s':''} · paths and messages</div></div></div><span class="plan-si-caret">›</span></div>`;
+  msSecs+=`<div class="plan-si" data-ms-tab="yaml"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 2h8l4 4v12a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="12 2 12 6 16 6"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg><div><div class="plan-si-name">YAML Specification</div><div class="plan-si-meta">${msLines} lines · full migration specification</div></div></div><span class="plan-si-caret">›</span></div>`;
+  msSecs+=`<div class="plan-si" data-ms-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${msSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
  // Plan: summary chips + clickable section rows; full data opens in modal
  if(art.format==='plan'){
   window._planArt=art;
@@ -1985,7 +1993,7 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
 
 // ==== Planning Output Modal ================================================
@@ -2147,6 +2155,65 @@ function renderACEReportTab(art){
 function renderACERawTab(){
  const data=window._aceOutputs||window._aceArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete analysis output</span><button id="acmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Migration Specification Output Modal =================================
+function openMSModal(tab){
+ const art=window._msArt;if(!art)return;
+ let m=document.getElementById('msModal');
+ if(!m){
+  m=document.createElement('div');m.id='msModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const msErrors=art.validation_errors||[];
+ const msValid=art.validation_status==='VALID';
+ const msLines=(art.yaml||'').split('\n').length;
+ const TABS=[[msErrors.length,'errors','Validation Errors',msErrors.length],[1,'yaml','YAML Specification',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'yaml');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="msmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Migration Specification</div>
+    <div class="plan-modal-sub">${msLines} lines · validation: <span style="color:${msValid?'var(--success-text)':'var(--warning-text)'}">${msValid?'VALID':'INVALID'}</span>${msErrors.length?' · '+msErrors.length+' error'+(msErrors.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-msm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="msmBody">${renderMSModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('msmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('msmBody').innerHTML=renderMSModalTab(art,btn.dataset.msmTab);
+  wireMSModalTab(btn.dataset.msmTab)})});
+ wireMSModalTab(activeTab)}
+function renderMSModalTab(art,tab){
+ if(tab==='errors')return renderMSErrorsTab(art);
+ if(tab==='yaml')return renderMSYamlTab(art);
+ if(tab==='raw')return renderMSRawTab();
+ return ''}
+function wireMSModalTab(tab){
+ const copyBtn=document.getElementById('msmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._msOutputs||window._msArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}
+ const copyYaml=document.getElementById('msmCopyYaml');
+ if(copyYaml)copyYaml.onclick=()=>{
+  try{navigator.clipboard.writeText(window._msArt?.yaml||'').then(()=>{copyYaml.textContent='Copied ✓';setTimeout(()=>{copyYaml.textContent='Copy YAML'},1500)}).catch(()=>{})}catch(e){}}}
+function renderMSErrorsTab(art){
+ const errors=art.validation_errors||[];
+ if(!errors.length)return'<p class="authhint">No validation errors.</p>';
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Path</th><th>Message</th></tr></thead><tbody>${errors.map(e=>`<tr><td><code class="plan-id">${esc(e.path||'—')}</code></td><td class="plan-tests-cell">${esc(e.message||JSON.stringify(e))}</td></tr>`).join('')}</tbody></table></div>`}
+function renderMSYamlTab(art){
+ if(!art.yaml)return'<p class="authhint">No YAML available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">YAML · migration specification</span><button id="msmCopyYaml" class="plan-copy-btn">Copy YAML</button></div><pre class="plan-raw-pre">${esc(art.yaml)}</pre>`}
+function renderMSRawTab(){
+ const data=window._msOutputs||window._msArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full output</span><button id="msmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
 // ===========================================================================
 
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
@@ -2236,6 +2303,7 @@ async function openStepOutput(pipelineId,stepId,step){
  const _dur=durationTag(detail,'op-exec-val',detail.status in LIVE_STEP_STATUS);
  if(detail.artefact?.format==='plan')window._planOutputs=outputs;
  if(detail.artefact?.title==='ACE Analysis')window._aceOutputs=outputs;
+ if(detail.artefact?.format==='yaml')window._msOutputs=outputs;
  panel.innerHTML=`
   <div class="op-header">
    <div class="op-title-row">
@@ -2288,6 +2356,7 @@ async function openStepOutput(pipelineId,stepId,step){
   panel.querySelector('#pane-'+tab.dataset.tab)?.classList.add('active')}});
  panel.querySelectorAll('.plan-si[data-plan-tab]').forEach(item=>{item.addEventListener('click',()=>openPlanningModal(item.dataset.planTab))});
  panel.querySelectorAll('.plan-si[data-ace-tab]').forEach(item=>{item.addEventListener('click',()=>openACEModal(item.dataset.aceTab))});
+ panel.querySelectorAll('.plan-si[data-ms-tab]').forEach(item=>{item.addEventListener('click',()=>openMSModal(item.dataset.msTab))});
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
   try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};
