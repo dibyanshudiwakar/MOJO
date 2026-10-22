@@ -66,7 +66,7 @@ These roles can be self-assigned — no `GOVERNANCE_ADMIN` needed.
 
 ## 4. Elevated Roles (require `GOVERNANCE_ADMIN` to grant)
 
-These roles cannot be self-assigned. The first account registered gets `GOVERNANCE_ADMIN` automatically (bootstrap).
+These roles cannot be self-assigned. The platform administrator (`admin@ace.local`, seeded on first setup) holds the administrative roles; registering first grants nothing.
 
 | Role | Needed To Test |
 |---|---|

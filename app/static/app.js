@@ -55,10 +55,16 @@ function notice(m,b=false){
 }
 let session=null,githubState=null;
 const initials=n=>String(n||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
+// An administrator account configures the platform and does not operate migrations:
+// no pipelines, approvals or clarifications, and no GitHub connection to make.
+const ADMIN_ONLY_ROLES=['GOVERNANCE_ADMIN','AI_GOVERNANCE_ADMIN','AGENT_REGISTRY_ADMIN','GATE_ADMIN','CONNECTOR_ADMIN','CLARIFICATION_ADMIN','AUDITOR'];
+const ADMIN_HIDDEN_PAGES=['dashboard','metrics','pipelines','new-migration','clarifications','approval-inbox','approvals','evidence','events','specifications','plans','generated','delivery-operations','versions','quality-runs','agent-templates','jobs'];
+function isAdminOnly(){const r=(session&&session.user&&session.user.roles)||[];return r.length>0&&r.every(x=>ADMIN_ONLY_ROLES.includes(x))}
+function homePage(){return isAdminOnly()?'access':'dashboard'}
 function renderIdentity(){
  const chip=$('#userChip'),gh=$('#ghIndicator'),newBtn=$('#new');
  if(!session){chip.hidden=true;gh.hidden=true;newBtn.hidden=true;$('#userMenu').hidden=true;return}
- const u=session.user;chip.hidden=false;newBtn.hidden=false;
+ const u=session.user;chip.hidden=false;newBtn.hidden=isAdminOnly();
  $('#userAvatar').textContent=initials(u.name);$('#userName').textContent=u.name;$('#userRole').textContent=u.role.replaceAll('_',' ');
  $('#menuName').textContent=u.name;$('#menuEmail').textContent=u.email;
  const c=claimsOf(token()),mins=c?Math.floor(((c.exp||0)*1000-Date.now())/60000):0;
@@ -70,6 +76,7 @@ function renderIdentity(){
  // merely whether a URL and token happen to be stored.
  const s=(githubState&&githubState.status)||'NOT_CONFIGURED';
  const look={CONNECTED:['ok','GitHub connected'],FAILED:['bad','GitHub error'],UNVERIFIED:['warn','GitHub unverified'],NOT_CONFIGURED:['warn','GitHub not connected']}[s]||['warn','GitHub'];
+ if(isAdminOnly()){gh.hidden=true;return}
  gh.hidden=false;gh.className='ghchip '+look[0];
  if(s==='CONNECTED'&&githubState.account_login){
   gh.innerHTML=`<span class="ghchip-label">GitHub</span><span class="ghchip-sep">·</span><span class="ghchip-acct">${esc(githubState.account_login)}</span>`;
@@ -189,6 +196,7 @@ async function afterLogin(){
   session={user:me.user};githubState=me.integrations.github}
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
+ if(isAdminOnly()){try{history.replaceState(null,'','#access')}catch(e){location.hash='access'}render();notifStartPolling();return}
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
  // Always re-verify the stored GitHub token regardless of its last-known status.
  // A token that was CONNECTED in a previous session may have been revoked.
@@ -309,15 +317,17 @@ const NAV_GROUPS=[
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
- $('#nav').innerHTML=NAV_GROUPS.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
+ const admin=isAdminOnly();
+ const groups=admin?NAV_GROUPS.map(g=>({...g,items:g.items.filter(it=>!ADMIN_HIDDEN_PAGES.includes(it.page))})).filter(g=>g.items.length):NAV_GROUPS;
+ $('#nav').innerHTML=groups.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
  document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>location.hash=b.dataset.p);
- navSetActive((location.hash||'#dashboard').slice(1))}
+ navSetActive((location.hash||'#'+homePage()).slice(1))}
 function navSetActive(page){
  const base=page.startsWith('pipelines/')?'pipelines':page;
  document.querySelectorAll('.nav-item').forEach(b=>{b.classList.toggle('active',b.dataset.p===base)})}
 function table(items,actions=false){if(!items?.length)return '<div class="empty">No live records</div>';const keys=Object.keys(items[0]).filter(k=>k!=='config').slice(0,9);const tdCls=k=>/_at$|^(created|updated|started|finished|timestamp)$/.test(k)?'td-date':/^(id|name|service|workspace_dir|display_name|title|gate)$/.test(k)||keys.indexOf(k)===0?'td-name':'';const fmtCell=(k,v)=>{if(/_at$|^(created|updated|started|finished|timestamp)$/.test(k)&&typeof v==='string')return fmtDt(v);return typeof v==='object'?JSON.stringify(v):String(v??'')};return `<div class="table"><table><thead><tr>${keys.map(k=>`<th>${esc(k.replaceAll('_',' '))}</th>`).join('')}${actions?'<th>Actions</th>':''}</tr></thead><tbody>${items.map(x=>`<tr>${keys.map(k=>`<td class="${tdCls(k)}" title="${esc(typeof x[k]==='object'?JSON.stringify(x[k]):String(x[k]??''))}">${esc(fmtCell(k,x[k])).slice(0,80)}</td>`).join('')}${actions?`<td><button data-test="${esc(x.id)}">Validate</button></td>`:''}</tr>`).join('')}</tbody></table></div>`}
 function gateCard(g){return `<article class="gate-card"><div class="sectionhead"><h3>${esc(g.gate)}</h3><span class="live-dot">LIVE</span></div><form class="gate-form"><input type="hidden" name="gate" value="${esc(g.gate)}"><div class="formgrid"><label>Enabled<select name="enabled"><option value="true" ${g.enabled?'selected':''}>Enabled</option><option value="false" ${!g.enabled?'selected':''}>Disabled</option></select></label><label>Approver role<input name="required_role" value="${esc(g.required_role)}"></label><label class="wide">Allowed decisions<input name="allowed_decisions" value="${esc(g.allowed_decisions.join(','))}"></label><label>Minimum evidence<input name="min_evidence" type="number" min="0" value="${g.min_evidence}"></label><label>Quorum<input name="quorum" type="number" min="1" value="${g.quorum}"></label><label>Timeout minutes<input name="timeout_minutes" type="number" min="0" value="${g.timeout_minutes}"></label><label>Escalation profile<input name="escalation_profile" value="${esc(g.escalation_profile)}"></label><label>Bypass role<input name="bypass_role" value="${esc(g.bypass_role)}"></label><label>Downstream effect<input name="downstream_effect" value="${esc(g.downstream_effect)}"></label></div><button class="btn-primary gate-save"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save changes</button><p class="gate-meta">Last persisted update: ${esc(g.updated_at?fmtDt(g.updated_at):'not yet configured')}</p></form></article>`}
-async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox'),api('/api/v2/approvals')]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
+async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/approvals').catch(()=>({items:[]}))]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
 // ---- Learning: what each run has taught, and whether the agents are improving ----------
 let _lessons=[];
 const LESSON_LABEL={SCHEMA_CORRECTION:'Schema correction',EFFORT_STEP_DOWN:'Effort step-down',GATE_GAP:'Skill gap',GATE_FAIL:'Gate failure',REPAIR:'Feedback repair',GAP_UNREPAIRED:'Gap not repaired',RUN_FAILURE:'Run failure'};
@@ -449,9 +459,9 @@ async function accessPage(){
  try{d=await api('/api/v2/admin/access')}catch(e){$('#view').innerHTML=`<div class="hero"><h2>Access</h2><p>Granting roles needs the <b>GOVERNANCE_ADMIN</b> role. ${esc(e.message)}</p></div>`;return}
  const gate=new Set(d.gate_roles);
  const chip=(u,r)=>`<span class="rsel-chip ${gate.has(r)?'chip-gate':''}">${esc(r)}<span class="rsel-chip-x" data-revoke="${esc(r)}" data-email="${esc(u.email)}" role="button" title="Revoke">&#x2715;</span></span>`;
- const reqs=d.requests.length?`<div class="table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
+ const reqs=d.requests.length?`<div class="table access-table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
  const grantOpts=u=>d.grantable.filter(r=>!u.roles.includes(r)).map(r=>`<option value="${esc(r)}">${esc(r)}${gate.has(r)?' (gate approver)':''}</option>`).join('');
- const users=`<div class="table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
+ const users=`<div class="table access-table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
  $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><h3>Role requests</h3>${reqs}<h3>Accounts</h3>${users}`;
  const act=async(url,body,msg)=>{try{await api(url,{method:'POST',body:JSON.stringify(body)});notice(msg);accessPage()}catch(e){notice(e.message,true)}};
  document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
@@ -2421,7 +2431,9 @@ async function openStepOutput(pipelineId,stepId,step){
 
 let renderSeq=0,renderSoft=false;const dashOpenJobs=new Set();const sugTried=new Set();
 async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=false;if(!soft){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker()}if(!token()||!session)return authScreen('login');renderIdentity();
- const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
+ const p=(location.hash||'#'+homePage()).slice(1);
+ if(isAdminOnly()&&ADMIN_HIDDEN_PAGES.includes(p.split('/')[0])){location.hash=homePage();return}
+ navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
  // state and do not want the dashboard metrics bar refetched under them on
  // every internal step change, so they are handled before the generic path.

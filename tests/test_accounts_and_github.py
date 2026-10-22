@@ -35,12 +35,47 @@ def test_signup_stores_account_without_plaintext_password(svc):
     assert row['password_hash'] and row['password_salt'] and int(row['password_iterations']) >= 1000
 
 
-def test_first_account_bootstraps_administration(svc):
+def test_registering_first_does_not_make_anyone_an_administrator(svc):
     accounts, _ = svc
     first = accounts.sign_up(dict(GOOD))
-    assert 'GOVERNANCE_ADMIN' in first['roles'], 'a fresh deployment needs one administrator'
-    second = accounts.sign_up({**GOOD, 'email': 'grace@example.com', 'name': 'Grace Hopper'})
-    assert second['roles'] == ['ACE_ANALYST'], 'only the first account is privileged'
+    assert first['roles'] == ['ACE_ANALYST'], 'administration is seeded, never won by registering first'
+
+
+def test_first_setup_seeds_one_administrator_with_only_administrative_roles(svc, monkeypatch):
+    from app.services.accounts import ADMIN_ROLES, GATE_APPROVER_ROLES, SELF_SERVICE_ROLES, is_admin_only
+    accounts, _ = svc
+    monkeypatch.delenv('FACTORY_ADMIN_EMAIL', raising=False)
+    monkeypatch.delenv('FACTORY_ADMIN_PASSWORD', raising=False)
+    email, password = accounts.seed_admin()
+    assert email == 'admin@ace.local' and len(password) >= 12
+    roles = accounts.roles_of(accounts.by_email(email))
+    assert set(roles) == set(ADMIN_ROLES) and is_admin_only(roles)
+    assert not set(roles) & (set(SELF_SERVICE_ROLES) | set(GATE_APPROVER_ROLES)), 'cannot run or approve a migration'
+    assert accounts.login(email, password)['user']['email'] == email
+    assert accounts.seed_admin() is None, 'restarting never creates a second administrator'
+
+
+def test_the_administrator_comes_from_the_environment_when_set(svc, monkeypatch):
+    accounts, _ = svc
+    monkeypatch.setenv('FACTORY_ADMIN_EMAIL', 'Root@Example.com')
+    monkeypatch.setenv('FACTORY_ADMIN_PASSWORD', 'a-long-enough-password')
+    assert accounts.seed_admin() == ('root@example.com', 'a-long-enough-password')
+
+
+def test_an_administrator_account_cannot_be_given_pipeline_or_approver_roles(svc):
+    accounts, _ = svc
+    email, _pw = accounts.seed_admin()
+    for role in ('ACE_ANALYST', 'CODE_GENERATOR', 'PRODUCT_OWNER', 'QA_LEAD', 'ORCHESTRATOR'):
+        with pytest.raises(ValueError, match='admin_account_cannot_hold'):
+            accounts.grant_role(['GOVERNANCE_ADMIN'], email, role)
+    assert accounts.grant_role(['GOVERNANCE_ADMIN'], email, 'CONNECTOR_ADMIN')['email'] == email
+
+
+def test_a_normal_account_can_still_be_granted_roles(svc):
+    accounts, _ = svc
+    accounts.seed_admin()
+    accounts.sign_up(dict(GOOD))
+    assert 'PRODUCT_OWNER' in accounts.grant_role(['GOVERNANCE_ADMIN'], GOOD['email'], 'PRODUCT_OWNER')['roles']
 
 
 def test_signup_rejects_duplicate_weak_and_elevated(svc):

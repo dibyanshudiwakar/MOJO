@@ -13,7 +13,7 @@ from app.services.rca import RCAService
 from app.services.agents import AgentRegistry
 from app.services.connectors import ConnectorRegistry
 from app.services.auth import IdentityService
-from app.services.accounts import AccountService
+from app.services.accounts import AccountService, is_admin_only
 from app.services.github_integration import GitHubIntegrationService
 from app.services.repo_clone import RepoCloneService
 from app.services.pipelines import PipelineService, PipelineError
@@ -36,7 +36,27 @@ specs=SpecificationService(repo,ROOT/'schemas/migration-specification.schema.jso
 diff=DifferentialService(repo)
 rca=RCAService(repo)
 agents=AgentRegistry(repo)
-workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); skill7=SkillRegistryService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity);accounts.prune_retired_roles(); github=GitHubIntegrationService(repo)
+workflow=WorkflowOrchestrator(repo); intake=IntakeService(repo); dormancy=DormancyService(repo); frameworks=FrameworkService(repo); analysis=ACEAnalysisService(repo); planning=PlanningGenerationService(repo); ledger=AuditLedger(repo); security=SecurityService(repo); connectors=ConnectorRegistry(repo); identity=IdentityService(); priority1=PriorityOneService(repo); lifecycle6=MappingAndPlanningService(repo); registry7=RegistryService(repo); ai7=AIRegistryService(repo); knowledge7=KnowledgeService(repo); approvals7=ApprovalWorkspaceService(repo); delivery7=DeliveryAutomationService(repo); notify7=NotificationService(repo); observe7=ObservabilityService(repo); skill7=SkillRegistryService(repo); confidence=ConfidenceRemediationService(); accounts=AccountService(repo,identity);accounts.prune_retired_roles();_seeded=accounts.seed_admin(); github=GitHubIntegrationService(repo)
+
+
+def _announce_admin(seeded):
+    """Say once, on first setup, how to sign in as the seeded administrator."""
+    if not seeded:
+        return
+    email,password=seeded
+    if os.getenv('FACTORY_ADMIN_PASSWORD'):
+        print('First setup: administrator account %s created (password from FACTORY_ADMIN_PASSWORD).'%email,file=sys.stderr,flush=True)
+        return
+    note=Path(repo.path).with_suffix('.admin-credentials')
+    try:
+        note.write_text('email: %s'%email+chr(10)+'password: %s'%password+chr(10),encoding='utf-8')
+        try: os.chmod(note,0o600)
+        except OSError: pass
+        where=' Also saved to %s -- delete it after signing in.'%note
+    except OSError:
+        where=''
+    print(chr(10).join(['First setup: administrator account created.','  email:    '+email,'  password: '+password,'  Shown once.'+where]),file=sys.stderr,flush=True)
+_announce_admin(_seeded)
 pipelines=PipelineService(repo); repo_clone=RepoCloneService(repo); agent_admin=AgentAdminService(repo); llm_bindings=AgentLLMBindingService(repo); templates_svc=AgentTemplateService(repo)
 # Registration and sign-in cannot require a token, since obtaining one is what
 # they are for. Everything else under /api/ stays authenticated.
@@ -360,12 +380,20 @@ class H(BaseHTTPRequestHandler):
         if any_of and not (set(any_of) & set(pr.roles)):
             raise PermissionError('required_role_missing:'+'|'.join(sorted(any_of)))
         return pr
+    #: What an administrator account cannot touch: running, answering or approving migrations.
+    ADMIN_BLOCKED=('/api/v2/jobs','/api/v2/pipelines','/api/v2/clarifications','/api/v7/approval-inbox',
+                   '/api/v7/approval-packages','/api/v2/agents/dispatch','/api/v2/agents/orchestrate',
+                   '/api/v2/agents/start','/api/v2/run-analysis')
+    def block_admin_operating(self,principal,p):
+        if is_admin_only(principal.roles) and any(p==x or p.startswith(x+'/') for x in self.ADMIN_BLOCKED):
+            raise PermissionError('admin_account_cannot_operate_pipelines')
     def authorize_job(self,principal,job_id):
         """Section 14 project and environment isolation.
 
         This check existed in IdentityService but was never called, so a token
         scoped to one project could read and drive another project's jobs.
         """
+        if is_admin_only(principal.roles): raise PermissionError('admin_account_cannot_operate_pipelines')
         job=repo.one('select id,project_scope,environment from jobs where id=?',(job_id,))
         if not job: raise ValueError('job_not_found')
         identity.authorize_job(principal,job)
@@ -422,6 +450,8 @@ class H(BaseHTTPRequestHandler):
         if p.startswith('/api/') and p not in PUBLIC_ROUTES:
             try: principal=self.principal()
             except PermissionError as e: return self.sendj(401,{'error':str(e)})
+            try: self.block_admin_operating(principal,p)
+            except PermissionError as e: return self.sendj(403,{'error':str(e)})
             if p=='/api/v2/'+'audit-ledger' and not ({'GOVERNANCE_ADMIN','AUDITOR'} & set(principal.roles)):
                 return self.sendj(403,{'error':'required_role_missing:AUDITOR|GOVERNANCE_ADMIN'})
             if p in ('/api/v2/connectors','/api/v2/connector-operations','/api/v2/routing-policies') and 'CONNECTOR_ADMIN' not in principal.roles:
@@ -627,6 +657,10 @@ class H(BaseHTTPRequestHandler):
         p=urlparse(self.path).path
         try:
             d=body(self)
+            if p.startswith('/api/') and p not in PUBLIC_ROUTES and self.headers.get('Authorization'):
+                try: pr0=self.principal()
+                except PermissionError: pr0=None
+                if pr0: self.block_admin_operating(pr0,p)
             if p=='/api/v2/auth/signup':
                 throttle('signup:'+self.client_key())
                 user=accounts.sign_up(d)

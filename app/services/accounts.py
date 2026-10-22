@@ -69,9 +69,20 @@ ELEVATED_ROLES = tuple(r for r in dict.fromkeys((
     'KNOWLEDGE_CURATOR', 'NOTIFICATION_PUBLISHER', 'OBSERVABILITY_PUBLISHER',
     'CLARIFICATION_ADMIN', 'ORCHESTRATOR', 'AGENT_OPERATOR', 'AGENT_REGISTRY_ADMIN',
 ) + GATE_APPROVER_ROLES) if r not in SELF_SERVICE_ROLES)
-# The first account bootstraps administration, otherwise a fresh deployment has
-# no one able to grant an elevated role to anyone.
-BOOTSTRAP_ROLES = ('GOVERNANCE_ADMIN', 'CONNECTOR_ADMIN', 'GATE_ADMIN', 'AUDITOR')
+# The administrator account seeded on first setup (seed_admin). It administers the
+# platform -- who holds which role, gate configuration, model and agent settings,
+# connectors, the audit trail -- and nothing else. It holds no agent role and no gate
+# approver role, and none can be granted to it, so it can neither run nor approve a
+# migration: the person who configures the controls is not the person they govern.
+ADMIN_ROLES = ('GOVERNANCE_ADMIN', 'AI_GOVERNANCE_ADMIN', 'AGENT_REGISTRY_ADMIN', 'GATE_ADMIN',
+               'CONNECTOR_ADMIN', 'CLARIFICATION_ADMIN', 'AUDITOR')
+DEFAULT_ADMIN_EMAIL = 'admin@ace.local'
+
+
+def is_admin_only(roles):
+    """True for an account whose roles are all administrative: it must not operate pipelines."""
+    roles = {r for r in (roles or ()) if r}
+    return bool(roles) and roles <= set(ADMIN_ROLES)
 
 # Roles an earlier build offered that nothing enforces. No endpoint, agent or
 # gate policy requires them, so holding one grants nothing; they are stripped
@@ -169,10 +180,10 @@ class AccountService:
         requested = self._requested(d)
         if self.repo.one('select id from users where email=?', (email,)):
             raise ValueError('email_already_registered')
-        first = not self.repo.one('select id from users limit 1')
-        # The first role in the list is stored as the primary display role.
+        # The first role in the list is stored as the primary display role. Nobody
+        # becomes an administrator by registering first: that account is seeded.
         primary = roles[0]
-        all_roles = list(dict.fromkeys(roles + ([r for r in BOOTSTRAP_ROLES if r not in roles] if first else [])))
+        all_roles = list(dict.fromkeys(roles))
         pw, salt, rounds = hash_password(password)
         i = uid()
         ts = now()
@@ -253,6 +264,36 @@ class AccountService:
                 'roles': list(AccountService.roles_of(user)), 'status': user['status'],
                 'created_at': user['created_at'], 'last_login_at': user.get('last_login_at') or ''}
 
+    def seed_admin(self, email=None, password=None):
+        """Create the administrator on first setup. Returns ``(email, password)`` when it
+        created one, else None.
+
+        Seeded only while no account holds GOVERNANCE_ADMIN, which is what a fresh
+        database looks like, so restarting never creates a second one. The address and
+        password come from FACTORY_ADMIN_EMAIL / FACTORY_ADMIN_PASSWORD; with no password
+        set a random one is generated and returned for the caller to show once.
+        """
+        if any('GOVERNANCE_ADMIN' in self.roles_of(u) and u['status'] == 'ACTIVE'
+               for u in self.repo.rows('select * from users')):
+            return None
+        email = str(email or os.getenv('FACTORY_ADMIN_EMAIL') or DEFAULT_ADMIN_EMAIL).strip().lower()
+        if not EMAIL.match(email):
+            raise ValueError('invalid_admin_email')
+        password = password or os.getenv('FACTORY_ADMIN_PASSWORD') or secrets.token_urlsafe(18)
+        if len(password) < MIN_PASSWORD:
+            raise ValueError('admin_password_too_short')
+        if self.by_email(email):
+            return None          # the address is taken by a non-admin account: do not take it over
+        pw, salt, rounds = hash_password(password)
+        i, ts = uid(), now()
+        with self.repo.connect() as c:
+            self.repo.insert(c, 'users', {
+                'id': i, 'name': 'Platform Administrator', 'email': email, 'password_hash': pw,
+                'password_salt': salt, 'password_iterations': rounds, 'role': ADMIN_ROLES[0],
+                'granted_roles': ','.join(ADMIN_ROLES), 'status': 'ACTIVE', 'failed_attempts': 0,
+                'locked_until': '', 'created_at': ts, 'updated_at': ts, 'last_login_at': ''})
+        return email, password
+
     def by_email(self, email):
         return self.repo.one('select * from users where email=?', (str(email or '').strip().lower(),))
 
@@ -267,6 +308,8 @@ class AccountService:
         if not user:
             raise ValueError('account_not_found')
         roles = list(self.roles_of(user))
+        if is_admin_only(roles) and role not in ADMIN_ROLES:
+            raise ValueError('admin_account_cannot_hold:' + role)
         if role not in roles:
             roles.append(role)
         with self.repo.connect() as c:

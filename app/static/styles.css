@@ -1415,3 +1415,13 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .seg-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 20px 14px;font-size:11.5px;color:var(--text-2)}
 .seg-legend .seg{width:10px;height:10px;margin-right:6px;vertical-align:-1px}
 @media(max-width:760px){.pl-row-head{grid-template-columns:1fr auto;row-gap:8px}.pl-row-strip{grid-column:1 / -1;order:3}}
+
+/* Access: roles wrap inside their cell, so the table fits the page instead of scrolling sideways. */
+.access-table{overflow-x:visible}
+.access-table table{table-layout:fixed}
+.access-table td{white-space:normal;vertical-align:top;overflow-wrap:anywhere}
+.access-table th:nth-child(1){width:26%}
+.access-table .rsel-chip{display:inline-flex;margin:2px 6px 2px 0;max-width:100%}
+.access-table select{max-width:100%;width:58%}
+.access-table td button{margin-top:2px}
+@media(max-width:900px){.access-table table,.access-table thead,.access-table tbody,.access-table tr,.access-table td{display:block;width:100%}.access-table thead{display:none}.access-table tr{padding:10px 0;border-bottom:1px solid var(--border-2)}}
