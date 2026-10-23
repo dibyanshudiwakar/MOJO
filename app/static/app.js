@@ -318,10 +318,10 @@ const NAV_ICON={
 const _defIcon=_I('<circle cx="12" cy="12" r="4"/>');
 const NAV_GROUPS=[
  {label:'Overview',items:[{page:'dashboard',label:'Dashboard'},{page:'metrics',label:'Metrics'}]},
- {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
- {label:'Governance',items:[{page:'access',label:'Access'},{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'},{page:'security-findings',label:'Security'}]},
+ {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
+ {label:'Governance',items:[{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'}]},
  {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-models',label:'Agent Models'},{page:'learning',label:'Learning'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
- {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
+ {label:'Platform / AI',items:[{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'}]},
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
