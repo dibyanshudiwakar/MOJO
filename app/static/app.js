@@ -2066,35 +2066,59 @@ function renderArtefact(art){
   if(risks.length)secs+=`<div class="plan-si" data-plan-tab="risks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Risk Register</div><div class="plan-si-meta">${risks.length} risk${risks.length!==1?'s':''} · severity levels and mitigation</div></div></div><span class="plan-si-caret">›</span></div>`;
   secs+=`<div class="plan-si" data-plan-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full plan output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`}
- // Code generation: file list with content
+ // Code generation: chips + section rows; full data opens in modal
  if(art.format==='code'&&art.files&&art.files.length){
-  html+=`<div class="artefact-sub">Generated Files (${art.files.length})</div>`;
-  art.files.forEach(f=>{html+=`<details class="op-raw-section"><summary>${chev} ${esc(f.path)}</summary><pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre></details>`});
-  if(art.quality){
-   const qs=art.quality.status;const qcls=qs==='PASS'?'success':qs==='FAIL'?'error':'warning';
-   html+=`<div class="artefact-sub">Quality Gate: <span class="badge badge-${qcls}">${esc(qs)}</span></div>`;
-   // A GAP is the skill's own word for a non-blocking open item: it is listed with
-   // the checklist item it comes from, what was found, and how to close it.
-   const qbadge=s=>s==='PASS'?'success':s==='FAIL'?'error':s==='GAP'?'warning':'neutral';
-   const qdetail=c=>{const ev=(c.evidence&&c.evidence.length)?(Array.isArray(c.evidence)?c.evidence:[JSON.stringify(c.evidence)]):[];
-    if(!ev.length&&!c.remediation&&!c.skill_ref)return '';
-    return `<div style="font-size:11px;color:var(--text-3)">${c.skill_ref?esc(c.skill_ref):''}</div>${ev.slice(0,4).map(e=>`<div style="font-size:11px;color:var(--text-2)">${esc(String(e))}</div>`).join('')}${c.remediation?`<div style="font-size:11px;color:var(--text-2)"><b>Fix:</b> ${esc(c.remediation)}</div>`:''}`};
-   if(art.quality.checks){html+=`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${art.quality.checks.map(c=>`<tr><td>${esc(c.name)}${qdetail(c)}</td><td><span class="badge badge-${qbadge(c.status)}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div>`}}}
+  window._codeArt=art;
+  const files=art.files||[];
+  const quality=art.quality||null;
+  const qs=quality?.status||'';
+  const checks=quality?.checks||[];
+  const passCount=checks.filter(c=>c.status==='PASS').length;
+  const qStatCls=qs==='PASS'?'plan-stat-ok':qs==='FAIL'?'plan-stat-warn':'';
+  html+=`<div class="plan-stats-row">
+   <div class="plan-stat-chip"><span class="plan-stat-n">${files.length}</span><span class="plan-stat-l">Files Generated</span></div>
+   ${quality?`<div class="plan-stat-chip ${qStatCls}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.4px">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div>`:''}
+   ${checks.length?`<div class="plan-stat-chip ${passCount===checks.length?'plan-stat-ok':passCount>0?'plan-stat-warn':'plan-stat-warn'}"><span class="plan-stat-n">${passCount}<span style="font-size:11px;font-weight:400;opacity:.7"> / ${checks.length}</span></span><span class="plan-stat-l">Checks Passed</span></div>`:''}
+  </div>`;
+  let codeSecs='';
+  codeSecs+=`<div class="plan-si" data-code-tab="files"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 2h8l4 4v12a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="12 2 12 6 16 6"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg><div><div class="plan-si-name">Generated Files</div><div class="plan-si-meta">${files.length} file${files.length!==1?'s':''} · Spring Boot source code</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(quality)codeSecs+=`<div class="plan-si" data-code-tab="quality"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg><div><div class="plan-si-name">Quality Gate</div><div class="plan-si-meta">${checks.length} check${checks.length!==1?'s':''} · ${passCount} passed${qs?' · '+esc(qs):''}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  codeSecs+=`<div class="plan-si" data-code-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full code generation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${codeSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Test Engineering: chips + section rows; full data opens in modal
+ if(art.format==='test'){
+  window._testArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-test-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full test package · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Variances
- if(art.format==='variances'&&art.items&&art.items.length){
-  html+=`<div class="table-wrap"><table><thead><tr><th>Path</th><th>Kind</th><th>Severity</th><th>Expected</th><th>Actual</th><th>Disposition</th></tr></thead><tbody>${art.items.map(v=>`<tr><td><code style="font-size:11px">${esc(v.path)}</code></td><td>${esc(v.kind)}</td><td><span class="badge badge-${v.severity==='HIGH'?'error':v.severity==='MEDIUM'?'warning':'success'}">${esc(v.severity)}</span></td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.expected)}</td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.actual)}</td><td>${esc(v.disposition)}</td></tr>`).join('')}</tbody></table></div>`}
+ // Variance Analysis
+ if(art.format==='variances'){
+  window._varArt=art;
+  const _vLinks=[];_collectHtmlLinks(window._varOutputs||{},'',_vLinks);
+  const _vHtmlRows=_vLinks.map(l=>`<div class="plan-si" data-var-html-url="${esc(l.url)}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-4"/><path d="M13 3h4v4M11 9l6-6"/></svg><div><div class="plan-si-name">${esc(l.label)}</div><div class="plan-si-meta">HTML report · opens in new tab</div></div></div><span class="plan-si-caret">›</span></div>`).join('');
+  html+=`<div class="plan-sections"><div class="plan-si" data-var-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full variance analysis · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>${_vHtmlRows}</div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // RCA
- if(art.format==='rca'&&art.hypotheses&&art.hypotheses.length){
-  html+=art.hypotheses.map(h=>`<div class="artefact-rca-item"><div class="artefact-rca-hyp">${esc(h.hypothesis)}</div><div class="artefact-rca-meta">Confidence: <strong>${(h.confidence*100).toFixed(0)}%</strong> · Scope: ${esc(h.scope||'—')} · ${esc(h.status)}</div></div>`).join('')}
+ if(art.format==='rca'){
+  window._rcaArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-rca-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full RCA output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Remediation
- if(art.format==='remediation'&&art.proposals&&art.proposals.length){
-  html+=art.proposals.map(p=>`<div class="artefact-rem-item"><div class="artefact-sub">${esc(p.pattern||'Proposal')} <span class="badge badge-neutral">${esc(p.status)}</span></div><div style="font-size:12px;color:var(--text-2);margin:4px 0">${esc(typeof p.proposal==='string'?p.proposal:JSON.stringify(p.proposal))}</div>${p.tests&&p.tests.length?`<div style="font-size:11px;color:var(--text-3)">Regression tests: ${p.tests.map(t=>esc(t)).join(', ')}</div>`:''}</div>`).join('')}
+ if(art.format==='remediation'){
+  window._remArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-rem-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full remediation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Governance
- if(art.format==='governance'&&art.decision){
-  html+=`<div class="artefact-sub">Gate Decisions</div><div class="table-wrap"><table><thead><tr><th>Target State</th><th>Decision</th></tr></thead><tbody>${Object.entries(art.decision).map(([k,v])=>`<tr><td>${esc(k)}</td><td><span class="badge badge-${v==='ALLOW'?'success':'error'}">${esc(v)}</span></td></tr>`).join('')}</tbody></table></div>`}
+ if(art.format==='governance'){
+  window._govArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-gov-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full governance output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Knowledge
- if(art.format==='knowledge'&&art.cited_context&&art.cited_context.length){
-  html+=`<div class="artefact-sub">Citations (${art.cited_context.length})</div><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Reference</th><th>Version</th><th>Score</th></tr></thead><tbody>${art.cited_context.map(c=>`<tr><td>${esc(c.kind)}</td><td style="font-size:11px">${esc(c.reference)}</td><td>${esc(c.version)}</td><td>${c.score}</td></tr>`).join('')}</tbody></table></div>`}
+ if(art.format==='knowledge'){
+  window._knwArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-knw-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full knowledge evidence output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Report-style sections (intake, dormancy)
  if(art.sections){
   art.sections.forEach(s=>{
@@ -2122,7 +2146,7 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template'||artefact?.format==='code'||artefact?.format==='test'||artefact?.format==='variances'||artefact?.format==='rca'||artefact?.format==='remediation'||artefact?.format==='governance'||artefact?.format==='knowledge')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
 function renderCloneOutputPane(outputs,params){
  const branch=outputs.branch||params.branch||'—';
@@ -2266,7 +2290,7 @@ function renderPlanRisksTab(risks){
  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-tests-cell">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
 function renderPlanRawTab(){
  const data=window._planOutputs||window._planArt||{};
- return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</pre>`}
 
 // ==== ACE Analysis Output Modal ============================================
 function openACEModal(tab){
@@ -2450,6 +2474,271 @@ function renderRIListTab(items,label){
 function renderRIRawTab(){
  const data=window._riOutputs||window._riArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full intake output</span><button id="rimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Test Engineering Output Modal =======================================
+function openTestModal(tab){
+ const art=window._testArt;if(!art)return;
+ let m=document.getElementById('testModal');
+ if(!m){
+  m=document.createElement('div');m.id='testModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="testmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Test Engineering — Differential Test Package</div>
+    <div class="plan-modal-sub">JSON · full test package</div>
+   </div>
+   <button id="testmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._testOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('testmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('testmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._testOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Variance Analysis Output Modal ======================================
+async function _openHtmlReport(url){
+ try{
+  const t=sessionStorage.getItem('access_token')||'';
+  const res=await fetch(url,{headers:t?{Authorization:'Bearer '+t}:{}});
+  if(!res.ok)throw new Error(res.status);
+  let html=await res.text();
+  const cssHref=location.origin+'/static/report-styles.css';
+  html=html.replace(/<style>[\s\S]*?<\/style>/i,'<link rel="stylesheet" href="'+cssHref+'">');
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const blobUrl=URL.createObjectURL(blob);
+  window.open(blobUrl,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+ }catch(e){}}
+
+function _collectHtmlLinks(obj,label,out){
+ if(!obj||typeof obj!=='object')return;
+ if(Array.isArray(obj)){obj.forEach(v=>_collectHtmlLinks(v,label,out));return}
+ if(obj.html_url&&typeof obj.html_url==='string'){
+  const name=label||'Report';
+  const display=name.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  out.push({url:obj.html_url,label:display,status:obj.status||''});return}
+ Object.entries(obj).forEach(([k,v])=>_collectHtmlLinks(v,k,out))}
+
+function openVarModal(tab){
+ const art=window._varArt;if(!art)return;
+ let m=document.getElementById('varModal');
+ if(!m){
+  m=document.createElement('div');m.id='varModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const data=window._varOutputs||art;
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="varmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Variance Analysis — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full variance analysis</div>
+   </div>
+   <button id="varmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('varmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('varmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}};
+}
+
+
+// ==== Root Cause Analysis Output Modal =====================================
+function openRCAModal(tab){
+ const art=window._rcaArt;if(!art)return;
+ let m=document.getElementById('rcaModal');
+ if(!m){
+  m=document.createElement('div');m.id='rcaModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="rcamClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Root Cause Analysis — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full RCA output</div>
+   </div>
+   <button id="rcamCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._rcaOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('rcamClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('rcamCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._rcaOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Remediation Output Modal =============================================
+function openRemModal(tab){
+ const art=window._remArt;if(!art)return;
+ let m=document.getElementById('remModal');
+ if(!m){
+  m=document.createElement('div');m.id='remModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="remmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Remediation — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full remediation output</div>
+   </div>
+   <button id="remmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._remOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('remmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('remmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._remOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Governance Output Modal ==============================================
+function openGovModal(tab){
+ const art=window._govArt;if(!art)return;
+ let m=document.getElementById('govModal');
+ if(!m){
+  m=document.createElement('div');m.id='govModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="govmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Governance — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full governance output</div>
+   </div>
+   <button id="govmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._govOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('govmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('govmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._govOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Knowledge Evidence Output Modal ======================================
+function openKnwModal(tab){
+ const art=window._knwArt;if(!art)return;
+ let m=document.getElementById('knwModal');
+ if(!m){
+  m=document.createElement('div');m.id='knwModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="knwmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Knowledge Evidence — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full knowledge evidence output</div>
+   </div>
+   <button id="knwmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._knwOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('knwmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('knwmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._knwOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Code Generation Output Modal ========================================
+function openCodeModal(tab){
+ const art=window._codeArt;if(!art)return;
+ let m=document.getElementById('codeModal');
+ if(!m){
+  m=document.createElement('div');m.id='codeModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const files=art.files||[];
+ const quality=art.quality||null;
+ const checks=quality?.checks||[];
+ const qs=quality?.status||'';
+ const passCount=checks.filter(c=>c.status==='PASS').length;
+ const TABS=[
+  {key:'files',label:'Generated Files',count:files.length},
+  quality&&{key:'quality',label:'Quality Gate',count:checks.length||null},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:'files';
+ const qBadgeCls=qs==='PASS'?'badge-success':qs==='FAIL'?'badge-error':'badge-warning';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="codemClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Code Generation</div>
+    <div class="plan-modal-sub">${files.length} file${files.length!==1?'s':''} generated${qs?' · Quality: <span class="badge '+qBadgeCls+'">'+esc(qs)+'</span>':''} · ${passCount} / ${checks.length} checks passed</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-codem-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="codemBody">${renderCodeModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('codemClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('codemBody').innerHTML=renderCodeModalTab(art,btn.dataset.codemTab);
+  wireCodeModalTab(btn.dataset.codemTab)})});
+ wireCodeModalTab(activeTab)}
+function renderCodeModalTab(art,tab){
+ if(tab==='files'){
+  const files=art.files||[];
+  if(!files.length)return`<p class="authhint">No files generated.</p>`;
+  const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+  return`<div style="display:flex;flex-direction:column;gap:8px">${files.map(f=>`<details class="op-raw-section" style="margin:0"><summary style="display:flex;align-items:center;gap:6px">${chev}<span style="font-family:monospace;font-size:12px;word-break:break-all">${esc(f.path)}</span></summary><pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre></details>`).join('')}</div>`}
+ if(tab==='quality'){
+  const quality=art.quality;
+  if(!quality)return`<p class="authhint">No quality data available.</p>`;
+  const qs=quality.status||'';
+  const checks=quality.checks||[];
+  const passCount=checks.filter(c=>c.status==='PASS').length;
+  const failCount=checks.filter(c=>c.status==='FAIL').length;
+  const gapCount=checks.filter(c=>c.status==='GAP').length;
+  const statusColor=s=>s==='PASS'?'var(--ok,#059669)':s==='FAIL'?'#DC2626':s==='GAP'?'var(--warn,#D97706)':'var(--text-3)';
+  let h=`<div class="meta-row"><div class="meta-key">Overall Status</div><div class="meta-val" style="display:flex;align-items:center;gap:10px"><span style="font-weight:700;color:${statusColor(qs)}">${esc(qs||'—')}</span><span style="color:var(--text-3);font-family:inherit">·</span><span style="color:var(--ok,#059669)">${passCount} passed</span><span style="color:var(--text-3)">·</span><span style="color:#DC2626">${failCount} failed</span>${gapCount?`<span style="color:var(--text-3)">·</span><span style="color:var(--warn,#D97706)">${gapCount} gap${gapCount!==1?'s':''}</span>`:''}</div></div>`;
+  checks.forEach(c=>{
+   const ev=(c.evidence&&c.evidence.length)?(Array.isArray(c.evidence)?c.evidence:[JSON.stringify(c.evidence)]):[];
+   const detail=[
+    c.skill_ref?`<span style="color:var(--text-3)">${esc(c.skill_ref)}</span>`:'',
+    ...ev.slice(0,4).map(e=>`<span>${esc(String(e))}</span>`),
+    c.remediation?`<span><b style="color:${statusColor(c.status)}">Fix:</b> ${esc(c.remediation)}</span>`:'',
+   ].filter(Boolean).join('<br>');
+   h+=`<div class="meta-row"><div class="meta-key" style="font-family:ui-monospace,monospace;font-size:11px">${esc(c.name)}</div><div class="meta-val"><span style="font-weight:700;color:${statusColor(c.status)}">${esc(c.status)}</span>${detail?`<div style="margin-top:4px;font-size:11px;color:var(--text-2);font-family:inherit;line-height:1.6">${detail}</div>`:''}</div></div>`;});
+  return h}
+ if(tab==='raw'){
+  const data=window._codeOutputs||window._codeArt||{};
+  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full code generation output</span><button id="codemCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+ return ''}
+function wireCodeModalTab(tab){
+ if(tab==='raw'){
+  const btn=document.getElementById('codemCopyJson');
+  if(btn)btn.onclick=()=>{
+   const data=window._codeOutputs||window._codeArt||{};
+   try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{btn.textContent='Copied ✓';setTimeout(()=>{btn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}}
 
 // ==== Framework Baseline Output Modal =====================================
 function openFBModal(tab){
@@ -2652,6 +2941,13 @@ async function openStepOutput(pipelineId,stepId,step){
  if(detail.artefact?.title==='Repository Intake Report')window._riOutputs=outputs;
  if(detail.artefact?.title==='Dormancy Assessment')window._diOutputs=outputs;
  if(detail.artefact?.title==='Framework Baseline Template')window._fbOutputs=outputs;
+ if(detail.artefact?.format==='code')window._codeOutputs=outputs;
+ if(detail.artefact?.format==='test')window._testOutputs=outputs;
+ if(detail.artefact?.format==='variances')window._varOutputs=outputs;
+ if(detail.artefact?.format==='rca')window._rcaOutputs=outputs;
+ if(detail.artefact?.format==='remediation')window._remOutputs=outputs;
+ if(detail.artefact?.format==='governance')window._govOutputs=outputs;
+ if(detail.artefact?.format==='knowledge')window._knwOutputs=outputs;
  const _outputPaneHtml=detail.kind==='CLONE'?renderCloneOutputPane(outputs,params):renderOutputPane(outputs,detail.artefact);
  panel.innerHTML=`
   <div class="op-header">
@@ -2709,6 +3005,14 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.plan-si[data-ri-tab]').forEach(item=>{item.addEventListener('click',()=>openRIModal(item.dataset.riTab))});
  panel.querySelectorAll('.plan-si[data-fb-tab]').forEach(item=>{item.addEventListener('click',()=>openFBModal(item.dataset.fbTab))});
  panel.querySelectorAll('.plan-si[data-di-tab]').forEach(item=>{item.addEventListener('click',()=>openDIModal(item.dataset.diTab))});
+ panel.querySelectorAll('.plan-si[data-code-tab]').forEach(item=>{item.addEventListener('click',()=>openCodeModal(item.dataset.codeTab))});
+ panel.querySelectorAll('.plan-si[data-test-tab]').forEach(item=>{item.addEventListener('click',()=>openTestModal(item.dataset.testTab))});
+ panel.querySelectorAll('.plan-si[data-var-tab]').forEach(item=>{item.addEventListener('click',()=>openVarModal(item.dataset.varTab))});
+ panel.querySelectorAll('[data-var-html-url]').forEach(item=>{item.addEventListener('click',()=>_openHtmlReport(item.dataset.varHtmlUrl))});
+ panel.querySelectorAll('.plan-si[data-rca-tab]').forEach(item=>{item.addEventListener('click',()=>openRCAModal(item.dataset.rcaTab))});
+ panel.querySelectorAll('.plan-si[data-rem-tab]').forEach(item=>{item.addEventListener('click',()=>openRemModal(item.dataset.remTab))});
+ panel.querySelectorAll('.plan-si[data-gov-tab]').forEach(item=>{item.addEventListener('click',()=>openGovModal(item.dataset.govTab))});
+ panel.querySelectorAll('.plan-si[data-knw-tab]').forEach(item=>{item.addEventListener('click',()=>openKnwModal(item.dataset.knwTab))});
  const cloneCopyBtn=panel.querySelector('#cloneCopySHA');
  if(cloneCopyBtn)cloneCopyBtn.onclick=()=>{
   try{navigator.clipboard.writeText(outputs.commit||'').then(()=>{cloneCopyBtn.textContent='Copied ✓';setTimeout(()=>{cloneCopyBtn.textContent='Copy SHA'},1500)}).catch(()=>{})}catch(e){}};
