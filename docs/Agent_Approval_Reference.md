@@ -46,9 +46,9 @@ Each agent checks that the caller (or the Orchestrator acting on behalf) holds t
 
 ---
 
-## 3. Self-Service Roles (users can assign themselves at signup)
+## 3. Operator Roles (granted through the default role `MIGRATION_OPERATOR`)
 
-These roles can be self-assigned — no `GOVERNANCE_ADMIN` needed.
+An account is given `MIGRATION_OPERATOR` when an administrator creates it, and its token carries the roles below. No self-registration.
 
 | Role | Needed To Test |
 |---|---|
@@ -129,7 +129,7 @@ Use this as a checklist. If a stage fails with a permission error, verify the te
 1. First account registered → automatically gets GOVERNANCE_ADMIN, CONNECTOR_ADMIN,
                                GATE_ADMIN, AUDITOR  (bootstrap roles)
 
-2. Any user can self-assign at signup:
+2. Every operator account carries (via `MIGRATION_OPERATOR`):
    ACE_ANALYST, FRAMEWORK_ANALYST, SPECIFICATION_AUTHOR, CODE_GENERATOR,
    TEST_ENGINEER, RCA_ANALYST, REPOSITORY_INTAKE, DORMANCY_ANALYST,
    DELIVERY_ENGINEER

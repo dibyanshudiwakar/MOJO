@@ -18,7 +18,7 @@ def env(tmp_path, monkeypatch):
     # specifically -- not ACE_ANALYST -- since that is the agent every test
     # here dispatches.
     owner = accounts.sign_up({'name': 'Pipeline Owner', 'email': 'owner@example.com',
-                              'password': 'a-long-enough-password', 'role': 'REPOSITORY_INTAKE'})
+                              'password': 'a-long-enough-password', 'roles': ['REPOSITORY_INTAKE']}, ('GOVERNANCE_ADMIN',))
     job = FactoryService(repo).create_job({'service': 'Orders', 'owner': 'Retail', 'sourceRevision': 'abc'}, owner['email'])
     pipelines = PipelineService(repo)
     workflow = WorkflowOrchestrator(repo)

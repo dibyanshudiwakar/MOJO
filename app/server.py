@@ -60,7 +60,7 @@ _announce_admin(_seeded)
 pipelines=PipelineService(repo); repo_clone=RepoCloneService(repo); agent_admin=AgentAdminService(repo); llm_bindings=AgentLLMBindingService(repo); templates_svc=AgentTemplateService(repo)
 # Registration and sign-in cannot require a token, since obtaining one is what
 # they are for. Everything else under /api/ stays authenticated.
-PUBLIC_ROUTES={'/api/v2/health','/api/v2/auth/signup','/api/v2/auth/login','/api/v2/auth/roles'}
+PUBLIC_ROUTES={'/api/v2/health','/api/v2/auth/login','/api/v2/auth/roles','/api/v2/auth/platform'}
 # Sign-in is the one unauthenticated endpoint that does real work, so it is the
 # one place a caller can guess at. Per-address throttling bounds that.
 THROTTLE={}; THROTTLE_LOCK=threading.Lock(); THROTTLE_MAX=10; THROTTLE_WINDOW=60
@@ -444,6 +444,12 @@ class H(BaseHTTPRequestHandler):
         if p=='/api/v2/health': return self.sendj(200,{'status':'UP','version':'7.2'})
         # The registration form needs its role options before anyone has a token.
         if p=='/api/v2/auth/roles': return self.sendj(200,{'items':accounts.assignable_roles(),'approver_items':accounts.requestable_roles()})
+        # The sign-in page's figures, read from the platform rather than typed into it.
+        if p=='/api/v2/auth/platform':
+            return self.sendj(200,{
+                'agents':(repo.one("select count(distinct name) n from agent_registry where enabled=1") or {}).get('n',0),
+                'gates':(repo.one("select count(*) n from approval_policies where enabled=1") or {}).get('n',0),
+                'audit_events':(repo.one("select count(*) n from audit_ledger") or {}).get('n',0)})
         # Every other API read is authenticated. Governance data (jobs,
         # approvals, evidence, the audit ledger, specifications, the prompt
         # registry, connector profiles) was previously world-readable.
@@ -662,9 +668,10 @@ class H(BaseHTTPRequestHandler):
                 except PermissionError: pr0=None
                 if pr0: self.block_admin_operating(pr0,p)
             if p=='/api/v2/auth/signup':
-                throttle('signup:'+self.client_key())
-                user=accounts.sign_up(d)
-                ledger.append('',user['email'],'ACCOUNT_REGISTERED',{'role':user['role'],'roles':user['roles']})
+                # Administrators create profiles; nobody registers themselves.
+                pr=self.require('GOVERNANCE_ADMIN')
+                user=accounts.sign_up(d,pr.roles)
+                ledger.append('',pr.identity,'ACCOUNT_CREATED',{'email':user['email'],'roles':user['roles']})
                 return self.sendj(201,{'user':user})
             if p=='/api/v2/auth/login':
                 # Throttle on address and on the address+account pair, so one

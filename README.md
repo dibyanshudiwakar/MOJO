@@ -53,10 +53,10 @@ role, and the API refuses it any pipeline, job, clarification or approval operat
 (`admin_account_cannot_operate_pipelines`). An existing database that already has a
 `GOVERNANCE_ADMIN` keeps it and is not re-seeded.
 
-Registration itself only
-offers operational roles — approver roles such as `PRODUCT_OWNER` are
-granted afterwards through `POST /api/v2/auth/grant-role`, so an account cannot
-self-assign the authority to approve its own gate.
+There is no self-registration. Only an administrator creates profiles (the Access
+page, or `POST /api/v2/auth/signup` with `GOVERNANCE_ADMIN`). A new profile gets the
+default role `MIGRATION_OPERATOR`, which carries all fifteen operator roles at sign-in.
+Gate approver roles are granted by an administrator, never self-assigned.
 
 `FACTORY_JWT_HS256_SECRET` is optional. When it is not set the server generates a
 signing key on first run and persists it as `<database>.signing-key`; set the
