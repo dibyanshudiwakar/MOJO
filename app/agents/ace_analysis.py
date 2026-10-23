@@ -24,7 +24,7 @@ visible only inside the semantic model's own JSON.
 """
 import json
 from app.agents.artefact import produce_many
-from app.services import automode
+from app.services import ace_analysis_report, automode, workspace
 from app.agents.base import AgentResult, BaseAgent, Clarification, EvidenceRef
 from app.services.priority1 import PriorityOneService
 
@@ -120,6 +120,24 @@ class ACEAnalysisAgent(BaseAgent):
                     assignment['literal'] = ('true' if literal is True else 'false' if literal is False
                                              else str(literal))
 
+    def _write_report(self, context, path, result):
+        """Render the analysis to ``<pipeline workspace>/reports/ace-analysis-report.html``.
+
+        Same place and same rule as the variance reports: the analysis is already stored by the time this
+        runs, so a failure here is reported in the step's metrics and never fails the step.
+        """
+        try:
+            page = ace_analysis_report.build_for_analysis(self.repo, result['analysis_id'], path)
+            pipeline = self.repo.one('select workspace_dir from pipelines where job_id=? order by created_at desc limit 1',
+                                     (context.job_id,))
+            base = (pipeline or {}).get('workspace_dir')
+            folder = (str(base).rstrip('/\\') + '/reports') if base else 'reports/' + str(context.job_id)
+            target = workspace.resolve(folder, must_exist=False, create=True) / ace_analysis_report.FILENAME
+            target.write_text(page, encoding='utf-8')
+            return {'report_path': target.relative_to(workspace.root()).as_posix()}
+        except Exception as exc:
+            return {'report_error': '%s:%s' % (type(exc).__name__, exc)}
+
     def _focused_skill(self, context, by_path):
         """Narrow the skill to the references the files at hand actually need."""
         try:
@@ -163,6 +181,9 @@ class ACEAnalysisAgent(BaseAgent):
                    # the last of them took.
                    'sources_read': provenance.get('item_count', 0),
                    'model_attempts': provenance.get('attempts', 0)}
+        # The HTML hand-over report, written once the analysis is stored. Its path (or its failure) is
+        # recorded beside the other metrics; it is not an output, so the approved contract is unchanged.
+        metrics.update(self._write_report(context, context.param('path'), result))
         clarifications = tuple(
             Clarification(stage='ACE_ANALYSIS', question=a.get('question', ''),
                           owner=a.get('owner', 'ACE_SME'), impact=a.get('impact', 'unassessed'),

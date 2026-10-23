@@ -17,7 +17,7 @@ def env(tmp_path, monkeypatch):
     # user_integrations.user_id is a real foreign key against users(id), so
     # cloning tests need a real account, not an arbitrary string.
     user = AccountService(repo).sign_up({'name': 'Clone Tester', 'email': 'clone@example.com',
-                                          'password': 'a-long-enough-password', 'role': 'ACE_ANALYST'})
+                                          'password': 'a-long-enough-password'}, ('GOVERNANCE_ADMIN',))
     return repo, github, RepoCloneService(repo), user['id']
 
 

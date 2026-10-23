@@ -3,7 +3,7 @@
 function wsName(p){if(!p)return'';const s=String(p).replace(/[/\\]+$/,'');const i=Math.max(s.lastIndexOf('/'),s.lastIndexOf('\\'));return i>=0?s.slice(i+1):s}
 function fmtDt(v){if(!v||v==='—')return v||'—';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function fmtTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
-function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
+function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning',RUNNING:'info',PAUSED:'warning',WAITING_CLARIFICATION:'warning',CANCELLED:'error',PENDING:'neutral',CONFIRMED:'neutral'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
 function progressFillClass(state,pct){const s=String(state||'').toUpperCase();const p=s in STATE_PCT?STATE_PCT[s]:(pct||0);if(s==='COMPLETED'||p>=100)return ' darkgreen';if(s==='FAILED'||s==='ROLLED_BACK')return ' error';if(s==='READY_FOR_PROMOTION')return ' done';if(s==='TEST_PASSED')return ' cyan';if(s.startsWith('WAITING_'))return ' orange';if(s==='PLAN_APPROVED')return ' orange';if(s==='REMEDIATING')return ' error';if(['DIFFERENTIAL_TESTING','VARIANCE_REVIEW'].includes(s))return ' cyan';if(['FRAMEWORK_BASELINED','ACE_ANALYSED'].includes(s))return ' purple';if(['INTAKE_VALIDATED','DORMANCY_ASSESSED'].includes(s))return ' teal';if(['IMPLEMENTING','BUILD_VALIDATED'].includes(s))return ' blue';if(s==='CREATED')return ' neutral';return ''}
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
@@ -55,10 +55,19 @@ function notice(m,b=false){
 }
 let session=null,githubState=null;
 const initials=n=>String(n||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
+// An administrator account configures the platform and does not operate migrations:
+// no pipelines, approvals or clarifications, and no GitHub connection to make.
+const DEFAULT_ROLE_NAME='MIGRATION_OPERATOR';
+const ADMIN_ONLY_ROLES=['GOVERNANCE_ADMIN','AI_GOVERNANCE_ADMIN','AGENT_REGISTRY_ADMIN','GATE_ADMIN','CONNECTOR_ADMIN','CLARIFICATION_ADMIN','AUDITOR'];
+const ADMIN_HIDDEN_PAGES=['dashboard','metrics','pipelines','new-migration','clarifications','approval-inbox','approvals','evidence','events','specifications','plans','generated','delivery-operations','versions','quality-runs','agent-templates','jobs'];
+function isAdminOnly(){const r=(session&&session.user&&session.user.roles)||[];return r.length>0&&r.every(x=>ADMIN_ONLY_ROLES.includes(x))}
+// Only an administrator account lands on Access. Everyone else -- including someone
+// who also holds an administrative role alongside operator roles -- lands on Dashboard.
+function homePage(){return isAdminOnly()?'access':'dashboard'}
 function renderIdentity(){
  const chip=$('#userChip'),gh=$('#ghIndicator'),newBtn=$('#new');
  if(!session){chip.hidden=true;gh.hidden=true;newBtn.hidden=true;$('#userMenu').hidden=true;return}
- const u=session.user;chip.hidden=false;newBtn.hidden=false;
+ const u=session.user;chip.hidden=false;newBtn.hidden=isAdminOnly();
  $('#userAvatar').textContent=initials(u.name);$('#userName').textContent=u.name;$('#userRole').textContent=u.role.replaceAll('_',' ');
  $('#menuName').textContent=u.name;$('#menuEmail').textContent=u.email;
  const c=claimsOf(token()),mins=c?Math.floor(((c.exp||0)*1000-Date.now())/60000):0;
@@ -70,6 +79,7 @@ function renderIdentity(){
  // merely whether a URL and token happen to be stored.
  const s=(githubState&&githubState.status)||'NOT_CONFIGURED';
  const look={CONNECTED:['ok','GitHub connected'],FAILED:['bad','GitHub error'],UNVERIFIED:['warn','GitHub unverified'],NOT_CONFIGURED:['warn','GitHub not connected']}[s]||['warn','GitHub'];
+ if(isAdminOnly()){gh.hidden=true;return}
  gh.hidden=false;gh.className='ghchip '+look[0];
  if(s==='CONNECTED'&&githubState.account_login){
   gh.innerHTML=`<span class="ghchip-label">GitHub</span><span class="ghchip-sep">·</span><span class="ghchip-acct">${esc(githubState.account_login)}</span>`;
@@ -140,29 +150,25 @@ function initRoleSelect(){
  if(!window.__rselBound){window.__rselBound=true;
   document.addEventListener('click',e=>{const w=document.getElementById('roleSel');if(w&&!w.contains(e.target))rsClose()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape')rsClose()})}}
+// The sign-in page's figures come from the platform: the agents and gates it actually has.
+function fillPlatformFigures(){
+ api('/api/v2/auth/platform').then(d=>{
+  const set=(id,v)=>{const el=$('#'+id);if(el)el.textContent=v};
+  set('authStatAgents',d.agents);set('authStatGates',d.gates);set('authStatAudit',d.audit_events.toLocaleString('en-US'));
+  set('authListAgents',d.agents);set('authListGates',d.gates)}).catch(()=>{})}
 function authScreen(mode,message,bad){
  $('#metrics').innerHTML='';$('#nav').innerHTML='';$('#title').textContent=mode==='signup'?'Create account':'Sign in';$('#panelBackdrop').classList.remove('open');$('#outputPanel').classList.remove('open');document.body.classList.add('auth-mode');
- const signup=mode==='signup';
- $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Migration Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n">13</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n">6</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n">100%</div><div class="auth-stat-l">Audit&nbsp;Trail</div></div></div><ul class="auth-panel-list"><li>13 specialized AI migration agents</li><li>6-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Migration Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Gate approver roles you tick are requests until an administrator approves them.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span class="rsel-input-area"><span class="rsel-chips" id="rselChips"></span><span class="rsel-placeholder" id="roleTriggerText">Select one or more roles…</span></span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><div class="rsel-search-wrap"><input type="text" class="rsel-search" id="roleSearch" placeholder="Search roles…" autocomplete="off" spellcheck="false"></div><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt" id="roleAllTxt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div><div class="rsel-panel-ft" id="rolePanelFt"><button type="button" class="rsel-clear-btn" id="roleClearBtn">Clear</button><button type="button" class="rsel-save-btn" id="roleSaveBtn">Save</button></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap">${signup?'Already registered? <button type="button" id="swapAuth">Sign in</button>':'No account yet? <button type="button" id="swapAuth">Create one</button>'}</p></div></div></div></div>`;
- $('#swapAuth').onclick=()=>authScreen(signup?'login':'signup');
- if(signup)initRoleSelect();
- $('#authForm').onsubmit=async e=>{
+ const signup=false; // self-registration is gone: an administrator creates profiles on the Access page
+ $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Migration Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n" id="authStatAgents">—</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n" id="authStatGates">—</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n" id="authStatAudit">—</div><div class="auth-stat-l">Audit&nbsp;Events</div></div></div><ul class="auth-panel-list"><li><span id="authListAgents">—</span> specialized AI migration agents</li><li><span id="authListGates">—</span>-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Migration Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Gate approver roles you tick are requests until an administrator approves them.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span class="rsel-input-area"><span class="rsel-chips" id="rselChips"></span><span class="rsel-placeholder" id="roleTriggerText">Select one or more roles…</span></span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><div class="rsel-search-wrap"><input type="text" class="rsel-search" id="roleSearch" placeholder="Search roles…" autocomplete="off" spellcheck="false"></div><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt" id="roleAllTxt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div><div class="rsel-panel-ft" id="rolePanelFt"><button type="button" class="rsel-clear-btn" id="roleClearBtn">Clear</button><button type="button" class="rsel-save-btn" id="roleSaveBtn">Save</button></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap"></p></div></div></div></div>`;
+  $('#authForm').onsubmit=async e=>{
   e.preventDefault();const btn=$('#authSubmit'),err=$('#authFormError');const f=Object.fromEntries(new FormData(e.target));
   btn.disabled=true;err.textContent='';
   try{
-   if(signup){
-    // Collect all checked role checkboxes into a roles array.
-    const ticked=[...document.querySelectorAll('#roleCheckboxes input[name="roles"]:checked')];
-    const checkedRoles=ticked.filter(cb=>!cb.dataset.request).map(cb=>cb.value);
-    const requested=ticked.filter(cb=>cb.dataset.request).map(cb=>cb.value);
-    if(!checkedRoles.length){err.textContent='Select at least one working role; approver roles are requested in addition.';btn.disabled=false;return}
-    const payload={name:f.name,email:f.email,password:f.password,roles:checkedRoles,requested_roles:requested};
-    await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify(payload)});
-    return authScreen('login','Account created. Sign in to continue.')}
    const out=await api('/api/v2/auth/login',{method:'POST',body:JSON.stringify({email:f.email,password:f.password})});
    sessionStorage.setItem('access_token',out.access_token);session={user:out.user};
    await afterLogin()
   }catch(x){err.textContent=friendly(x.message);btn.disabled=false}};
+ fillPlatformFigures();
 }
 function friendly(code){
  const m={invalid_credentials:'Email or password is incorrect.',email_already_registered:'That email is already registered.',
@@ -189,6 +195,13 @@ async function afterLogin(){
   session={user:me.user};githubState=me.integrations.github}
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
+
+ if(isAdminOnly()){try{history.replaceState(null,'','#access')}catch(e){location.hash='access'}
+  // Set explicitly even when the address already reads #access, so a route left over from the
+  // previous session can never be what an administrator lands on.
+  render();notifStartPolling();return}
+ // Every other account starts on Dashboard, whatever hash the browser kept.
+ if((location.hash||'').slice(1)!=='dashboard'&&!isAdminOnly()){try{history.replaceState(null,'','#dashboard')}catch(e){location.hash='dashboard'}}
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
  // Always re-verify the stored GitHub token regardless of its last-known status.
  // A token that was CONNECTED in a previous session may have been revoked.
@@ -247,6 +260,9 @@ async function signOut(message,bad){
  // defeating the entire point of storing it per account. Disconnecting is now
  // a deliberate action (the Disconnect button in the GitHub dialog).
  sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;notifStopPolling();
+ // The page the person left must not survive the session: a stale #pipelines/<id> in the
+ // address bar sent the next sign-in to that route instead of its own landing page.
+ try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
  // The topbar markup is static, so an open notification panel would still be
  // open on the next sign-in. Reset it with the rest of the session state.
  const dd=$('#notifDropdown');if(dd)dd.hidden=true;
@@ -309,15 +325,17 @@ const NAV_GROUPS=[
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
- $('#nav').innerHTML=NAV_GROUPS.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
+ const admin=isAdminOnly();
+ const groups=admin?NAV_GROUPS.map(g=>({...g,items:g.items.filter(it=>!ADMIN_HIDDEN_PAGES.includes(it.page))})).filter(g=>g.items.length):NAV_GROUPS;
+ $('#nav').innerHTML=groups.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
  document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>location.hash=b.dataset.p);
- navSetActive((location.hash||'#dashboard').slice(1))}
+ navSetActive((location.hash||'#'+homePage()).slice(1))}
 function navSetActive(page){
  const base=page.startsWith('pipelines/')?'pipelines':page;
  document.querySelectorAll('.nav-item').forEach(b=>{b.classList.toggle('active',b.dataset.p===base)})}
 function table(items,actions=false){if(!items?.length)return '<div class="empty">No live records</div>';const keys=Object.keys(items[0]).filter(k=>k!=='config').slice(0,9);const tdCls=k=>/_at$|^(created|updated|started|finished|timestamp)$/.test(k)?'td-date':/^(id|name|service|workspace_dir|display_name|title|gate)$/.test(k)||keys.indexOf(k)===0?'td-name':'';const fmtCell=(k,v)=>{if(/_at$|^(created|updated|started|finished|timestamp)$/.test(k)&&typeof v==='string')return fmtDt(v);return typeof v==='object'?JSON.stringify(v):String(v??'')};return `<div class="table"><table><thead><tr>${keys.map(k=>`<th>${esc(k.replaceAll('_',' '))}</th>`).join('')}${actions?'<th>Actions</th>':''}</tr></thead><tbody>${items.map(x=>`<tr>${keys.map(k=>`<td class="${tdCls(k)}" title="${esc(typeof x[k]==='object'?JSON.stringify(x[k]):String(x[k]??''))}">${esc(fmtCell(k,x[k])).slice(0,80)}</td>`).join('')}${actions?`<td><button data-test="${esc(x.id)}">Validate</button></td>`:''}</tr>`).join('')}</tbody></table></div>`}
 function gateCard(g){return `<article class="gate-card"><div class="sectionhead"><h3>${esc(g.gate)}</h3><span class="live-dot">LIVE</span></div><form class="gate-form"><input type="hidden" name="gate" value="${esc(g.gate)}"><div class="formgrid"><label>Enabled<select name="enabled"><option value="true" ${g.enabled?'selected':''}>Enabled</option><option value="false" ${!g.enabled?'selected':''}>Disabled</option></select></label><label>Approver role<input name="required_role" value="${esc(g.required_role)}"></label><label class="wide">Allowed decisions<input name="allowed_decisions" value="${esc(g.allowed_decisions.join(','))}"></label><label>Minimum evidence<input name="min_evidence" type="number" min="0" value="${g.min_evidence}"></label><label>Quorum<input name="quorum" type="number" min="1" value="${g.quorum}"></label><label>Timeout minutes<input name="timeout_minutes" type="number" min="0" value="${g.timeout_minutes}"></label><label>Escalation profile<input name="escalation_profile" value="${esc(g.escalation_profile)}"></label><label>Bypass role<input name="bypass_role" value="${esc(g.bypass_role)}"></label><label>Downstream effect<input name="downstream_effect" value="${esc(g.downstream_effect)}"></label></div><button class="btn-primary gate-save"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save changes</button><p class="gate-meta">Last persisted update: ${esc(g.updated_at?fmtDt(g.updated_at):'not yet configured')}</p></form></article>`}
-async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox'),api('/api/v2/approvals')]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
+async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/approvals').catch(()=>({items:[]}))]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
 // ---- Learning: what each run has taught, and whether the agents are improving ----------
 let _lessons=[];
 const LESSON_LABEL={SCHEMA_CORRECTION:'Schema correction',EFFORT_STEP_DOWN:'Effort step-down',GATE_GAP:'Skill gap',GATE_FAIL:'Gate failure',REPAIR:'Feedback repair',GAP_UNREPAIRED:'Gap not repaired',RUN_FAILURE:'Run failure'};
@@ -369,6 +387,31 @@ $('#lessonReject').onclick=()=>decideLesson('REJECT');
 $('#lessonRetract').onclick=()=>decideLesson('RETRACT');
 // ---- Agent Models: which model each agent runs on, with the option to change it --------
 let _agentModels=null;
+// ---- Metrics: the overall run analysis ------------------------------------------------
+const metricsOpen=new Set();
+const secText=n=>n==null?'':n<60?n+'s':Math.floor(n/60)+'m '+(n%60)+'s';
+async function metricsPage(soft){
+ const d=await api('/api/v2/run-analysis');
+ if(location.hash!=='#metrics')return;
+ const sm=d.summary;
+ const tile=(label,value,sub)=>`<div class="kpi-card" style="--kpi-color:#2558C4;--kpi-icon-bg:#DDE9F7"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value}</div>${sub?`<div class="kpi-trend trend-neutral">${esc(sub)}</div>`:''}</div>`;
+ const statusSub=Object.entries(sm.by_status||{}).map(([k,v])=>v+' '+k.toLowerCase().replace(/_/g,' ')).join(' · ');
+ const tiles=`<div class="run-tiles">${tile('Pipelines',sm.pipelines,statusSub)}${tile('Agent runs',sm.runs,sm.completed+' completed · '+sm.failed+' not')}${tile('Success rate',sm.success_rate==null?'—':sm.success_rate+'%','')}${tile('Average run time',sm.avg_seconds==null?'—':secText(Math.round(sm.avg_seconds)),'per agent run')}${tile('Open clarifications',sm.open_clarifications,'')}</div>`;
+ const segCls=st=>({COMPLETED:'ok',RUNNING:'run',FAILED:'bad',CANCELLED:'bad',PAUSED:'wait',WAITING_APPROVAL:'wait',WAITING_CLARIFICATION:'wait'}[st]||'idle');
+ const plRows=d.pipelines.map(pl=>{const st=Object.entries(pl.steps);const done=st.filter(([,x])=>x.status==='COMPLETED').length;const total=st.reduce((n,[,x])=>n+(x.seconds||0),0);const open=metricsOpen.has(pl.id);
+  const strip=st.length?`<div class="step-strip">${st.map(([a,x])=>`<span class="seg seg-${segCls(x.status)}" title="${esc(a)} · ${esc(String(x.status).replace(/_/g,' ').toLowerCase())}${x.seconds!=null?' · '+secText(x.seconds):''}"></span>`).join('')}</div>`:'<span class="td-light">No steps</span>';
+  const detail=st.map(([a,x])=>`<div class="step-chip"><span class="seg seg-${segCls(x.status)}"></span><div><b>${esc(a)}</b><small>${esc(String(x.status).replace(/_/g,' ').toLowerCase())}${x.seconds!=null?' · '+secText(x.seconds):''}</small></div></div>`).join('');
+  return `<div class="pl-row${open?' open':''}" data-pl="${esc(pl.id)}"><button class="pl-row-head" type="button" aria-expanded="${open}"><span class="pl-row-name">${esc(wsName(pl.name)||pl.name)}</span><span class="pl-row-status">${stateBadge(String(pl.status||''))}</span><span class="pl-row-strip">${strip}</span><span class="pl-row-count">${done}/${st.length} done${total?' · '+secText(total):''}</span></button><div class="pl-row-body"${open?'':' hidden'}><div class="step-grid">${detail||'<span class="td-light">This pipeline has no steps.</span>'}</div><button class="btn-ghost pl-row-open" data-pl="${esc(pl.id)}" type="button">Open pipeline →</button></div></div>`}).join('');
+ const matrix=d.pipelines.length?`<div class="run-list">${plRows}</div><div class="seg-legend"><span><i class="seg seg-ok"></i>Completed</span><span><i class="seg seg-run"></i>Running</span><span><i class="seg seg-wait"></i>Paused / waiting</span><span><i class="seg seg-bad"></i>Failed / stopped</span><span><i class="seg seg-idle"></i>Not started</span></div>`:'<div class="empty">No pipelines have run yet.</div>';
+ const agentRows=d.agents.length?d.agents.map(a=>{const done=a.completed||0;const rate=a.runs?Math.round(100*done/a.runs):0;return `<tr><td class="td-name">${esc(a.agent_id)}</td><td>${done}/${a.runs}</td><td style="min-width:120px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${rate>=100?' darkgreen':rate<50?' error':''}" style="width:${Math.max(rate,rate?4:0)}%"></div></div><span style="font-size:11px;min-width:30px">${rate}%</span></div></td><td>${a.avg_seconds==null?'—':secText(Math.round(a.avg_seconds))}</td><td class="td-light" style="font-size:12px">${a.avg_attempts??'—'} attempts · ${a.corrections||0} corrections · ${a.avg_gaps??'—'} gaps · ${a.avg_clarifications??'—'} questions</td></tr>`}).join(''):'<tr><td colspan="5" class="empty">No runs recorded yet. They appear here as agents run.</td></tr>';
+ const body=`<div id="metricsBody" style="display:contents">${tiles}
+  <div class="card"><div class="card-head"><div><div class="card-title">Run matrix</div><div class="card-sub">One bar per pipeline, one segment per agent step. Select a row for the step detail.</div></div></div><div class="card-body">${matrix}</div></div>
+  <div class="card"><div class="card-head"><div><div class="card-title">By agent</div><div class="card-sub">Every recorded run, grouped by agent</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Completed</th><th>Success</th><th>Avg time</th><th>Per run</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div></div>`;
+ if(soft&&$('#metricsBody'))$('#metricsBody').outerHTML=body;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Metrics</div><div class="page-sub">Overall run analysis across pipelines and agents</div></div></div><div style="display:flex;flex-direction:column;gap:20px">${body}</div>`;
+ document.querySelectorAll('.pl-row-head').forEach(h=>{h.onclick=()=>{const row=h.closest('.pl-row');const open=row.classList.toggle('open');row.querySelector('.pl-row-body').hidden=!open;h.setAttribute('aria-expanded',String(open));if(open)metricsOpen.add(row.dataset.pl);else metricsOpen.delete(row.dataset.pl)}});
+ document.querySelectorAll('.pl-row-open').forEach(b=>{b.onclick=()=>{location.hash='pipelines/'+b.dataset.pl}});
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash==='#metrics'&&!document.hidden)metricsPage(true).catch(()=>{})},30000)}}
 async function agentModelsPage(){
  const d=await api('/api/v2/agent-models');_agentModels=d;
  const canManage=canManageAgents();
@@ -419,17 +462,30 @@ $('#agentModelForm').onsubmit=async e=>{
   $('#agentModelDialog').close();notice(id+' now runs on '+alias);agentModelsPage()
  }catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 // Access: who holds which role, requests for gate approver roles, grant and revoke.
+let _grantable=[],_gateRoles=new Set();
+function openProfileDialog(){
+ const f=$('#profileForm');f.reset();$('#profileError').textContent='';
+ $('#profileRole').innerHTML=_grantable.map(r=>`<option value="${esc(r)}"${r===DEFAULT_ROLE_NAME?' selected':''}>${esc(r)}${_gateRoles.has(r)?' (gate approver)':''}</option>`).join('');
+ $('#profileDialog').showModal();f.name.focus()}
+$('#profileCancel').onclick=()=>$('#profileDialog').close();
+$('#profileForm').onsubmit=async e=>{e.preventDefault();const f=e.target;const err=$('#profileError');err.textContent='';
+ const btn=$('#profileSubmit');btn.disabled=true;
+ try{await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify({name:f.name.value,email:f.email.value,password:f.password.value,roles:[f.role.value]})});
+  $('#profileDialog').close();notice('Profile created for '+f.email.value);accessPage()}
+ catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 async function accessPage(){
  let d;
  try{d=await api('/api/v2/admin/access')}catch(e){$('#view').innerHTML=`<div class="hero"><h2>Access</h2><p>Granting roles needs the <b>GOVERNANCE_ADMIN</b> role. ${esc(e.message)}</p></div>`;return}
- const gate=new Set(d.gate_roles);
+ const gate=new Set(d.gate_roles);d.default_role=DEFAULT_ROLE_NAME;
  const chip=(u,r)=>`<span class="rsel-chip ${gate.has(r)?'chip-gate':''}">${esc(r)}<span class="rsel-chip-x" data-revoke="${esc(r)}" data-email="${esc(u.email)}" role="button" title="Revoke">&#x2715;</span></span>`;
- const reqs=d.requests.length?`<div class="table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
+ const reqs=d.requests.length?`<div class="table access-table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
  const grantOpts=u=>d.grantable.filter(r=>!u.roles.includes(r)).map(r=>`<option value="${esc(r)}">${esc(r)}${gate.has(r)?' (gate approver)':''}</option>`).join('');
- const users=`<div class="table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
- $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><h3>Role requests</h3>${reqs}<h3>Accounts</h3>${users}`;
+ const users=`<div class="table access-table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
+ $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><div class="access-head"><h3>Accounts</h3><button id="openProfile" class="btn-primary" type="button">+ Create profile</button></div>${users}`;
  const act=async(url,body,msg)=>{try{await api(url,{method:'POST',body:JSON.stringify(body)});notice(msg);accessPage()}catch(e){notice(e.message,true)}};
- document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
+ _grantable=d.grantable;_gateRoles=new Set(d.gate_roles);
+document.getElementById('openProfile').onclick=()=>openProfileDialog();
+document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
  document.querySelectorAll('[data-grant]').forEach(b=>b.onclick=()=>{const sel=document.querySelector(`select[data-pick="${CSS.escape(b.dataset.grant)}"]`);if(sel&&sel.value)act('/api/v2/auth/grant-role',{email:b.dataset.grant,role:sel.value},sel.value+' granted')});
  document.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>{if(confirm('Revoke '+b.dataset.revoke+' from '+b.dataset.email+'?'))act('/api/v2/auth/revoke-role',{email:b.dataset.email,role:b.dataset.revoke},b.dataset.revoke+' revoked')})}
 // Pending packages the signed-in user cannot act on. The inbox filters by role,
@@ -476,8 +532,9 @@ async function approvalInbox(){
 // Auto mode decides most questions; the ones left OPEN are the model's own
 // "high severity and not sure" cases, so say so on the card.
 function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='CRITICAL'?'<span class="badge badge-error"><span class="badge-dot"></span>CRITICAL</span>':''}
-async function clarificationsPage(){
+async function clarificationsPage(soft){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
+ if(location.hash!=='#clarifications')return;
  const all=cd.items||[];
  const jobMap={};(jd.items||[]).forEach(j=>{jobMap[j.id]=j.service||j.workspace_dir||j.id});
  const open=all.filter(c=>c.status==='OPEN');
@@ -485,7 +542,9 @@ async function clarificationsPage(){
  // original is listed, so the copy is not.
  const answered=all.filter(c=>c.status==='ANSWERED');
  const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
- const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim());
+ // Standards-baseline rows are placeholders until the model has had its turn.
+ const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim()||c.suggestion_mode==='STANDARDS_BASELINE');
+ const sugSource=c=>c.suggestion_mode==='STANDARDS_BASELINE'?'Platform standard':c.suggestion_mode==='PRIOR_ANSWER'?'Earlier answer':"Model's suggestion";
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -500,7 +559,7 @@ async function clarificationsPage(){
    </div>
    <div class="clarif-type">${questionType}</div>
    ${c.impact?`<div class="clarif-impact">Impact: ${esc(c.impact)}</div>`:''}
-   ${isOpen&&c.suggested_answer?`<div class="clarif-impact">Model's suggestion${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: ${esc(c.suggested_answer)}</div>`:''}
+   ${isOpen&&c.suggested_answer?`<div class="clarif-impact clarif-sug"><span class="clarif-sug-text">${esc(sugSource(c))}${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: <span class="clarif-sug-body">${esc(c.suggested_answer)}</span></span> <button class="btn-ghost clarif-use-sug" type="button">Use this answer</button></div>`:''}
    ${isOpen?`<div class="clarif-form">
     <textarea class="clarif-textarea" placeholder="Enter your answer…" rows="3"></textarea>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
@@ -514,14 +573,20 @@ async function clarificationsPage(){
     ${c.answered_at?`<span class="clarif-answered-meta">${esc(fmtDt(c.answered_at))}${c.answered_by?' · '+esc(c.answered_by):''}</span>`:''}
    </div>`}
   </div>`};
- $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
-  ${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
+ const clarifBody=`${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ if(soft&&$('#clarifBody'))$('#clarifBody').innerHTML=clarifBody;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div><div id="clarifBody" style="display:contents">${clarifBody}</div>`;
+ document.querySelectorAll('.clarif-use-sug').forEach(b=>{b.onclick=()=>{const it=b.closest('.clarif-item');const ta=it?.querySelector('.clarif-textarea');if(ta){ta.value=it.querySelector('.clarif-sug-body').textContent;ta.focus()}}});
+ // Ask the model to improve placeholders once per job per session, unprompted.
+ const sugTodo=[...new Set(unsuggested.map(c=>c.job_id))].filter(j=>j&&!sugTried.has(j));
+ if(sugTodo.length){sugTodo.forEach(j=>sugTried.add(j));(async()=>{try{for(const j of sugTodo)await api('/api/v2/clarifications/suggest',{method:'POST',body:JSON.stringify({job_id:j})})}catch(_){}
+  if(location.hash==='#clarifications'&&!document.querySelector('.clarif-textarea:focus'))clarificationsPage()})()}
  const gen=$('#genSuggestions');
  if(gen)gen.onclick=async()=>{
   // One request per job: the model answers in the context of the agent and job that raised the question.
@@ -554,7 +619,7 @@ async function clarificationsPage(){
     notice('Answer submitted. If this was the last open clarification, the pipeline will resume automatically.');
    }catch(e){notice(e.message,true);btn.disabled=false;btn.textContent='Submit Answer'}}});
  // Skipped while anything is being typed: a re-render replaces every textarea.
- refreshTimer=setInterval(()=>{if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage()},15000)}
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash!=='#clarifications'||document.hidden)return;if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage(true).catch(()=>{})},15000)}}
 // ---- New migration wizard -------------------------------------------------
 let wizard=null;
 const WIZARD_STEPS=['Migration & Workspace','IBM ACE Repository','Migration Framework Repository','Spring Boot Output','Review','Select Agents'];
@@ -1888,22 +1953,119 @@ function renderArtefact(art){
  if(!art)return '';
  const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
  let html=`<div class="artefact-title">${esc(art.title||'Agent Output')}</div>`;
- // Markdown content (framework-baseline, ace-analysis)
+ // ACE Analysis: summary chips + clickable section rows; full data opens in modal
+ if(art.title==='ACE Analysis'){
+  window._aceArt=art;
+  const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+  const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+  const smTable=smSection?.table||[];
+  const ambigItems=ambigSection?.items||[];
+  const flowCount=(smTable.find(r=>r.area==='flows')||{}).count||0;
+  const esqlCount=(smTable.find(r=>r.area==='esql')||{}).count||0;
+  const ambigCount=ambigItems.length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${flowCount}</span><span class="plan-stat-l">Message Flows</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${esqlCount}</span><span class="plan-stat-l">ESQL Modules</span></div><div class="plan-stat-chip ${ambigCount>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${ambigCount}</span><span class="plan-stat-l">Ambiguities</span></div></div>`;
+  let secs='';
+  if(ambigCount)secs+=`<div class="plan-si" data-ace-tab="ambiguities"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="7" x2="10" y2="10.5"/><circle cx="10" cy="13.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Ambiguities</div><div class="plan-si-meta">${ambigCount} open question${ambigCount!==1?'s':''} · require expert input</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(art.markdown)secs+=`<div class="plan-si" data-ace-tab="report"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Analysis Report</div><div class="plan-si-meta">Full analysis · coverage, patterns, and recommendations</div></div></div><span class="plan-si-caret">›</span></div>`;
+  secs+=`<div class="plan-si" data-ace-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full analysis output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  if(smTable.length){
+   const smLabels={flows:'Message Flows',subflows:'Subflows',esql:'ESQL Modules',maps:'Maps',schemas:'Schemas',policies:'Policies',interfaces:'Interfaces'};
+   html+=`<div class="artefact-sub" style="margin-top:12px">Semantic Model</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Count</th></tr></thead><tbody>${smTable.map(r=>`<tr><td>${esc(smLabels[r.area]||r.area)}</td><td>${r.count}</td></tr>`).join('')}</tbody></table></div>`}
+  return html}
+ // Framework Baseline Template: chips + section rows; full data opens in modal
+ if(art.title==='Framework Baseline Template'){
+  window._fbArt=art;
+  const fbSections=art.sections||[];
+  const fbConflicts=fbSections.find(s=>s.heading==='Conflicts');
+  const fbStandards=fbSections.find(s=>s.heading==='Standards');
+  const conflictItems=fbConflicts?.items||[];
+  const standardsObj=fbStandards?.json||{};
+  const standardsKeys=Object.keys(standardsObj);
+  const templateLines=(art.markdown||'').split('\n').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${templateLines}</span><span class="plan-stat-l">Template Lines</span></div><div class="plan-stat-chip ${conflictItems.length>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${conflictItems.length}</span><span class="plan-stat-l">Conflicts</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${standardsKeys.length}</span><span class="plan-stat-l">Standards</span></div></div>`;
+  let fbSecs='';
+  if(conflictItems.length)fbSecs+=`<div class="plan-si" data-fb-tab="conflicts"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="11"/><circle cx="10" cy="14" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Conflicts</div><div class="plan-si-meta">${conflictItems.length} conflict${conflictItems.length!==1?'s':''} · conventions that differ from the target framework</div></div></div><span class="plan-si-caret">›</span></div>`;
+  fbSecs+=`<div class="plan-si" data-fb-tab="template"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Template</div><div class="plan-si-meta">${templateLines} lines · Spring Boot project template</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(standardsKeys.length)fbSecs+=`<div class="plan-si" data-fb-tab="standards"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg><div><div class="plan-si-name">Standards</div><div class="plan-si-meta">${standardsKeys.length} standard${standardsKeys.length!==1?'s':''} · coding conventions and patterns</div></div></div><span class="plan-si-caret">›</span></div>`;
+  fbSecs+=`<div class="plan-si" data-fb-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full baseline output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${fbSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Repository Intake: summary + section rows; full data opens in modal
+ if(art.title==='Repository Intake Report'){
+  window._riArt=art;
+  const riSections=art.sections||[];
+  const getRI=h=>riSections.find(s=>s.heading===h);
+  const riSummary=getRI('Summary');
+  const riRepo=getRI('Repository');
+  const riGaps=getRI('Gaps');
+  const riFlows=getRI('Flows');
+  const riESQL=getRI('ESQL Modules');
+  const riSchemas=getRI('Schemas');
+  const flowCount=riFlows?.items?.length||0;
+  const esqlCount=riESQL?.items?.length||0;
+  const schemaCount=riSchemas?.items?.length||0;
+  const gapCount=riGaps?.items?.length||0;
+  const repoContent=riRepo?.content||'';
+  const repoItems=riRepo?.items||[];
+  html+=`<div style="margin-bottom:12px">`;
+  if(repoContent)html+=`<div class="meta-row"><div class="meta-key">Repository</div><div class="meta-val">${esc(repoContent)}</div></div>`;
+  repoItems.forEach(item=>{const parts=typeof item==='string'?item.split(/:\s*/,2):[item,''];html+=`<div class="meta-row"><div class="meta-key">${esc(parts[0])}</div><div class="meta-val">${esc(parts[1]||String(item))}</div></div>`;});
+  const flowItems=riFlows?.items||[];
+  const esqlItems=riESQL?.items||[];
+  flowItems.forEach((item,i)=>html+=`<div class="meta-row"><div class="meta-key">Flow ${i+1}</div><div class="meta-val">${esc(typeof item==='string'?item:JSON.stringify(item))}</div></div>`);
+  esqlItems.forEach((item,i)=>html+=`<div class="meta-row"><div class="meta-key">ESQL ${i+1}</div><div class="meta-val">${esc(typeof item==='string'?item:JSON.stringify(item))}</div></div>`);
+  html+=`</div>`;
+  let riSecs='';
+  if(gapCount)riSecs+=`<div class="plan-si" data-ri-tab="gaps"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Gaps</div><div class="plan-si-meta">${gapCount} gap${gapCount!==1?'s':''} · items requiring attention</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(schemaCount)riSecs+=`<div class="plan-si" data-ri-tab="schemas"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="5" height="5" rx="1"/><rect x="11" y="4" width="5" height="5" rx="1"/><rect x="4" y="11" width="5" height="5" rx="1"/><rect x="11" y="11" width="5" height="5" rx="1"/></svg><div><div class="plan-si-name">Schemas</div><div class="plan-si-meta">${schemaCount} schema${schemaCount!==1?'s':''} · MRM and XSD definitions</div></div></div><span class="plan-si-caret">›</span></div>`;
+  riSecs+=`<div class="plan-si" data-ri-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full intake output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${riSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Dormancy Intelligence: chips + inline signals + rationale + raw section row
+ if(art.title==='Dormancy Assessment'){
+  window._diArt=art;
+  const diSections=art.sections||[];
+  const getS=h=>diSections.find(s=>s.heading===h);
+  const classification=getS('Classification')?.content||'';
+  const confidence=getS('Confidence')?.content||'';
+  const signals=getS('Signals')?.table||[];
+  const rationale=getS('Rationale')?.content||'';
+  const clsCls=classification==='DORMANT'?'plan-stat-warn':classification.startsWith('ACTIVE')?'plan-stat-ok':'';
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip ${clsCls}"><span class="plan-stat-n" style="font-size:12px;letter-spacing:.3px">${esc(classification||'—')}</span><span class="plan-stat-l">Classification</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${esc(confidence||'—')}</span><span class="plan-stat-l">Confidence</span></div></div>`;
+  if(signals.length)html+=`<div class="artefact-sub" style="margin-top:2px">Signals</div><div class="table-wrap"><table><thead><tr><th>Signal</th><th>Value</th></tr></thead><tbody>${signals.map(r=>`<tr><td>${esc(r.signal)}</td><td>${esc(String(r.value))}</td></tr>`).join('')}</tbody></table></div>`;
+  if(rationale)html+=`<div class="artefact-sub" style="margin-top:10px">Rationale</div><div style="font-size:13px;color:var(--text);line-height:1.6;margin:4px 0 8px">${esc(rationale)}</div>`;
+  html+=`<div class="plan-sections"><div class="plan-si" data-di-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · complete assessment output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div>`;
+  return html}
+ // Markdown content (fallback for other markdown artefacts)
  if(art.markdown){
   html+=`<div class="artefact-md"><pre class="artefact-pre">${esc(art.markdown)}</pre></div>`}
- // YAML content (migration-specification)
- if(art.yaml){
-  const vBadge=art.validation_status==='VALID'?'<span class="badge badge-success" style="margin-left:8px"><span class="badge-dot"></span>VALID</span>':'<span class="badge badge-error" style="margin-left:8px"><span class="badge-dot"></span>INVALID</span>';
-  html+=`<div class="artefact-yaml-header">Migration Specification ${vBadge}</div><div class="artefact-yaml"><pre class="artefact-pre">${esc(art.yaml)}</pre></div>`;
-  if(art.validation_errors&&art.validation_errors.length){html+=`<div class="artefact-errors"><div class="artefact-sub">Validation Errors</div><ul>${art.validation_errors.map(e=>`<li>${esc(e.path||'')} — ${esc(e.message||JSON.stringify(e))}</li>`).join('')}</ul></div>`}}
- // Plan: task table, mappings table, risk register
+ // Migration Specification: summary chips + section rows; full data opens in modal
+ if(art.format==='yaml'){
+  window._msArt=art;
+  const msErrors=art.validation_errors||[];
+  const msValid=art.validation_status==='VALID';
+  const msLines=(art.yaml||'').split('\n').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${msLines}</span><span class="plan-stat-l">YAML Lines</span></div><div class="plan-stat-chip ${msErrors.length>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${msErrors.length}</span><span class="plan-stat-l">Validation Errors</span></div><div class="plan-stat-chip ${msValid?'plan-stat-ok':'plan-stat-warn'}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.5px">${msValid?'VALID':'INVALID'}</span><span class="plan-stat-l">Status</span></div></div>`;
+  let msSecs='';
+  if(msErrors.length)msSecs+=`<div class="plan-si" data-ms-tab="errors"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="11"/><circle cx="10" cy="14" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Validation Errors</div><div class="plan-si-meta">${msErrors.length} error${msErrors.length!==1?'s':''} · paths and messages</div></div></div><span class="plan-si-caret">›</span></div>`;
+  msSecs+=`<div class="plan-si" data-ms-tab="yaml"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 2h8l4 4v12a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="12 2 12 6 16 6"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg><div><div class="plan-si-name">YAML Specification</div><div class="plan-si-meta">${msLines} lines · full migration specification</div></div></div><span class="plan-si-caret">›</span></div>`;
+  msSecs+=`<div class="plan-si" data-ms-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${msSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Plan: summary chips + clickable section rows; full data opens in modal
  if(art.format==='plan'){
-  if(art.tasks&&art.tasks.length){
-   html+=`<div class="artefact-sub">Implementation Tasks (${art.tasks.length})</div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Boundary</th><th>Tests</th></tr></thead><tbody>${art.tasks.map(t=>`<tr><td><code>${esc(t.id)}</code></td><td style="font-size:11px">${esc(t.source)}</td><td><code>${esc(t.pattern)}</code></td><td>${esc(t.module)}</td><td><span class="badge badge-${t.boundary==='GENERATED'?'info':'warning'}">${esc(t.boundary)}</span></td><td style="font-size:11px">${(t.tests||[]).map(x=>esc(x)).join(', ')}</td></tr>`).join('')}</tbody></table></div>`}
-  if(art.mappings&&art.mappings.length){
-   html+=`<details class="op-raw-section"><summary>${chev} Construct Mappings (${art.mappings.length})</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody>${art.mappings.map(m=>`<tr><td style="font-size:11px">${esc(m.source)}</td><td>${esc(m.construct)}</td><td><code>${esc(m.pattern)}</code></td><td>${esc(m.module)}</td></tr>`).join('')}</tbody></table></div></details>`}
-  if(art.risk_register&&art.risk_register.length){
-   html+=`<div class="artefact-sub">Risk Register (${art.risk_register.length})</div><div class="table-wrap"><table><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${art.risk_register.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td style="font-size:11px">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}}
+  window._planArt=art;
+  const tasks=art.tasks||[],mappings=art.mappings||[],risks=art.risk_register||[];
+  const genCount=tasks.filter(t=>t.boundary==='GENERATED').length;
+  const protCount=tasks.filter(t=>t.boundary==='HAND_WRITTEN_PROTECTED').length;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${tasks.length}</span><span class="plan-stat-l">Components to Migrate</span></div><div class="plan-stat-chip plan-stat-ok"><span class="plan-stat-n">${genCount}</span><span class="plan-stat-l">Auto-Migrated</span></div><div class="plan-stat-chip plan-stat-warn"><span class="plan-stat-n">${protCount}</span><span class="plan-stat-l">Need Review</span></div></div>`;
+  let secs='';
+  if(tasks.length)secs+=`<div class="plan-si" data-plan-tab="tasks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="14" height="11" rx="1.5"/><line x1="3" y1="9" x2="17" y2="9"/><line x1="7" y1="9" x2="7" y2="16"/></svg><div><div class="plan-si-name">Migration Tasks</div><div class="plan-si-meta">${tasks.length} component${tasks.length!==1?'s':''} · what gets built and how it will be tested</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(mappings.length)secs+=`<div class="plan-si" data-plan-tab="mappings"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="10" r="2.5"/><circle cx="15" cy="10" r="2.5"/><line x1="7.5" y1="10" x2="12.5" y2="10"/></svg><div><div class="plan-si-name">How Each Component Maps</div><div class="plan-si-meta">${mappings.length} rows · original ACE node → new Spring Boot equivalent</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(risks.length)secs+=`<div class="plan-si" data-plan-tab="risks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Risk Register</div><div class="plan-si-meta">${risks.length} risk${risks.length!==1?'s':''} · severity levels and mitigation</div></div></div><span class="plan-si-caret">›</span></div>`;
+  secs+=`<div class="plan-si" data-plan-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full plan output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`}
  // Code generation: file list with content
  if(art.format==='code'&&art.files&&art.files.length){
   html+=`<div class="artefact-sub">Generated Files (${art.files.length})</div>`;
@@ -1960,7 +2122,445 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`}
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
+function renderCloneOutputPane(outputs,params){
+ const branch=outputs.branch||params.branch||'—';
+ const commit=outputs.commit||'';
+ const shortCommit=commit?commit.slice(0,8):'—';
+ const role=params.role||'';
+ const repoUrl=params.repo_url||'';
+ const repoName=repoUrl?repoUrl.replace(/\.git$/,'').split('/').filter(Boolean).pop()||repoUrl:'—';
+ const roleLabels={ACE:'ACE Integration',FRAMEWORK:'Spring Boot Framework',TARGET:'Target Migration'};
+ const roleLabel=roleLabels[role]||role||'—';
+ // Chips — same plan-stats-row pattern as Planning / Migration Spec
+ let html=`<div class="plan-stats-row">
+  <div class="plan-stat-chip plan-stat-ok">
+   <span class="plan-stat-n" style="font-size:15px;font-family:monospace;letter-spacing:.5px">${esc(shortCommit)}</span>
+   <span class="plan-stat-l">Commit</span>
+  </div>
+  ${role?`<div class="plan-stat-chip"><span class="plan-stat-n" style="font-size:13px">${esc(roleLabel)}</span><span class="plan-stat-l">Repository Type</span></div>`:''}
+ </div>`;
+ // Info rows — use plan-si visual style (same card look as Planning sections) but static
+ html+=`<div class="plan-sections">
+  <div class="plan-si" style="cursor:default">
+   <div class="plan-si-l">
+    <svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="7" y1="3" x2="7" y2="12"/><circle cx="14" cy="5.5" r="2.5"/><circle cx="7" cy="15.5" r="2.5"/><path d="M14 8a7 7 0 01-7 7"/></svg>
+    <div style="min-width:0">
+     <div class="plan-si-name">Branch</div>
+     <div class="plan-si-meta" style="font-family:monospace;font-size:11px;word-break:break-all;white-space:normal;line-height:1.5;margin-top:2px">${esc(branch)}</div>
+    </div>
+   </div>
+  </div>
+  <div class="plan-si" style="cursor:default">
+   <div class="plan-si-l" style="min-width:0;flex:1">
+    <svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 17c-3.5 1-3.5-2-5-2.5m10 4.5v-3.1a2.4 2.4 0 00-.65-1.85c2.2-.25 4.5-1.1 4.5-4.9a3.8 3.8 0 00-1.05-2.65 3.6 3.6 0 00-.06-2.6s-.83-.26-2.72 1.03a9.4 9.4 0 00-4.9 0C7.23 3.4 6.4 3.66 6.4 3.66a3.6 3.6 0 00-.06 2.6A3.8 3.8 0 005.3 8.91c0 3.78 2.3 4.63 4.5 4.88A2.4 2.4 0 009 15.65V18.5"/></svg>
+    <div style="min-width:0;flex:1">
+     <div class="plan-si-name" style="word-break:break-all">${esc(repoName)}</div>
+     <div class="plan-si-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>Source repository${role?' · '+esc(roleLabel):''}</span>
+      ${repoUrl?`<a href="${esc(repoUrl)}" target="_blank" rel="noopener" style="color:var(--primary);font-weight:600;text-decoration:none">Open ↗</a>`:''}
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>`;
+ // Technical Details — clean bordered card, label+action on top row, value below
+ const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+ html+=`<details class="op-raw-section" style="margin-top:6px"><summary>${chev} Technical Details</summary>`;
+ html+=`<div style="margin-top:10px">`;
+ if(commit)html+=`<div class="meta-row"><div class="meta-key">Full SHA</div><div class="meta-val" style="flex:1;display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><span style="flex:1;word-break:break-all">${esc(commit)}</span><button id="cloneCopySHA" class="plan-copy-btn" style="font-size:10px;padding:3px 10px;flex-shrink:0">Copy</button></div></div>`;
+ if(role)html+=`<div class="meta-row"><div class="meta-key">Role</div><div class="meta-val">${esc(role)}</div></div>`;
+ html+=`</div></details>`;
+ return html}
+
+// ==== Planning Output Modal ================================================
+function openPlanningModal(tab){
+ const art=window._planArt;if(!art)return;
+ let m=document.getElementById('planModal');
+ if(!m){
+  m=document.createElement('div');m.id='planModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const tasks=art.tasks||[],mappings=art.mappings||[],risks=art.risk_register||[];
+ const genCount=tasks.filter(t=>t.boundary==='GENERATED').length;
+ const protCount=tasks.filter(t=>t.boundary==='HAND_WRITTEN_PROTECTED').length;
+ const TABS=[[tasks.length,'tasks','Migration Tasks',tasks.length],[mappings.length,'mappings','How Each Component Maps',mappings.length],[risks.length,'risks','Risk Register',risks.length],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'raw');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="pmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">${esc(art.title||'Planning Output')}</div>
+    <div class="plan-modal-sub">${tasks.length} component${tasks.length!==1?'s':''} to migrate · ${genCount} auto-migrated · ${protCount} need review</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-pm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="pmBody">${renderPlanModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('pmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('pmBody').innerHTML=renderPlanModalTab(art,btn.dataset.pmTab);
+  wirePlanModalTab(art,btn.dataset.pmTab)})});
+ wirePlanModalTab(art,activeTab)}
+function renderPlanModalTab(art,tab){
+ if(tab==='tasks')return renderPlanTasksTab(art.tasks||[]);
+ if(tab==='mappings')return renderPlanMappingsTab(art.mappings||[]);
+ if(tab==='risks')return renderPlanRisksTab(art.risk_register||[]);
+ if(tab==='raw')return renderPlanRawTab();
+ return ''}
+function wirePlanModalTab(art,tab){
+ if(tab==='tasks'||tab==='mappings'){
+  const sEl=document.getElementById('pmSearch'),bEl=document.getElementById('pmBoundary'),mEl=document.getElementById('pmModule'),tBody=document.getElementById('pmTbody'),cnt=document.getElementById('pmCount');
+  if(!sEl||!tBody)return;
+  const rerender=()=>{
+   const s=sEl.value.toLowerCase(),bf=bEl?bEl.value:'',mf=mEl?mEl.value:'';
+   const rows=tab==='tasks'?planTaskRows(art.tasks||[],s,bf,mf):planMappingRows(art.mappings||[],s,mf);
+   tBody.innerHTML=rows;
+   if(cnt){const total=tab==='tasks'?(art.tasks||[]).length:(art.mappings||[]).length;cnt.textContent=`${tBody.querySelectorAll('tr').length} of ${total}`}};
+  sEl.addEventListener('input',rerender);
+  if(bEl)bEl.addEventListener('change',rerender);
+  if(mEl)mEl.addEventListener('change',rerender)}
+ const copyBtn=document.getElementById('pmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._planOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function planTaskRows(tasks,search,boundary,mod){
+ return tasks.filter(t=>{
+  if(boundary&&t.boundary!==boundary)return false;
+  if(mod&&t.module!==mod)return false;
+  if(search&&!`${t.id} ${t.source} ${t.pattern} ${t.module}`.toLowerCase().includes(search))return false;
+  return true}).map(t=>`<tr>
+  <td><code class="plan-id">${esc(t.id)}</code></td>
+  <td><span class="plan-src" title="${esc(t.source)}">${esc(t.source)}</span></td>
+  <td>${esc(t.pattern)}</td>
+  <td><span class="badge badge-success">${esc(t.module)}</span></td>
+  <td><span class="badge ${t.boundary==='GENERATED'?'badge-info':'badge-warning'}">${t.boundary==='GENERATED'?'Auto-Migrated':'Needs Review'}</span></td>
+  <td class="plan-tests-cell">${(t.tests||[]).map(x=>esc(x)).join(', ')}</td>
+ </tr>`).join('')}
+function planMappingRows(mappings,search,mod){
+ return mappings.filter(m=>{
+  if(mod&&m.module!==mod)return false;
+  if(search&&!`${m.source} ${m.construct} ${m.pattern} ${m.module}`.toLowerCase().includes(search))return false;
+  return true}).map(m=>`<tr>
+  <td><span class="plan-src" title="${esc(m.source)}">${esc(m.source)}</span></td>
+  <td><code class="plan-ace-badge">${esc(m.construct)}</code></td>
+  <td>${esc(m.pattern)}</td>
+  <td><span class="badge badge-success">${esc(m.module)}</span></td>
+ </tr>`).join('')}
+function renderPlanTasksTab(tasks){
+ const mods=[...new Set(tasks.map(t=>t.module).filter(Boolean))];
+ return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search ID, source, pattern…"><select id="pmBoundary" class="plan-sel"><option value="">All Migration Types</option><option value="GENERATED">Auto-Migrated</option><option value="HAND_WRITTEN_PROTECTED">Needs Review</option></select><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${tasks.length} of ${tasks.length}</span></div>
+ <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Migration Type</th><th>Tests</th></tr></thead><tbody id="pmTbody">${planTaskRows(tasks,'','','')}</tbody></table></div>`}
+function renderPlanMappingsTab(mappings){
+ const mods=[...new Set(mappings.map(m=>m.module).filter(Boolean))];
+ return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search source, ACE construct…"><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${mappings.length} of ${mappings.length}</span></div>
+ <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody id="pmTbody">${planMappingRows(mappings,'','')}</tbody></table></div>`}
+function renderPlanRisksTab(risks){
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-tests-cell">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
+function renderPlanRawTab(){
+ const data=window._planOutputs||window._planArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+
+// ==== ACE Analysis Output Modal ============================================
+function openACEModal(tab){
+ const art=window._aceArt;if(!art)return;
+ let m=document.getElementById('aceModal');
+ if(!m){
+  m=document.createElement('div');m.id='aceModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+ const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+ const smTable=smSection?.table||[];
+ const ambigItems=ambigSection?.items||[];
+ const TABS=[[ambigItems.length,'ambiguities','Ambiguities',ambigItems.length],[art.markdown?1:0,'report','Analysis Report',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'raw');
+ const smSub=smTable.length?smTable.map(r=>r.area+': '+r.count).join(' · '):'ACE semantic model';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="acmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">ACE Analysis</div>
+    <div class="plan-modal-sub">${esc(smSub)}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-acm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="acmBody">${renderACEModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('acmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('acmBody').innerHTML=renderACEModalTab(art,btn.dataset.acmTab);
+  wireACEModalTab(btn.dataset.acmTab)})});
+ wireACEModalTab(activeTab)}
+function renderACEModalTab(art,tab){
+ if(tab==='model')return renderACEModelTab(art);
+ if(tab==='ambiguities')return renderACEAmbiguitiesTab(art);
+ if(tab==='report')return renderACEReportTab(art);
+ if(tab==='raw')return renderACERawTab();
+ return ''}
+function wireACEModalTab(tab){
+ const copyBtn=document.getElementById('acmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._aceOutputs||window._aceArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderACEModelTab(art){
+ const smSection=art.sections&&art.sections.find(s=>s.heading==='Semantic Model Summary');
+ const rows=smSection?.table||[];
+ if(!rows.length)return'<p class="authhint">No semantic model data available.</p>';
+ const labels={flows:'Message Flows',subflows:'Subflows',esql:'ESQL Modules',maps:'Maps',schemas:'Schemas',policies:'Policies',interfaces:'Interfaces'};
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Construct Area</th><th>Count</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(labels[r.area]||r.area)}</td><td>${r.count}</td></tr>`).join('')}</tbody></table></div>`}
+function renderACEAmbiguitiesTab(art){
+ const ambigSection=art.sections&&art.sections.find(s=>s.heading==='Ambiguities');
+ const items=ambigSection?.items||[];
+ if(!items.length)return'<p class="authhint">No ambiguities detected.</p>';
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((q,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num">${i+1}</span><span class="ace-ambig-q">${esc(q)}</span></div>`).join('')}</div></div>`}
+function renderACEReportTab(art){
+ if(!art.markdown)return'<p class="authhint">No analysis report available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Full ACE Analysis Report</span></div><pre class="plan-raw-pre">${esc(art.markdown)}</pre>`}
+function renderACERawTab(){
+ const data=window._aceOutputs||window._aceArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete analysis output</span><button id="acmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Migration Specification Output Modal =================================
+function openMSModal(tab){
+ const art=window._msArt;if(!art)return;
+ let m=document.getElementById('msModal');
+ if(!m){
+  m=document.createElement('div');m.id='msModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const msErrors=art.validation_errors||[];
+ const msValid=art.validation_status==='VALID';
+ const msLines=(art.yaml||'').split('\n').length;
+ const TABS=[[msErrors.length,'errors','Validation Errors',msErrors.length],[1,'yaml','YAML Specification',null],[1,'raw','Raw Output',null]].filter(([c])=>c).map(([,key,label,count])=>({key,label,count}));
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'yaml');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="msmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Migration Specification</div>
+    <div class="plan-modal-sub">${msLines} lines · validation: <span style="color:${msValid?'var(--success-text)':'var(--warning-text)'}">${msValid?'VALID':'INVALID'}</span>${msErrors.length?' · '+msErrors.length+' error'+(msErrors.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-msm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="msmBody">${renderMSModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('msmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('msmBody').innerHTML=renderMSModalTab(art,btn.dataset.msmTab);
+  wireMSModalTab(btn.dataset.msmTab)})});
+ wireMSModalTab(activeTab)}
+function renderMSModalTab(art,tab){
+ if(tab==='errors')return renderMSErrorsTab(art);
+ if(tab==='yaml')return renderMSYamlTab(art);
+ if(tab==='raw')return renderMSRawTab();
+ return ''}
+function wireMSModalTab(tab){
+ const copyBtn=document.getElementById('msmCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._msOutputs||window._msArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}
+ const copyYaml=document.getElementById('msmCopyYaml');
+ if(copyYaml)copyYaml.onclick=()=>{
+  try{navigator.clipboard.writeText(window._msArt?.yaml||'').then(()=>{copyYaml.textContent='Copied ✓';setTimeout(()=>{copyYaml.textContent='Copy YAML'},1500)}).catch(()=>{})}catch(e){}}}
+function renderMSErrorsTab(art){
+ const errors=art.validation_errors||[];
+ if(!errors.length)return'<p class="authhint">No validation errors.</p>';
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Path</th><th>Message</th></tr></thead><tbody>${errors.map(e=>`<tr><td><code class="plan-id">${esc(e.path||'—')}</code></td><td class="plan-tests-cell">${esc(e.message||JSON.stringify(e))}</td></tr>`).join('')}</tbody></table></div>`}
+function renderMSYamlTab(art){
+ if(!art.yaml)return'<p class="authhint">No YAML available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">YAML · migration specification</span><button id="msmCopyYaml" class="plan-copy-btn">Copy YAML</button></div><pre class="plan-raw-pre">${esc(art.yaml)}</pre>`}
+function renderMSRawTab(){
+ const data=window._msOutputs||window._msArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full output</span><button id="msmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+// ==== Repository Intake Output Modal ======================================
+function openRIModal(tab){
+ const art=window._riArt;if(!art)return;
+ let m=document.getElementById('riModal');
+ if(!m){
+  m=document.createElement('div');m.id='riModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const riSections=art.sections||[];
+ const getRI=h=>riSections.find(s=>s.heading===h);
+ const gapItems=getRI('Gaps')?.items||[];
+ const schemaItems=getRI('Schemas')?.items||[];
+ const TABS=[
+  gapItems.length&&{key:'gaps',label:'Gaps',count:gapItems.length},
+  schemaItems.length&&{key:'schemas',label:'Schemas',count:schemaItems.length},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'repository');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="rimClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Repository Intake Report</div>
+    <div class="plan-modal-sub">${schemaItems.length} schema${schemaItems.length!==1?'s':''}${gapItems.length?' · '+gapItems.length+' gap'+(gapItems.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-rim-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="rimBody">${renderRIModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('rimClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('rimBody').innerHTML=renderRIModalTab(art,btn.dataset.rimTab);
+  wireRIModalTab(btn.dataset.rimTab)})});
+ wireRIModalTab(activeTab)}
+function renderRIModalTab(art,tab){
+ const riSections=art.sections||[];
+ const getRI=h=>riSections.find(s=>s.heading===h);
+ if(tab==='gaps')return renderRIListTab(getRI('Gaps')?.items||[],'Gaps');
+ if(tab==='schemas')return renderRIListTab(getRI('Schemas')?.items||[],'Schemas');
+ if(tab==='raw')return renderRIRawTab();
+ return ''}
+function wireRIModalTab(tab){
+ const copyBtn=document.getElementById('rimCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._riOutputs||window._riArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderRIListTab(items,label){
+ if(!items.length)return`<p class="authhint">No ${esc(label)} found.</p>`;
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((item,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num" style="background:var(--accent-bg,rgba(37,99,235,.1));color:var(--accent)">${i+1}</span><span class="ace-ambig-q" style="font-family:monospace;font-size:11px">${esc(typeof item==='string'?item:JSON.stringify(item))}</span></div>`).join('')}</div></div>`}
+function renderRIRawTab(){
+ const data=window._riOutputs||window._riArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full intake output</span><button id="rimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Framework Baseline Output Modal =====================================
+function openFBModal(tab){
+ const art=window._fbArt;if(!art)return;
+ let m=document.getElementById('fbModal');
+ if(!m){
+  m=document.createElement('div');m.id='fbModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const fbSections=art.sections||[];
+ const conflictItems=fbSections.find(s=>s.heading==='Conflicts')?.items||[];
+ const standardsObj=fbSections.find(s=>s.heading==='Standards')?.json||{};
+ const standardsCount=Object.keys(standardsObj).length;
+ const templateLines=(art.markdown||'').split('\n').length;
+ const TABS=[
+  conflictItems.length&&{key:'conflicts',label:'Conflicts',count:conflictItems.length},
+  {key:'template',label:'Template',count:null},
+  standardsCount&&{key:'standards',label:'Standards',count:standardsCount},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:(TABS[0]?.key||'template');
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="fbmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Framework Baseline</div>
+    <div class="plan-modal-sub">${templateLines} template lines · ${standardsCount} standards${conflictItems.length?' · '+conflictItems.length+' conflict'+(conflictItems.length!==1?'s':''):''}</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-fbm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="fbmBody">${renderFBModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('fbmClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('fbmBody').innerHTML=renderFBModalTab(art,btn.dataset.fbmTab);
+  wireFBModalTab(btn.dataset.fbmTab)})});
+ wireFBModalTab(activeTab)}
+function renderFBModalTab(art,tab){
+ if(tab==='conflicts')return renderFBConflictsTab(art);
+ if(tab==='template')return renderFBTemplateTab(art);
+ if(tab==='standards')return renderFBStandardsTab(art);
+ if(tab==='raw')return renderFBRawTab();
+ return ''}
+function wireFBModalTab(tab){
+ const copyTpl=document.getElementById('fbmCopyTpl');
+ if(copyTpl)copyTpl.onclick=()=>{
+  try{navigator.clipboard.writeText(window._fbArt?.markdown||'').then(()=>{copyTpl.textContent='Copied ✓';setTimeout(()=>{copyTpl.textContent='Copy Markdown'},1500)}).catch(()=>{})}catch(e){}}
+ const copyJson=document.getElementById('fbmCopyJson');
+ if(copyJson)copyJson.onclick=()=>{
+  const data=window._fbOutputs||window._fbArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyJson.textContent='Copied ✓';setTimeout(()=>{copyJson.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderFBConflictsTab(art){
+ const items=art.sections?.find(s=>s.heading==='Conflicts')?.items||[];
+ if(!items.length)return'<p class="authhint">No conflicts detected.</p>';
+ return`<div class="plan-tbl-wrap"><div class="ace-ambig-list">${items.map((item,i)=>`<div class="ace-ambig-item"><span class="ace-ambig-num" style="background:var(--warn-s);color:var(--warn)">${i+1}</span><span class="ace-ambig-q">${esc(typeof item==='string'?item:JSON.stringify(item))}</span></div>`).join('')}</div></div>`}
+function renderFBTemplateTab(art){
+ if(!art.markdown)return'<p class="authhint">No template available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Markdown · Spring Boot project template</span><button id="fbmCopyTpl" class="plan-copy-btn">Copy Markdown</button></div><pre class="plan-raw-pre">${esc(art.markdown)}</pre>`}
+function renderFBStandardsTab(art){
+ const standards=art.sections?.find(s=>s.heading==='Standards')?.json||{};
+ if(!Object.keys(standards).length)return'<p class="authhint">No standards available.</p>';
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">Standards · coding conventions and patterns</span></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(standards)}</div>`}
+function renderFBRawTab(){
+ const data=window._fbOutputs||window._fbArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full baseline output</span><button id="fbmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Dormancy Intelligence Output Modal ==================================
+function openDIModal(tab){
+ const art=window._diArt;if(!art)return;
+ let m=document.getElementById('diModal');
+ if(!m){
+  m=document.createElement('div');m.id='diModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const diSections=art.sections||[];
+ const classification=diSections.find(s=>s.heading==='Classification')?.content||'';
+ const confidence=diSections.find(s=>s.heading==='Confidence')?.content||'';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="dimClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Dormancy Assessment</div>
+    <div class="plan-modal-sub">${esc(classification)} · ${esc(confidence)} confidence</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   <button class="plan-modal-tab active" data-dim-tab="raw">Raw Output</button>
+  </div>
+  <div class="plan-modal-body" id="dimBody">${renderDIRawTab()}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('dimClose').onclick=()=>m.classList.remove('open');
+ wireDIModalTab('raw')}
+function wireDIModalTab(tab){
+ const copyBtn=document.getElementById('dimCopyJson');
+ if(copyBtn)copyBtn.onclick=()=>{
+  const data=window._diOutputs||window._diArt||{};
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{copyBtn.textContent='Copied ✓';setTimeout(()=>{copyBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function renderDIRawTab(){
+ const data=window._diOutputs||window._diArt||{};
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · complete assessment output</span><button id="dimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ===========================================================================
+
 const SUGGESTION_CONFIDENCE_BADGE={HIGH:'success',MEDIUM:'warning',LOW:'neutral'};
 function renderClarifyPane(clarifications){
  if(!clarifications.length)return '<p class="authhint">No clarifications recorded for this step.</p>';
@@ -2046,6 +2646,13 @@ async function openStepOutput(pipelineId,stepId,step){
  // Live for a step still running or parked, so the drawer agrees with the card
  // behind it instead of showing a duration frozen at whenever it was opened.
  const _dur=durationTag(detail,'op-exec-val',detail.status in LIVE_STEP_STATUS);
+ if(detail.artefact?.format==='plan')window._planOutputs=outputs;
+ if(detail.artefact?.title==='ACE Analysis')window._aceOutputs=outputs;
+ if(detail.artefact?.format==='yaml')window._msOutputs=outputs;
+ if(detail.artefact?.title==='Repository Intake Report')window._riOutputs=outputs;
+ if(detail.artefact?.title==='Dormancy Assessment')window._diOutputs=outputs;
+ if(detail.artefact?.title==='Framework Baseline Template')window._fbOutputs=outputs;
+ const _outputPaneHtml=detail.kind==='CLONE'?renderCloneOutputPane(outputs,params):renderOutputPane(outputs,detail.artefact);
  panel.innerHTML=`
   <div class="op-header">
    <div class="op-title-row">
@@ -2069,7 +2676,7 @@ async function openStepOutput(pipelineId,stepId,step){
   </div>
   <div class="op-body">
    <div class="op-pane" id="pane-output">
-    ${renderOutputPane(outputs,detail.artefact)}
+    ${_outputPaneHtml}
    </div>
    ${clarifications.length?`<div class="op-pane" id="pane-clarify">${renderClarifyPane(clarifications)}</div>`:''}
    <div class="op-pane" id="pane-logs">${logsHtml}</div>
@@ -2096,6 +2703,15 @@ async function openStepOutput(pipelineId,stepId,step){
   panel.querySelectorAll('.op-pane').forEach(p=>p.classList.remove('active'));
   tab.classList.add('active');
   panel.querySelector('#pane-'+tab.dataset.tab)?.classList.add('active')}});
+ panel.querySelectorAll('.plan-si[data-plan-tab]').forEach(item=>{item.addEventListener('click',()=>openPlanningModal(item.dataset.planTab))});
+ panel.querySelectorAll('.plan-si[data-ace-tab]').forEach(item=>{item.addEventListener('click',()=>openACEModal(item.dataset.aceTab))});
+ panel.querySelectorAll('.plan-si[data-ms-tab]').forEach(item=>{item.addEventListener('click',()=>openMSModal(item.dataset.msTab))});
+ panel.querySelectorAll('.plan-si[data-ri-tab]').forEach(item=>{item.addEventListener('click',()=>openRIModal(item.dataset.riTab))});
+ panel.querySelectorAll('.plan-si[data-fb-tab]').forEach(item=>{item.addEventListener('click',()=>openFBModal(item.dataset.fbTab))});
+ panel.querySelectorAll('.plan-si[data-di-tab]').forEach(item=>{item.addEventListener('click',()=>openDIModal(item.dataset.diTab))});
+ const cloneCopyBtn=panel.querySelector('#cloneCopySHA');
+ if(cloneCopyBtn)cloneCopyBtn.onclick=()=>{
+  try{navigator.clipboard.writeText(outputs.commit||'').then(()=>{cloneCopyBtn.textContent='Copied ✓';setTimeout(()=>{cloneCopyBtn.textContent='Copy SHA'},1500)}).catch(()=>{})}catch(e){}};
  const retryBtn=panel.querySelector('#opRetry');
  if(retryBtn)retryBtn.onclick=async()=>{
   try{await api(`/api/v2/pipelines/${pipelineId}/steps/${stepId}/retry`,{method:'POST'});close();pipelineDetail(pipelineId)}catch(e){notice(e.message,true)}};
@@ -2124,16 +2740,20 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
   btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
-async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
- const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
+let renderSeq=0,renderSoft=false;const dashOpenJobs=new Set();const sugTried=new Set();
+async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=false;if(!soft){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker()}if(!token()||!session)return authScreen('login');renderIdentity();
+ const p=(location.hash||'#'+homePage()).slice(1);
+ if(isAdminOnly()&&ADMIN_HIDDEN_PAGES.includes(p.split('/')[0])){location.hash=homePage();return}
+ navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
  // state and do not want the dashboard metrics bar refetched under them on
  // every internal step change, so they are handled before the generic path.
  if(p==='new-migration')return migrationWizard();
  if(p==='pipelines'){try{notice('');$('#title').textContent='Pipelines';await pipelineList()}catch(e){return renderError(e)}return}
  if(p.startsWith('pipelines/')){try{notice('');await pipelineDetail(p.slice('pipelines/'.length))}catch(e){return renderError(e)}return}
- try{notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+ try{if(!soft)notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
  const [d,agentHealth]=await Promise.all([api('/api/v2/dashboard'),api('/api/v2/agent-registry/health').catch(()=>({items:[]}))]);
+ if(seq!==renderSeq)return;
  const _ah=agentHealth.items||agentHealth.agents||[];
  const agentsRunning=d.running_agents??0;
  const totalAgents=_ah.length||15;
@@ -2158,6 +2778,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p==='access'){await accessPage();return}
  if(p==='agent-models'){await agentModelsPage();return}
  if(p==='learning'){await learningPage();return}
+ if(p==='metrics'){$('#metrics').innerHTML='';await metricsPage();return}
  if(p==='approval-governance'){await approvalGovernance();return}
  if(p==='approval-inbox'){await approvalInbox();refreshTimer=setInterval(approvalInbox,5000);return}
  if(p==='agent-registry')return agentRegistryPage();
@@ -2170,13 +2791,15 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // The pipeline worth showing: one doing something, then one that is held, then
   // the latest. Only RUNNING was looked for, so pausing a pipeline (or stopping at
   // an approval) made it vanish from the dashboard.
+  if(seq!==renderSeq)return;
   const plItems=pipelines.items||[];
-  const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
-  let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
   // The newest pipeline of each job, so a service can lead to the pipeline running it.
   const plByJob={};plItems.slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(pl=>{plByJob[pl.job_id]=pl});
   const svcName=x=>{const name=esc(x.service||x.workspace_dir||x.id);const pl=plByJob[x.id];return pl?`<a class="pl-link" href="#pipelines/${esc(pl.id)}" title="Open this pipeline">${name}</a>`:name};
-  const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
+  const progressOf=x=>{const st=String(x.state||x.status||'').toUpperCase();const v=Math.max(0,Math.min(100,Number(dispPct(st,x.progress))||0));return st==='COMPLETED'||v>=100?100:Math.max(v,6)};
+  const jobRows=(jobs.items||[]).slice(0,12).map(x=>{const pl=plByJob[x.id];const st=x.state||x.status||'CREATED';const pct=progressOf(x);const open=pl&&dashOpenJobs.has(x.id);
+   const caps=pl?`<div class="job-caps"><button class="btn-ghost job-steps-btn" data-job="${esc(x.id)}" data-pl="${esc(pl.id)}" aria-expanded="${!!open}">${open?'Hide steps':'Steps'}</button><button class="btn-ghost job-open-btn" data-pl="${esc(pl.id)}">Open pipeline →</button></div>`:'<span class="td-light">No pipeline yet</span>';
+   return `<tr class="job-row"><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(String((pl&&pl.status)||st))}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(st,x.progress||0)}" style="width:${pct}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${pct===100?100:Math.min(pct,99)}%</span></div></td><td>${caps}</td></tr>${pl?`<tr class="job-steps-row" data-job="${esc(x.id)}"${open?'':' hidden'}><td colspan="5"><div class="pipeline-board job-steps-board" style="padding:10px 4px"><div class="empty">Loading steps…</div></div></td></tr>`:''}`}).join('');
   const pendingCount=(approvals.items||[]).length;
   const APPR_LIMIT=5;
   const appRows=(approvals.items||[]).slice(0,APPR_LIMIT).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
@@ -2186,17 +2809,6 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // so this read undefined and every step that had started showed "Running…"
   // for good -- including the completed ones. With the right field it can also
   // say how long each one took, which is the point of the card.
-  const stepCards=plSteps.slice(0,12).map(s=>{
-   const st=s.status||'PENDING';const dot=`<div class="stepdot"></div>`;
-   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
-   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`
-    :s.started_at?`Running… ${dur}`:'Waiting';
-   return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
-  const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
-  const plStatus=runPl?String(runPl.status||''):'';
-  const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
-  const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}</div></div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2212,16 +2824,30 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
+  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
+  const metaText=`Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
+  const painted=soft&&$('#dashSecJobs');
+  if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
+  else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   // Every part of the pipeline card leads to the pipeline: the title, the button,
   // and each step. None of it was clickable.
-  if(runPl){
-   const go=()=>{location.hash='pipelines/'+runPl.id};
-   $('#dashOpenPipeline')?.addEventListener('click',go);
-   document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
+  const stepHtml=steps=>steps.slice(0,12).map(s=>{
+   const st=s.status||'PENDING';
+   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
+   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`:s.started_at?`Running… ${dur}`:'Waiting';
+   return `<div class="pipeline-step ${esc(st)}"><div class="stepdot"></div><div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('')||'<div class="empty">No steps</div>';
+  const fillSteps=async(row,plId)=>{const board=row.querySelector('.job-steps-board');
+   try{const pl=await api('/api/v2/pipelines/'+plId);if(seq!==renderSeq&&!soft)return;board.innerHTML=stepHtml(pl.steps||[]);
+    board.querySelectorAll('.pipeline-step').forEach(el=>{el.style.cursor='pointer';el.onclick=()=>{location.hash='pipelines/'+plId}});startDurationTicker()}
+   catch(_){board.innerHTML='<div class="empty">Steps unavailable</div>'}};
+  document.querySelectorAll('.job-open-btn').forEach(b=>{b.onclick=()=>{location.hash='pipelines/'+b.dataset.pl}});
+  document.querySelectorAll('.job-steps-btn').forEach(b=>{const row=document.querySelector('.job-steps-row[data-job="'+b.dataset.job+'"]');
+   if(dashOpenJobs.has(b.dataset.job))fillSteps(row,b.dataset.pl);
+   b.onclick=()=>{const open=row.hidden;row.hidden=!open;b.textContent=open?'Hide steps':'Steps';b.setAttribute('aria-expanded',String(open));
+    if(open){dashOpenJobs.add(b.dataset.job);fillSteps(row,b.dataset.pl)}else dashOpenJobs.delete(b.dataset.job)}});
   // The header says it refreshes itself; nothing did.
-  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard')render()},30000);
+  if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.
