@@ -177,6 +177,58 @@ def test_one_unreadable_file_costs_the_whole_analysis(repo, job, params, gateway
                     (job['id'],))['n'] == 0
 
 
+def test_properties_files_are_folded_deterministically_not_sent_to_the_model(
+        repo, job, params, gateway, dispatch, ace_repo):
+    """The real bug: backend_properties came back empty on every real analysis.
+
+    ``agent/ace-analysis/semantic-model`` only describes the IIB/ACE construct
+    files (.msgflow/.subflow/.esql/.map/.xslt/.xsd/.wsdl/.policyxml) -- never
+    .properties. Sending a .properties file through it anyway got a
+    schema-valid answer with nothing extracted, which never once failed in a
+    way that would trip the parser fallback. The real backend/test-harness
+    URL naming convention (<node>#<vendor>ServiceURL /
+    <node>#testHarness<vendor>Url) is zero-ambiguity, so it is folded in
+    deterministically instead, and never reaches the model at all.
+    """
+    (ace_repo / 'Orders.DEV.properties').write_text(
+        'Orders#VendorServiceURL = https://vendor.example.com/orders\n'
+        'Orders#testHarnessVendorUrl = http://wiremock.example.com/orders\n')
+    gateway(PROMPT, model_name=ALIAS)
+    provider = ArtefactProvider(_fragment)
+
+    outcome = dispatch(job['id'], 'ace-analysis', params, provider=provider)
+
+    row = repo.one('select * from ace_analyses where id=?',
+                   (outcome['outputs']['analysis_document'],))
+    model = json.loads(row['semantic_model'])
+    assert model['backend_properties'] == {
+        'Vendor': {'DEV': {'service_url': 'https://vendor.example.com/orders',
+                           'test_harness_url': 'http://wiremock.example.com/orders'}}}
+    # Only the construct files reached the model -- the .properties file did not.
+    requested_paths = [c['payload']['path'] for c in provider.calls]
+    assert 'Orders.DEV.properties' not in requested_paths
+    assert len(provider.calls) == 3          # .msgflow, .esql, .xsd -- unchanged
+
+
+def test_sources_read_still_counts_the_folded_properties_file(
+        repo, job, params, gateway, dispatch, ace_repo):
+    """Folded deterministically, but still a real source this analysis read."""
+    (ace_repo / 'Orders.DEV.properties').write_text('Orders#VendorServiceURL = https://vendor.example.com\n')
+    gateway(PROMPT, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'ace-analysis', params, provider=ArtefactProvider(_fragment))
+    assert outcome['metrics']['sources_read'] == 4   # 3 construct files + the 1 properties file
+
+
+def test_a_repository_with_no_properties_files_is_unaffected(repo, job, params, gateway, dispatch):
+    """The default ace_repo fixture has none -- confirms the carve-out is a no-op without one."""
+    gateway(PROMPT, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'ace-analysis', params, provider=ArtefactProvider(_fragment))
+    row = repo.one('select * from ace_analyses where id=?',
+                   (outcome['outputs']['analysis_document'],))
+    model = json.loads(row['semantic_model'])
+    assert model['backend_properties'] == {}
+
+
 def test_a_model_authored_analysis_hashes_like_a_parsed_one(repo, job, params, gateway, dispatch):
     """Otherwise no single G2 approval could bind both paths' output.
 

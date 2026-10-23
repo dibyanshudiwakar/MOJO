@@ -59,6 +59,21 @@ class ACEAnalysisAgent(BaseAgent):
         downstream could tell which flows came from which -- so a construct the
         parser does not understand looked identical to one the model decided was
         absent. Each file gets its own retry budget instead.
+
+        ``.properties`` is carved out of that before it ever reaches the model.
+        ``self.PROMPT`` names the file kinds it covers -- ``.msgflow``,
+        ``.subflow``, ``.esql``, ``.map``, ``.xslt``, ``.xsd``, ``.wsdl``,
+        ``.policyxml`` -- and ``.properties`` is not one of them, so asking it
+        anyway returns a schema-valid answer with nothing extracted, never
+        once failing in a way that would trip the parser fallback. Confirmed
+        live: ``backend_properties`` came back empty on every real analysis,
+        even though the real backend and test-harness URLs
+        (``<node>#<vendor>ServiceURL`` / ``<node>#testHarness<vendor>Url``) are
+        sitting right there in the file, in a fixed, confirmed naming
+        convention ``ACEParser._env_properties`` already parses exactly.
+        Folding it in directly, the same way the deterministic-only path does,
+        is strictly more reliable than an LLM re-deriving a convention it was
+        never told about -- this is a parsing problem, not a judgment one.
         """
         parser = service.parser
         # ValueError('repository_not_accessible') propagates: an unreadable path
@@ -67,17 +82,28 @@ class ACEAnalysisAgent(BaseAgent):
         # the pipeline then treated as a real analysis of a repository with
         # nothing in it.
         sources = parser.sources(path)
-        by_path = {rel: (text, ext) for rel, text, ext in sources}
+        properties = [(rel, text, ext) for rel, text, ext in sources if ext == '.properties']
+        constructs = [(rel, text, ext) for rel, text, ext in sources if ext != '.properties']
+        by_path = {rel: (text, ext) for rel, text, ext in constructs}
         skill = self._focused_skill(context, by_path)
         items = [(rel, {'path': rel, 'kind': ext, 'text': text})
-                 for rel, text, ext in sources]
+                 for rel, text, ext in constructs]
         fragments, provenance = produce_many(context, self.PROMPT, items, skill=skill)
         # The merge stays deterministic: it is list concatenation, and leaving
         # it in code is what stops the assembly inventing, dropping or
         # reordering a construct the per-file answers established.
         for fragment in fragments.values():
             self._literals_as_text(fragment)
-        return parser.merge([fragments[rel] for rel, _, _ in sources if rel in fragments]), provenance
+        model = parser.merge([fragments[rel] for rel, _, _ in constructs if rel in fragments])
+        for rel, text, ext in properties:
+            parser.fold(model, rel, text, ext)
+        # Folded deterministically, not asked of the model, but still real
+        # sources this analysis read -- counted in so sources_read reports the
+        # whole repository rather than silently undercounting by however many
+        # .properties files it has.
+        if properties:
+            provenance = dict(provenance, item_count=provenance.get('item_count', 0) + len(properties))
+        return model, provenance
 
     @staticmethod
     def _literals_as_text(fragment):
