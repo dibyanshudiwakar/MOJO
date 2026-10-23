@@ -98,6 +98,17 @@ PARAM_SOURCES = {
 # dependency graph (agent-to-agent only) has no way to express that.
 REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-baseline': 'FRAMEWORK'}
 
+# A service that is not in use should not be converted. Dormancy-intelligence has no
+# dependency of its own on the conversion, so these agents are made to wait for its verdict,
+# and when the verdict is "not used" they and everything built on their output are skipped.
+# code-generation and test-engineering are the two entry points; the rest follow them.
+UNUSED_CLASSIFICATIONS = ('DORMANT', 'INACTIVE')
+CONVERSION_AGENTS = ('code-generation', 'feedback', 'test-engineering', 'variance-analysis', 'rca', 'remediation')
+DORMANCY_GATED = {'code-generation': ('dormancy-intelligence',), 'test-engineering': ('dormancy-intelligence',)}
+#: Recorded on a step skipped for this reason. Unlike a deselected agent it must not
+#: trigger a lifecycle gate: the job stays where dormancy left it.
+DORMANT_SKIP = 'skip_kind:dormant'
+
 # A governance hold, derived from a step parked at an unapproved gate. Distinct
 # from the operator's PAUSED: an operator may undo their own pause, but only an
 # approver releases a hold, so the two must never be the same value.
@@ -480,6 +491,15 @@ class PipelineService:
             params = self._seed_params(agent_id, by_role, workspace_dir, service_name, package_name)
             add('AGENT', 'AGENT:' + agent_id, agent_id=agent_id, depends_on=deps, params=params)
 
+        # The conversion waits for dormancy's verdict. Added once every step exists, because the
+        # plan does not order a step ahead of one that nothing depends on.
+        for st in steps:
+            for d in DORMANCY_GATED.get(st['agent_id'], ()):
+                dep = step_id_by_key.get('AGENT:' + d)
+                have = json.loads(st['depends_on'])
+                if dep and dep not in have:
+                    st['depends_on'] = json.dumps(have + [dep])
+
         for skip in plan['skipped']:
             add('AGENT', 'AGENT:' + skip['agent_id'], agent_id=skip['agent_id'])
             steps[-1]['status'] = 'SKIPPED'
@@ -678,6 +698,24 @@ class PipelineService:
                       "error=? where id=? and status='RUNNING'",
                       (now(), 'pipeline_cancelled', run_id))
 
+    @staticmethod
+    def unused_reason(rows):
+        """Why this pipeline's conversion should be skipped, or '' if it should go ahead.
+
+        Only a *completed* dormancy step with an unused verdict counts; a missing, failed or
+        unfinished one never blocks the conversion. An operator forces it by setting
+        ``convert_unused`` on the code-generation step.
+        """
+        for r in rows:
+            if r['agent_id'] == 'code-generation' and json.loads(r['params'] or '{}').get('convert_unused'):
+                return ''
+        for r in rows:
+            if r['agent_id'] == 'dormancy-intelligence' and r['status'] == 'COMPLETED':
+                verdict = str(json.loads(r['outputs'] or '{}').get('classification') or '').upper()
+                if verdict in UNUSED_CLASSIFICATIONS:
+                    return 'dormancy classified the service as %s: it is not in use, so it is not converted' % verdict
+        return ''
+
     def _ready_steps(self, pipeline_id):
         """Steps whose dependencies are all satisfied and that can be scheduled.
 
@@ -692,8 +730,13 @@ class PipelineService:
         status = {r['id']: r['status'] for r in rows}
         ready = []
         cascade_skip = []
+        unused = self.unused_reason(rows)
+        dormant_skip = []
         for r in rows:
             if r['status'] != 'PENDING':
+                continue
+            if unused and r['agent_id'] in CONVERSION_AGENTS:
+                dormant_skip.append(r)
                 continue
             deps = json.loads(r['depends_on'] or '[]')
             dep_statuses = [status.get(d, 'PENDING') for d in deps]
@@ -703,6 +746,13 @@ class PipelineService:
                     cascade_skip.append(r)
                 else:
                     ready.append(r)
+        if dormant_skip:
+            with self.repo.connect() as c:
+                for r in dormant_skip:
+                    c.execute("update pipeline_steps set status='SKIPPED',error=?,updated_at=? where id=? and status='PENDING'",
+                              (DORMANT_SKIP + ';' + unused, now(), r['id']))
+            # Steps that waited on one of these cascade on the next pass.
+            return self._ready_steps(pipeline_id)
         # Apply cascade skips immediately so downstream steps see the SKIPPED
         # status on the next _ready_steps call.
         if cascade_skip:
@@ -1025,6 +1075,7 @@ class PipelineService:
             explicitly_disabled = {
                 r['agent_id'] for r in skipped_rows
                 if r['agent_id'] not in dependency_skipped
+                and not str(r['error'] or '').startswith(DORMANT_SKIP)
             }
             # Furthest lifecycle index reachable from the completed agents alone.
             max_completed_idx = max(
@@ -1132,6 +1183,7 @@ class PipelineService:
             explicitly_disabled = {
                 r['agent_id'] for r in skipped_rows
                 if r['agent_id'] not in dependency_skipped
+                and not str(r['error'] or '').startswith(DORMANT_SKIP)
             }
             max_completed_idx = max(
                 (_LIFECYCLE_IDX.get(AGENT_LIFECYCLE_TRANSITIONS.get(a, ''), -1) for a in completed),

@@ -339,3 +339,65 @@ def test_progress_counts_finished_and_skipped_steps(env):
                       ('s%d' % i, 'pp', i, 'agent', 'a%d' % i, st))
     assert pipelines.progress_of('pp') == {'steps_total': 4, 'steps_done': 2}
     assert pipelines.progress_of('missing') == {'steps_total': 0, 'steps_done': 0}
+
+
+# -- a service that is not in use is not converted --------------------------
+
+CONVERSION = ['repository-intake', 'dormancy-intelligence', 'ace-analysis', 'migration-specification', 'planning',
+              'code-generation', 'feedback', 'test-engineering', 'variance-analysis']
+
+
+def _dormancy_pipeline(env, classification, convert_unused=False):
+    repo, job, pipelines, _ = env
+    p = pipelines.create(job['id'], 'workspace/orders', {}, CONVERSION, 'tester@example.com')
+    steps = {s['agent_id']: s for s in pipelines.detail(p['id'])['steps'] if s['agent_id']}
+    with repo.connect() as c:
+        for agent in ('repository-intake', 'ace-analysis', 'migration-specification', 'planning'):
+            c.execute("update pipeline_steps set status='COMPLETED' where id=?", (steps[agent]['id'],))
+        c.execute("update pipeline_steps set status='COMPLETED',outputs=? where id=?",
+                  (json.dumps({'classification': classification}), steps['dormancy-intelligence']['id']))
+        if convert_unused:
+            c.execute("update pipeline_steps set params=? where id=?",
+                      (json.dumps({'convert_unused': True}), steps['code-generation']['id']))
+    return pipelines, p['id'], steps
+
+
+def test_code_generation_and_tests_wait_for_dormancy(env):
+    _, job, pipelines, _ = env
+    p = pipelines.create(job['id'], 'workspace/orders', {}, CONVERSION, 'tester@example.com')
+    steps = {s['agent_id']: s for s in p['steps'] if s['agent_id']}
+    dormancy = steps['dormancy-intelligence']['id']
+    assert dormancy in json.loads(steps['code-generation']['depends_on'])
+    assert dormancy in json.loads(steps['test-engineering']['depends_on'])
+
+
+@pytest.mark.parametrize('verdict', ['DORMANT', 'INACTIVE'])
+def test_an_unused_service_is_not_converted(env, verdict):
+    pipelines, pid, steps = _dormancy_pipeline(env, verdict)
+    ready, _rows = pipelines._ready_steps(pid)
+    by_agent = {s['agent_id']: s for s in pipelines.detail(pid)['steps'] if s['agent_id']}
+    for agent in ('code-generation', 'feedback', 'test-engineering', 'variance-analysis'):
+        assert by_agent[agent]['status'] == 'SKIPPED', agent
+        assert by_agent[agent]['error'].startswith('skip_kind:dormant;')
+        assert verdict in by_agent[agent]['error']
+    assert not [r for r in ready if r['agent_id'] in ('code-generation', 'test-engineering')]
+
+
+@pytest.mark.parametrize('verdict', ['ACTIVE', 'UNKNOWN', 'ALREADY_MIGRATED'])
+def test_a_used_or_undecided_service_is_converted(env, verdict):
+    pipelines, pid, steps = _dormancy_pipeline(env, verdict)
+    ready, _rows = pipelines._ready_steps(pid)
+    assert {r['agent_id'] for r in ready} >= {'code-generation', 'test-engineering'}
+
+
+def test_an_operator_can_force_an_unused_service_through(env):
+    pipelines, pid, steps = _dormancy_pipeline(env, 'DORMANT', convert_unused=True)
+    ready, _rows = pipelines._ready_steps(pid)
+    assert 'code-generation' in {r['agent_id'] for r in ready}
+
+
+def test_an_unfinished_dormancy_step_never_blocks_the_conversion(env):
+    repo, job, pipelines, _ = env
+    p = pipelines.create(job['id'], 'workspace/orders', {}, CONVERSION, 'tester@example.com')
+    rows = repo.rows('select * from pipeline_steps where pipeline_id=?', (p['id'],))
+    assert pipelines.unused_reason(rows) == ''
