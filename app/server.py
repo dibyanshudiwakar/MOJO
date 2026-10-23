@@ -225,16 +225,35 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
                             'severity': v['severity'], 'kind': v['kind'], 'disposition': v['disposition']}
                            for v in variances[:100]]}
         elif agent_id == 'rca':
-            causes = r.rows('select hypothesis,confidence,affected_scope,status from root_causes where job_id=? order by confidence desc', (job_id,))
-            a = {'title': 'Root Cause Analysis', 'format': 'rca',
-                 'hypotheses': [{'hypothesis': c['hypothesis'], 'confidence': c['confidence'],
-                                 'scope': c['affected_scope'], 'status': c['status']} for c in causes]}
+            causes = r.rows('select id,hypothesis,confidence,affected_scope,status,supporting_evidence,missing_evidence,variance_ids '
+                            'from root_causes where job_id=? order by confidence desc', (job_id,))
+            hypotheses = []
+            for c in causes:
+                scope = str(c['affected_scope'] or '')
+                parts = scope.split(':', 2) if scope.startswith('STATIC:') else []
+                support = json.loads(c['supporting_evidence'] or '[]')
+                hypotheses.append({
+                    'id': c['id'], 'hypothesis': c['hypothesis'], 'confidence': c['confidence'],
+                    'scope': scope, 'status': c['status'],
+                    'source': parts[1] if len(parts) == 3 else 'DIFFERENTIAL',
+                    'area': parts[2] if len(parts) == 3 else '',
+                    'missing_evidence': json.loads(c['missing_evidence'] or '[]'),
+                    'finding_count': len(support) if parts else len(json.loads(c['variance_ids'] or '[]')),
+                    'findings': support[:25] if parts else []})
+            a = {'title': 'Root Cause Analysis', 'format': 'rca', 'hypotheses': hypotheses}
         elif agent_id == 'remediation':
             rems = r.rows('select proposal,approved_pattern,regression_tests,status from remediations where job_id=? order by created_at desc', (job_id,))
-            a = {'title': 'Remediation Proposals', 'format': 'remediation',
+            a = {'title': 'Remediation', 'format': 'remediation',
                  'proposals': [{'proposal': rem['proposal'][:500], 'pattern': rem['approved_pattern'],
                                 'tests': json.loads(rem['regression_tests'] or '[]'), 'status': rem['status']}
                                for rem in rems]}
+            rep = r.one("select payload from validation_reports where job_id=? and report_type='REMEDIATION_REPORT' "
+                        'order by created_at desc limit 1', (job_id,))
+            if rep:
+                report = json.loads(rep['payload'] or '{}')
+                a['causes'] = report.get('causes', [])
+                a['gate'] = report.get('gate')
+                a['totals'] = report.get('totals', {})
         elif agent_id == 'governance':
             a = {'title': 'Governance Evaluation', 'format': 'governance',
                  'decision': outputs.get('allow_deny_decision', {}),

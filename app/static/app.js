@@ -2103,11 +2103,35 @@ function renderArtefact(art){
  // RCA
  if(art.format==='rca'){
   window._rcaArt=art;
-  html+=`<div class="plan-sections"><div class="plan-si" data-rca-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full RCA output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  const hyp=art.hypotheses||[];
+  const fromReports=hyp.filter(h=>h.source!=='DIFFERENTIAL'),fromRuns=hyp.filter(h=>h.source==='DIFFERENTIAL');
+  const top=hyp.length?Math.max(...hyp.map(h=>Number(h.confidence)||0)):0;
+  const missing=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-rca-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${hyp.length}</span><span class="plan-stat-l">Root Causes</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${fromReports.length}</span><span class="plan-stat-l">From Reports</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${fromRuns.length}</span><span class="plan-stat-l">From Test Runs</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${Math.round(top*100)}%</span><span class="plan-stat-l">Top Confidence</span></div></div>`;
+  let secs='';
+  if(hyp.length)secs+=row('causes','<circle cx="10" cy="10" r="7"/><line x1="10" y1="6" x2="10" y2="10"/><circle cx="10" cy="13" r=".6" fill="currentColor" stroke="none"/>','Root Causes',`${hyp.length} hypothes${hyp.length!==1?'es':'is'} with confidence and the evidence behind each`);
+  if(fromReports.length)secs+=row('findings','<path d="M4 3h9l3 3v11H4z"/><line x1="7" y1="9" x2="13" y2="9"/><line x1="7" y1="12" x2="13" y2="12"/>','Report Findings',`${fromReports.reduce((n,h)=>n+(h.finding_count||0),0)} partial or gap finding${fromReports.reduce((n,h)=>n+(h.finding_count||0),0)!==1?'s':''} from the parity and hardcoding reports`);
+  if(missing.length)secs+=row('missing','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Missing Evidence',`${missing.length} item${missing.length!==1?'s':''} that would raise confidence`);
+  secs+=`<div class="plan-si" data-rca-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full RCA output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
   return html}
  // Remediation
  if(art.format==='remediation'){
   window._remArt=art;
+  const causes=art.causes||[],tot=art.totals||{},gate=art.gate;
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-rem-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  const gv=gate?(gate.result==='kept'?'KEPT':'REVERTED'):'—';
+  if(causes.length){
+   const unfixed=causes.reduce((n,c)=>n+(c.unfixed||[]).length,0);
+   html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${causes.length}</span><span class="plan-stat-l">Root Causes</span></div><div class="plan-stat-chip ${tot.fixes_applied?'plan-stat-ok':''}"><span class="plan-stat-n">${tot.fixes_applied||0}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unfixed||tot.not_eligible?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unfixed+(tot.not_eligible||0)}</span><span class="plan-stat-l">Not Fixed</span></div><div class="plan-stat-chip ${gate?(gate.result==='kept'?'plan-stat-ok':'plan-stat-warn'):''}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.4px">${gv}</span><span class="plan-stat-l">Quality Gate</span></div></div>`;
+   let secs='';
+   if(tot.fixes_applied)secs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${tot.fixes_applied} change${tot.fixes_applied!==1?'s':''} made to the generated project`);
+   if(unfixed||tot.not_eligible)secs+=row('unfixed','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Not Fixed',`${unfixed} finding${unfixed!==1?'s':''} left open and ${tot.not_eligible||0} cause${(tot.not_eligible||0)!==1?'s':''} below the confidence bar`);
+   secs+=row('causes','<circle cx="10" cy="10" r="7"/><polyline points="7 10 9.5 12.5 13.5 7.5"/>','Root Causes',`what happened to each of the ${causes.length} root cause${causes.length!==1?'s':''}`);
+   secs+=`<div class="plan-si" data-rem-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full remediation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+   return html}
   html+=`<div class="plan-sections"><div class="plan-si" data-rem-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full remediation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
   return html}
  // Governance
@@ -2570,176 +2594,77 @@ function openVarModal(tab){
 
 
 // ==== Root Cause Analysis Output Modal =====================================
-function openRCAModal(tab){
- const art=window._rcaArt;if(!art)return;
- let m=document.getElementById('rcaModal');
+function _pctBar(v){const p=Math.round((Number(v)||0)*100);return `<div style="display:flex;align-items:center;gap:8px;min-width:110px"><div class="progress-bar" style="flex:1"><div class="progress-fill${p>=80?' darkgreen':p<50?' error':''}" style="width:${Math.max(p,p?4:0)}%"></div></div><span style="font-size:11px;min-width:30px">${p}%</span></div>`}
+function _statusBadge(st){const u=String(st||'').toUpperCase();return `<span class="badge badge-${u==='GAP'||u==='FAILED'||u==='REVERTED'?'error':u==='PARTIAL'||u==='NOT_ELIGIBLE'?'warning':u==='APPLIED'||u==='KEPT'||u==='REMEDIATED'?'success':'neutral'}">${esc(String(st||'—').replace(/_/g,' '))}</span>`}
+function _openOutputModal(id,closeId,title,sub,tabs,render,wire,tab,art){
+ let m=document.getElementById(id);
  if(!m){
-  m=document.createElement('div');m.id='rcaModal';m.className='plan-modal-bg';
+  m=document.createElement('div');m.id=id;m.className='plan-modal-bg';
   document.body.appendChild(m);
   m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const active=tabs.find(t=>t.key===tab)?tab:tabs[0].key;
  m.innerHTML=`<div class="plan-modal">
   <div class="plan-modal-hd">
-   <button class="plan-modal-back" id="rcamClose">← Back</button>
-   <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Root Cause Analysis — Raw Output</div>
-    <div class="plan-modal-sub">JSON · full RCA output</div>
-   </div>
-   <button id="rcamCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+   <button class="plan-modal-back" id="${closeId}">← Back</button>
+   <div class="plan-modal-hd-info"><div class="plan-modal-title">${esc(title)}</div><div class="plan-modal-sub">${sub}</div></div>
   </div>
-  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._rcaOutputs||art)}</div></div>
+  <div class="plan-modal-tabs">${tabs.map(t=>`<button class="plan-modal-tab${t.key===active?' active':''}" data-t="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}</div>
+  <div class="plan-modal-body" id="${id}Body">${render(art,active)}</div>
  </div>`;
  m.classList.add('open');
- document.getElementById('rcamClose').onclick=()=>m.classList.remove('open');
- const cpBtn=document.getElementById('rcamCopyJson');
- if(cpBtn)cpBtn.onclick=()=>{
-  const data=window._rcaOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+ document.getElementById(closeId).onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  document.getElementById(id+'Body').innerHTML=render(art,btn.dataset.t);wire(btn.dataset.t,art)})});
+ wire(active,art)}
+function _rawTab(label,btnId,data){return `<div class="plan-raw-tb"><span class="plan-raw-lbl">${esc(label)}</span><button id="${btnId}" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div>`}
+function _wireCopy(btnId,data){const b=document.getElementById(btnId);if(b)b.onclick=()=>{try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{b.textContent='Copied ✓';setTimeout(()=>{b.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function openRCAModal(tab){
+ const art=window._rcaArt;if(!art)return;
+ const hyp=art.hypotheses||[],reports=hyp.filter(h=>h.source!=='DIFFERENTIAL');
+ const missing=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+ const tabs=[hyp.length&&{key:'causes',label:'Root Causes',count:hyp.length},reports.length&&{key:'findings',label:'Report Findings',count:reports.reduce((n,h)=>n+(h.finding_count||0),0)},missing.length&&{key:'missing',label:'Missing Evidence',count:missing.length},{key:'raw',label:'Raw Output',count:null}].filter(Boolean);
+ _openOutputModal('rcaModal','rcamClose','Root Cause Analysis',`${hyp.length} root cause${hyp.length!==1?'s':''} · ${reports.length} from the variance-analysis reports`,tabs,renderRCATab,(t,a)=>{if(t==='raw')_wireCopy('rcamCopyJson',window._rcaOutputs||a)},tab,art)}
+function renderRCATab(art,tab){
+ const hyp=art.hypotheses||[];
+ if(tab==='causes')return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>Area</th><th>Root cause</th><th>Confidence</th><th>Findings</th><th>Status</th></tr></thead><tbody>${hyp.map(h=>`<tr><td><span class="badge badge-${h.source==='DIFFERENTIAL'?'neutral':'info'}">${esc(h.source==='DIFFERENTIAL'?'TEST RUN':h.source)}</span></td><td style="font-size:12px">${esc(h.area||'—')}</td><td style="font-size:12px;word-break:break-word;min-width:260px">${esc(h.hypothesis||'No hypothesis offered for this group')}</td><td>${_pctBar(h.confidence)}</td><td>${esc(String(h.finding_count??'—'))}</td><td>${_statusBadge(h.status)}</td></tr>`).join('')}</tbody></table></div>`;
+ if(tab==='findings'){
+  const groups=hyp.filter(h=>h.source!=='DIFFERENTIAL'&&(h.findings||[]).length);
+  if(!groups.length)return '<p class="authhint">No report findings.</p>';
+  return groups.map(h=>`<div class="artefact-sub" style="margin-top:14px">${esc(h.source)} · ${esc(h.area)} <span class="plan-tab-badge">${h.finding_count}</span></div><div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Status</th><th>IIB source</th><th>Migrated code</th><th>Remarks</th></tr></thead><tbody>${h.findings.map(f=>`<tr><td>${_statusBadge(f.status)}</td><td style="font-size:11px;word-break:break-all">${esc(f.iib_source||'—')}</td><td style="font-size:11px;word-break:break-all">${esc(f.ms_source||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(f.remarks||'')}</td></tr>`).join('')}</tbody></table></div>${h.finding_count>h.findings.length?`<p class="authhint">${h.finding_count-h.findings.length} more in the report.</p>`:''}`).join('');
+ }
+ if(tab==='missing'){
+  const items=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+  return `<ul class="artefact-list">${items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`}
+ if(tab==='raw')return _rawTab('JSON · full RCA output','rcamCopyJson',window._rcaOutputs||art);
+ return ''}
 
 // ==== Remediation Output Modal =============================================
 function openRemModal(tab){
  const art=window._remArt;if(!art)return;
- let m=document.getElementById('remModal');
- if(!m){
-  m=document.createElement('div');m.id='remModal';m.className='plan-modal-bg';
-  document.body.appendChild(m);
-  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
- m.innerHTML=`<div class="plan-modal">
-  <div class="plan-modal-hd">
-   <button class="plan-modal-back" id="remmClose">← Back</button>
-   <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Remediation — Raw Output</div>
-    <div class="plan-modal-sub">JSON · full remediation output</div>
-   </div>
-   <button id="remmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
-  </div>
-  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._remOutputs||art)}</div></div>
- </div>`;
- m.classList.add('open');
- document.getElementById('remmClose').onclick=()=>m.classList.remove('open');
- const cpBtn=document.getElementById('remmCopyJson');
- if(cpBtn)cpBtn.onclick=()=>{
-  const data=window._remOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
-
-// ==== Governance Output Modal ==============================================
-function openGovModal(tab){
- const art=window._govArt;if(!art)return;
- let m=document.getElementById('govModal');
- if(!m){
-  m=document.createElement('div');m.id='govModal';m.className='plan-modal-bg';
-  document.body.appendChild(m);
-  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
- m.innerHTML=`<div class="plan-modal">
-  <div class="plan-modal-hd">
-   <button class="plan-modal-back" id="govmClose">← Back</button>
-   <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Governance — Raw Output</div>
-    <div class="plan-modal-sub">JSON · full governance output</div>
-   </div>
-   <button id="govmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
-  </div>
-  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._govOutputs||art)}</div></div>
- </div>`;
- m.classList.add('open');
- document.getElementById('govmClose').onclick=()=>m.classList.remove('open');
- const cpBtn=document.getElementById('govmCopyJson');
- if(cpBtn)cpBtn.onclick=()=>{
-  const data=window._govOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
-
-// ==== Knowledge Evidence Output Modal ======================================
-function openKnwModal(tab){
- const art=window._knwArt;if(!art)return;
- let m=document.getElementById('knwModal');
- if(!m){
-  m=document.createElement('div');m.id='knwModal';m.className='plan-modal-bg';
-  document.body.appendChild(m);
-  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
- m.innerHTML=`<div class="plan-modal">
-  <div class="plan-modal-hd">
-   <button class="plan-modal-back" id="knwmClose">← Back</button>
-   <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Knowledge Evidence — Raw Output</div>
-    <div class="plan-modal-sub">JSON · full knowledge evidence output</div>
-   </div>
-   <button id="knwmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
-  </div>
-  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._knwOutputs||art)}</div></div>
- </div>`;
- m.classList.add('open');
- document.getElementById('knwmClose').onclick=()=>m.classList.remove('open');
- const cpBtn=document.getElementById('knwmCopyJson');
- if(cpBtn)cpBtn.onclick=()=>{
-  const data=window._knwOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
-
-// ==== Feedback Output Modal ===============================================
-function openFbkModal(tab){
- const art=window._fbkArt;if(!art)return;
- let m=document.getElementById('fbkModal');
- if(!m){
-  m=document.createElement('div');m.id='fbkModal';m.className='plan-modal-bg';
-  document.body.appendChild(m);
-  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
- const fixes=art.applied_fixes||[],passes=art.passes||[],unresolved=art.unresolved||[];
- const qs=art.quality_status||'';
- const TABS=[
-  fixes.length&&{key:'fixes',label:'Applied Fixes',count:fixes.length},
-  passes.length&&{key:'passes',label:'Repair Passes',count:passes.length},
-  unresolved.length&&{key:'unresolved',label:'Unresolved',count:unresolved.length},
-  {key:'raw',label:'Raw Output',count:null},
- ].filter(Boolean);
- const activeTab=TABS.find(t=>t.key===tab)?tab:TABS[0].key;
- const qBadgeCls=qs==='PASS'?'badge-success':qs?'badge-error':'badge-warning';
- m.innerHTML=`<div class="plan-modal">
-  <div class="plan-modal-hd">
-   <button class="plan-modal-back" id="fbkmClose">← Back</button>
-   <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Code Quality Feedback</div>
-    <div class="plan-modal-sub">${fixes.length} fix${fixes.length!==1?'es':''} applied · ${unresolved.length} unresolved${qs?' · Quality: <span class="badge '+qBadgeCls+'">'+esc(qs)+'</span>':''}</div>
-   </div>
-  </div>
-  <div class="plan-modal-tabs">
-   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-fbkm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
-  </div>
-  <div class="plan-modal-body" id="fbkmBody">${renderFbkModalTab(art,activeTab)}</div>
- </div>`;
- m.classList.add('open');
- document.getElementById('fbkmClose').onclick=()=>m.classList.remove('open');
- m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
-  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('fbkmBody').innerHTML=renderFbkModalTab(art,btn.dataset.fbkmTab);
-  wireFbkModalTab(btn.dataset.fbkmTab,art)})});
- wireFbkModalTab(activeTab,art)}
-function renderFbkModalTab(art,tab){
- const str=v=>Array.isArray(v)?v.join(', '):(v==null?'':String(v));
+ const causes=art.causes||[],tot=art.totals||{};
+ const unfixed=causes.reduce((n,c)=>n+(c.unfixed||[]).length,0);
+ if(!causes.length){_openOutputModal('remModal','remmClose','Remediation','JSON · full remediation output',[{key:'raw',label:'Raw Output',count:null}],renderRemTab,(t,a)=>{if(t==='raw')_wireCopy('remmCopyJson',window._remOutputs||a)},'raw',art);return}
+ const tabs=[tot.fixes_applied&&{key:'fixes',label:'Applied Fixes',count:tot.fixes_applied},(unfixed||tot.not_eligible)&&{key:'unfixed',label:'Not Fixed',count:unfixed+(tot.not_eligible||0)},{key:'causes',label:'Root Causes',count:causes.length},{key:'raw',label:'Raw Output',count:null}].filter(Boolean);
+ const g=art.gate;
+ _openOutputModal('remModal','remmClose','Remediation',`${tot.fixes_applied||0} fix${(tot.fixes_applied||0)!==1?'es':''} applied · ${causes.length} root cause${causes.length!==1?'s':''}${g?' · Quality gate: <span class="badge badge-'+(g.result==='kept'?'success':'warning')+'">'+(g.result==='kept'?'NO WORSE':'REVERTED')+'</span>':''}`,tabs,renderRemTab,(t,a)=>{if(t==='raw')_wireCopy('remmCopyJson',window._remOutputs||a)},tab,art)}
+function renderRemTab(art,tab){
+ const causes=art.causes||[];
+ const label=c=>`${c.source==='DIFFERENTIAL'?'TEST RUN':c.source}${c.area?' · '+c.area:''}`;
  if(tab==='fixes'){
-  const fixes=art.applied_fixes||[];
-  if(!fixes.length)return'<p class="authhint">No fixes were applied.</p>';
-  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>File</th><th>Check</th><th>What changed</th></tr></thead><tbody>${fixes.map(f=>`<tr><td style="font-family:monospace;font-size:11px;word-break:break-all">${esc(str(f.path))}</td><td><span class="badge badge-info">${esc(str(f.check))}</span></td><td style="font-size:12px">${esc(str(f.action))}</td></tr>`).join('')}</tbody></table></div>`}
- if(tab==='passes'){
-  const passes=art.passes||[];
-  if(!passes.length)return'<p class="authhint">No repair passes were needed.</p>';
-  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Pass</th><th>Failed checks</th><th>Fixes</th><th>Model</th></tr></thead><tbody>${passes.map(p=>`<tr><td>${esc(str(p.pass))}</td><td style="font-size:12px">${esc(str(Array.isArray(p.failed)?p.failed.length:p.failed))}${Array.isArray(p.failed)&&p.failed.length?'<br><small style="color:var(--text-3)">'+esc(p.failed.slice(0,6).join(', '))+'</small>':''}</td><td>${esc(str(p.fixes))}</td><td style="font-size:12px">${esc(str(p.model||'—'))}</td></tr>`).join('')}</tbody></table></div>`}
- if(tab==='unresolved'){
-  const items=art.unresolved||[];
-  if(!items.length)return'<p class="authhint">Nothing is left unresolved.</p>';
-  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Kind</th><th>Detail</th><th>Owner</th></tr></thead><tbody>${items.map(u=>`<tr><td><span class="badge badge-warning">${esc(str(u.kind))}</span></td><td style="font-size:12px;word-break:break-word">${esc(str(u.detail))}</td><td style="font-size:12px">${esc(str(u.owner||'—'))}</td></tr>`).join('')}</tbody></table></div>`}
- if(tab==='raw'){
-  const data=window._fbkOutputs||art;
-  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full feedback output</span><button id="fbkmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div>`}
- return''}
-function wireFbkModalTab(tab,art){
- if(tab!=='raw')return;
- const btn=document.getElementById('fbkmCopyJson');
- if(btn)btn.onclick=()=>{const data=window._fbkOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{btn.textContent='Copied ✓';setTimeout(()=>{btn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+  const rows=causes.flatMap(c=>(c.applied||[]).map(f=>({c,f})));
+  if(!rows.length)return '<p class="authhint">No fixes were applied.</p>';
+  const gate=art.gate?`<p class="authhint">${esc(art.gate.basis||'')}. Open checks before: ${(art.gate.open_before||[]).length}, after: ${(art.gate.open_after||[]).length}.</p>`:'';
+  return `${gate}<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>File</th><th>What changed</th><th>Verdict</th></tr></thead><tbody>${rows.map(({c,f})=>`<tr><td style="font-size:12px">${esc(label(c))}</td><td style="font-family:monospace;font-size:11px;word-break:break-all">${esc(f.path)}</td><td style="font-size:12px">${esc(f.action)}</td><td>${_statusBadge(c.verdict==='kept'?'KEPT':c.verdict||'APPLIED')}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='unfixed'){
+  const rows=[...causes.filter(c=>!c.eligible).map(c=>({c,ref:c.hypothesis||label(c),why:`confidence ${Math.round((c.confidence||0)*100)}% is below the ${Math.round((c.threshold||0)*100)}% bar${(c.unmet||[]).length?'; unmet: '+c.unmet.join(', '):''}`})),
+   ...causes.flatMap(c=>(c.unfixed||[]).map(u=>({c,ref:u.ref,why:u.reason})))];
+  if(!rows.length)return '<p class="authhint">Nothing was left unfixed.</p>';
+  return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Item</th><th>Why it is still open</th></tr></thead><tbody>${rows.map(({c,ref,why})=>`<tr><td style="font-size:12px">${esc(label(c))}</td><td style="font-size:12px;word-break:break-word">${esc(ref||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(why||'—')}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='causes')return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Confidence</th><th>Outcome</th><th>Fixes</th><th>Tests</th></tr></thead><tbody>${causes.map(c=>`<tr><td style="font-size:12px;min-width:240px"><b>${esc(label(c))}</b><br>${esc(c.hypothesis||'')}</td><td>${_pctBar(c.confidence)}</td><td>${_statusBadge(String(c.outcome||'').toUpperCase())}</td><td>${(c.applied||[]).length}</td><td style="font-size:11px">${esc((c.tests||[]).join(', '))}</td></tr>`).join('')}</tbody></table></div>`;
+ if(tab==='raw')return _rawTab('JSON · full remediation output','remmCopyJson',window._remOutputs||art);
+ return ''}
 
 // ==== Code Generation Output Modal ========================================
 function openCodeModal(tab){
