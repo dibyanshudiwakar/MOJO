@@ -60,6 +60,8 @@ const initials=n=>String(n||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').
 const ADMIN_ONLY_ROLES=['GOVERNANCE_ADMIN','AI_GOVERNANCE_ADMIN','AGENT_REGISTRY_ADMIN','GATE_ADMIN','CONNECTOR_ADMIN','CLARIFICATION_ADMIN','AUDITOR'];
 const ADMIN_HIDDEN_PAGES=['dashboard','metrics','pipelines','new-migration','clarifications','approval-inbox','approvals','evidence','events','specifications','plans','generated','delivery-operations','versions','quality-runs','agent-templates','jobs'];
 function isAdminOnly(){const r=(session&&session.user&&session.user.roles)||[];return r.length>0&&r.every(x=>ADMIN_ONLY_ROLES.includes(x))}
+// Only an administrator account lands on Access. Everyone else -- including someone
+// who also holds an administrative role alongside operator roles -- lands on Dashboard.
 function homePage(){return isAdminOnly()?'access':'dashboard'}
 function renderIdentity(){
  const chip=$('#userChip'),gh=$('#ghIndicator'),newBtn=$('#new');
@@ -197,6 +199,8 @@ async function afterLogin(){
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
  if(isAdminOnly()){try{history.replaceState(null,'','#access')}catch(e){location.hash='access'}render();notifStartPolling();return}
+ // Every other account starts on Dashboard, whatever hash the browser kept.
+ if((location.hash||'').slice(1)!=='dashboard'&&!isAdminOnly()){try{history.replaceState(null,'','#dashboard')}catch(e){location.hash='dashboard'}}
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
  // Always re-verify the stored GitHub token regardless of its last-known status.
  // A token that was CONNECTED in a previous session may have been revoked.
