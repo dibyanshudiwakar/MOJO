@@ -2123,11 +2123,16 @@ function renderArtefact(art){
  // Feedback
  if(art.format==='feedback'){
   window._fbkArt=art;
-  const fixCount=(art.applied_fixes||[]).length;
-  const unresolvedCount=(art.unresolved||[]).length;
+  const fixes=art.applied_fixes||[],unresolved=art.unresolved||[],passes=art.passes||[];
   const qs=art.quality_status||'';
-  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${fixCount}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unresolvedCount>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unresolvedCount}</span><span class="plan-stat-l">Unresolved</span></div><div class="plan-stat-chip ${qs==='PASS'?'plan-stat-ok':qs?'plan-stat-warn':''}"><span class="plan-stat-n">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div></div>`;
-  html+=`<div class="plan-sections"><div class="plan-si" data-fbk-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full feedback output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-fbk-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${fixes.length}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unresolved.length?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unresolved.length}</span><span class="plan-stat-l">Unresolved</span></div><div class="plan-stat-chip ${qs==='PASS'?'plan-stat-ok':qs?'plan-stat-warn':''}"><span class="plan-stat-n">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${passes.length}</span><span class="plan-stat-l">Repair Passes</span></div></div>`;
+  let fSecs='';
+  if(fixes.length)fSecs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${fixes.length} change${fixes.length!==1?'s':''} made to the generated project`);
+  if(passes.length)fSecs+=row('passes','<polyline points="4 10 8 14 16 6"/>','Repair Passes',`${passes.length} pass${passes.length!==1?'es':''} run against the quality gate`);
+  if(unresolved.length)fSecs+=row('unresolved','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Unresolved',`${unresolved.length} item${unresolved.length!==1?'s':''} handed to the remediation agent`);
+  fSecs+=`<div class="plan-si" data-fbk-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full feedback output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${fSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
   return html}
  // Report-style sections (intake, dormancy)
  if(art.sections){
@@ -2681,23 +2686,60 @@ function openFbkModal(tab){
   document.body.appendChild(m);
   m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const fixes=art.applied_fixes||[],passes=art.passes||[],unresolved=art.unresolved||[];
+ const qs=art.quality_status||'';
+ const TABS=[
+  fixes.length&&{key:'fixes',label:'Applied Fixes',count:fixes.length},
+  passes.length&&{key:'passes',label:'Repair Passes',count:passes.length},
+  unresolved.length&&{key:'unresolved',label:'Unresolved',count:unresolved.length},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:TABS[0].key;
+ const qBadgeCls=qs==='PASS'?'badge-success':qs?'badge-error':'badge-warning';
  m.innerHTML=`<div class="plan-modal">
   <div class="plan-modal-hd">
    <button class="plan-modal-back" id="fbkmClose">← Back</button>
    <div class="plan-modal-hd-info">
-    <div class="plan-modal-title">Code Quality Feedback — Raw Output</div>
-    <div class="plan-modal-sub">JSON · full feedback output</div>
+    <div class="plan-modal-title">Code Quality Feedback</div>
+    <div class="plan-modal-sub">${fixes.length} fix${fixes.length!==1?'es':''} applied · ${unresolved.length} unresolved${qs?' · Quality: <span class="badge '+qBadgeCls+'">'+esc(qs)+'</span>':''}</div>
    </div>
-   <button id="fbkmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
   </div>
-  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._fbkOutputs||art)}</div></div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-fbkm-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="fbkmBody">${renderFbkModalTab(art,activeTab)}</div>
  </div>`;
  m.classList.add('open');
  document.getElementById('fbkmClose').onclick=()=>m.classList.remove('open');
- const cpBtn=document.getElementById('fbkmCopyJson');
- if(cpBtn)cpBtn.onclick=()=>{
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('fbkmBody').innerHTML=renderFbkModalTab(art,btn.dataset.fbkmTab);
+  wireFbkModalTab(btn.dataset.fbkmTab,art)})});
+ wireFbkModalTab(activeTab,art)}
+function renderFbkModalTab(art,tab){
+ const str=v=>Array.isArray(v)?v.join(', '):(v==null?'':String(v));
+ if(tab==='fixes'){
+  const fixes=art.applied_fixes||[];
+  if(!fixes.length)return'<p class="authhint">No fixes were applied.</p>';
+  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>File</th><th>Check</th><th>What changed</th></tr></thead><tbody>${fixes.map(f=>`<tr><td style="font-family:monospace;font-size:11px;word-break:break-all">${esc(str(f.path))}</td><td><span class="badge badge-info">${esc(str(f.check))}</span></td><td style="font-size:12px">${esc(str(f.action))}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='passes'){
+  const passes=art.passes||[];
+  if(!passes.length)return'<p class="authhint">No repair passes were needed.</p>';
+  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Pass</th><th>Failed checks</th><th>Fixes</th><th>Model</th></tr></thead><tbody>${passes.map(p=>`<tr><td>${esc(str(p.pass))}</td><td style="font-size:12px">${esc(str(Array.isArray(p.failed)?p.failed.length:p.failed))}${Array.isArray(p.failed)&&p.failed.length?'<br><small style="color:var(--text-3)">'+esc(p.failed.slice(0,6).join(', '))+'</small>':''}</td><td>${esc(str(p.fixes))}</td><td style="font-size:12px">${esc(str(p.model||'—'))}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='unresolved'){
+  const items=art.unresolved||[];
+  if(!items.length)return'<p class="authhint">Nothing is left unresolved.</p>';
+  return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Kind</th><th>Detail</th><th>Owner</th></tr></thead><tbody>${items.map(u=>`<tr><td><span class="badge badge-warning">${esc(str(u.kind))}</span></td><td style="font-size:12px;word-break:break-word">${esc(str(u.detail))}</td><td style="font-size:12px">${esc(str(u.owner||'—'))}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='raw'){
   const data=window._fbkOutputs||art;
-  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full feedback output</span><button id="fbkmCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div>`}
+ return''}
+function wireFbkModalTab(tab,art){
+ if(tab!=='raw')return;
+ const btn=document.getElementById('fbkmCopyJson');
+ if(btn)btn.onclick=()=>{const data=window._fbkOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{btn.textContent='Copied ✓';setTimeout(()=>{btn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
 
 // ==== Code Generation Output Modal ========================================
 function openCodeModal(tab){
