@@ -3,7 +3,7 @@
 function wsName(p){if(!p)return'';const s=String(p).replace(/[/\\]+$/,'');const i=Math.max(s.lastIndexOf('/'),s.lastIndexOf('\\'));return i>=0?s.slice(i+1):s}
 function fmtDt(v){if(!v||v==='—')return v||'—';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function fmtTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
-function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
+function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning',RUNNING:'info',PAUSED:'warning',WAITING_CLARIFICATION:'warning',CANCELLED:'error',PENDING:'neutral',CONFIRMED:'neutral'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
 function progressFillClass(state,pct){const s=String(state||'').toUpperCase();const p=s in STATE_PCT?STATE_PCT[s]:(pct||0);if(s==='COMPLETED'||p>=100)return ' darkgreen';if(s==='FAILED'||s==='ROLLED_BACK')return ' error';if(s==='READY_FOR_PROMOTION')return ' done';if(s==='TEST_PASSED')return ' cyan';if(s.startsWith('WAITING_'))return ' orange';if(s==='PLAN_APPROVED')return ' orange';if(s==='REMEDIATING')return ' error';if(['DIFFERENTIAL_TESTING','VARIANCE_REVIEW'].includes(s))return ' cyan';if(['FRAMEWORK_BASELINED','ACE_ANALYSED'].includes(s))return ' purple';if(['INTAKE_VALIDATED','DORMANCY_ASSESSED'].includes(s))return ' teal';if(['IMPLEMENTING','BUILD_VALIDATED'].includes(s))return ' blue';if(s==='CREATED')return ' neutral';return ''}
 const STATE_PCT={'CREATED':0,'INTAKE_VALIDATED':8,'DORMANCY_ASSESSED':17,'FRAMEWORK_BASELINED':25,'ACE_ANALYSED':33,'PLAN_APPROVED':42,'IMPLEMENTING':50,'BUILD_VALIDATED':58,'DIFFERENTIAL_TESTING':67,'VARIANCE_REVIEW':75,'REMEDIATING':83,'READY_FOR_PROMOTION':92,'COMPLETED':100,'WAITING_G0':25,'WAITING_G1':25,'WAITING_G2':33,'WAITING_G3':42,'WAITING_G4':75,'WAITING_G5':92};
 function dispPct(state,pct){const s=String(state||'').toUpperCase();if(s in STATE_PCT)return STATE_PCT[s];return pct||0}
@@ -55,10 +55,19 @@ function notice(m,b=false){
 }
 let session=null,githubState=null;
 const initials=n=>String(n||'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
+// An administrator account configures the platform and does not operate migrations:
+// no pipelines, approvals or clarifications, and no GitHub connection to make.
+const DEFAULT_ROLE_NAME='MIGRATION_OPERATOR';
+const ADMIN_ONLY_ROLES=['GOVERNANCE_ADMIN','AI_GOVERNANCE_ADMIN','AGENT_REGISTRY_ADMIN','GATE_ADMIN','CONNECTOR_ADMIN','CLARIFICATION_ADMIN','AUDITOR'];
+const ADMIN_HIDDEN_PAGES=['dashboard','metrics','pipelines','new-migration','clarifications','approval-inbox','approvals','evidence','events','specifications','plans','generated','delivery-operations','versions','quality-runs','agent-templates','jobs'];
+function isAdminOnly(){const r=(session&&session.user&&session.user.roles)||[];return r.length>0&&r.every(x=>ADMIN_ONLY_ROLES.includes(x))}
+// Only an administrator account lands on Access. Everyone else -- including someone
+// who also holds an administrative role alongside operator roles -- lands on Dashboard.
+function homePage(){return isAdminOnly()?'access':'dashboard'}
 function renderIdentity(){
  const chip=$('#userChip'),gh=$('#ghIndicator'),newBtn=$('#new');
  if(!session){chip.hidden=true;gh.hidden=true;newBtn.hidden=true;$('#userMenu').hidden=true;return}
- const u=session.user;chip.hidden=false;newBtn.hidden=false;
+ const u=session.user;chip.hidden=false;newBtn.hidden=isAdminOnly();
  $('#userAvatar').textContent=initials(u.name);$('#userName').textContent=u.name;$('#userRole').textContent=u.role.replaceAll('_',' ');
  $('#menuName').textContent=u.name;$('#menuEmail').textContent=u.email;
  const c=claimsOf(token()),mins=c?Math.floor(((c.exp||0)*1000-Date.now())/60000):0;
@@ -70,6 +79,7 @@ function renderIdentity(){
  // merely whether a URL and token happen to be stored.
  const s=(githubState&&githubState.status)||'NOT_CONFIGURED';
  const look={CONNECTED:['ok','GitHub connected'],FAILED:['bad','GitHub error'],UNVERIFIED:['warn','GitHub unverified'],NOT_CONFIGURED:['warn','GitHub not connected']}[s]||['warn','GitHub'];
+ if(isAdminOnly()){gh.hidden=true;return}
  gh.hidden=false;gh.className='ghchip '+look[0];
  if(s==='CONNECTED'&&githubState.account_login){
   gh.innerHTML=`<span class="ghchip-label">GitHub</span><span class="ghchip-sep">·</span><span class="ghchip-acct">${esc(githubState.account_login)}</span>`;
@@ -140,29 +150,25 @@ function initRoleSelect(){
  if(!window.__rselBound){window.__rselBound=true;
   document.addEventListener('click',e=>{const w=document.getElementById('roleSel');if(w&&!w.contains(e.target))rsClose()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape')rsClose()})}}
+// The sign-in page's figures come from the platform: the agents and gates it actually has.
+function fillPlatformFigures(){
+ api('/api/v2/auth/platform').then(d=>{
+  const set=(id,v)=>{const el=$('#'+id);if(el)el.textContent=v};
+  set('authStatAgents',d.agents);set('authStatGates',d.gates);set('authStatAudit',d.audit_events.toLocaleString('en-US'));
+  set('authListAgents',d.agents);set('authListGates',d.gates)}).catch(()=>{})}
 function authScreen(mode,message,bad){
  $('#metrics').innerHTML='';$('#nav').innerHTML='';$('#title').textContent=mode==='signup'?'Create account':'Sign in';$('#panelBackdrop').classList.remove('open');$('#outputPanel').classList.remove('open');document.body.classList.add('auth-mode');
- const signup=mode==='signup';
- $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Migration Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n">13</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n">6</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n">100%</div><div class="auth-stat-l">Audit&nbsp;Trail</div></div></div><ul class="auth-panel-list"><li>13 specialized AI migration agents</li><li>6-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Migration Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Gate approver roles you tick are requests until an administrator approves them.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span class="rsel-input-area"><span class="rsel-chips" id="rselChips"></span><span class="rsel-placeholder" id="roleTriggerText">Select one or more roles…</span></span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><div class="rsel-search-wrap"><input type="text" class="rsel-search" id="roleSearch" placeholder="Search roles…" autocomplete="off" spellcheck="false"></div><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt" id="roleAllTxt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div><div class="rsel-panel-ft" id="rolePanelFt"><button type="button" class="rsel-clear-btn" id="roleClearBtn">Clear</button><button type="button" class="rsel-save-btn" id="roleSaveBtn">Save</button></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap">${signup?'Already registered? <button type="button" id="swapAuth">Sign in</button>':'No account yet? <button type="button" id="swapAuth">Create one</button>'}</p></div></div></div></div>`;
- $('#swapAuth').onclick=()=>authScreen(signup?'login':'signup');
- if(signup)initRoleSelect();
- $('#authForm').onsubmit=async e=>{
+ const signup=false; // self-registration is gone: an administrator creates profiles on the Access page
+ $('#view').innerHTML=`<div class="auth-page"><div class="auth-panel"><div class="auth-panel-deco" aria-hidden="true"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 600' fill='none' stroke='white' preserveAspectRatio='xMidYMid slice'><circle cx='460' cy='70' r='210' stroke-width='1' stroke-dasharray='8 18'/><rect x='322' y='-12' width='198' height='182' rx='1.5' stroke-width='0.8'/><line x1='362' y1='22' x2='480' y2='22' stroke-width='0.7'/><line x1='362' y1='22' x2='362' y2='138' stroke-width='0.7'/><line x1='356' y1='22' x2='368' y2='22' stroke-width='0.7'/><line x1='362' y1='16' x2='362' y2='28' stroke-width='0.7'/><line x1='-8' y1='558' x2='198' y2='382' stroke-width='0.6'/><polyline points='-8,528 78,528 78,476 162,476 162,542 208,542' stroke-width='0.9'/><circle cx='78' cy='528' r='3.5' fill='white' stroke='none'/><circle cx='162' cy='476' r='3.5' fill='white' stroke='none'/><circle cx='26' cy='314' r='22' stroke-width='0.7' stroke-dasharray='3 6'/><line x1='0' y1='314' x2='52' y2='314' stroke-width='0.65'/><line x1='26' y1='290' x2='26' y2='338' stroke-width='0.65'/><polyline points='432,562 468,562 468,600' stroke-width='1.3'/></svg></div><div class="auth-panel-inner"><div class="auth-panel-logo"><div class="auth-panel-logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><span>ACE Migration Accelerator</span></div><h1 class="auth-panel-headline">Enterprise ACE to<br>Spring Boot Migration</h1><p class="auth-panel-desc">AI-driven agents, governed workflows and full audit traceability — purpose-built for enterprise modernisation at scale.</p><div class="auth-panel-stats"><div class="auth-stat"><div class="auth-stat-n" id="authStatAgents">—</div><div class="auth-stat-l">AI&nbsp;Agents</div></div><div class="auth-stat"><div class="auth-stat-n" id="authStatGates">—</div><div class="auth-stat-l">Gov&nbsp;Gates</div></div><div class="auth-stat"><div class="auth-stat-n" id="authStatAudit">—</div><div class="auth-stat-l">Audit&nbsp;Events</div></div></div><ul class="auth-panel-list"><li><span id="authListAgents">—</span> specialized AI migration agents</li><li><span id="authListGates">—</span>-gate governance framework</li><li>Automated code generation &amp; testing</li><li>Full audit trail &amp; evidence package</li></ul><div class="auth-panel-badge">ACE · Enterprise Platform · CVS Health</div></div></div><div class="auth-right"><div class="authcard"><div class="auth-brand"><div class="auth-brand-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="6" x2="14" y2="6"/><line x1="2" y1="12" x2="14" y2="12"/><line x1="2" y1="18" x2="14" y2="18"/><polyline points="17 6 22 12 17 18"/></svg></div><div><div class="auth-brand-name">ACE Migration Accelerator</div><div class="auth-brand-sub">ACE · Enterprise Platform</div></div></div><div class="auth-body">${message?`<div class="notice ${bad?'bad':''}">${esc(message)}</div>`:''}<div class="authhead"><h2>${signup?'Create your account':'Welcome back'}</h2><p>${signup?'Registration stores your details in the factory database. Gate approver roles you tick are requests until an administrator approves them.':'Sign in with the email and password registered for this factory.'}</p></div><form id="authForm" class="authform">${signup?`<label>Full name<input name="name" required minlength="2" autocomplete="name" placeholder="Jane Smith"></label><div class="auth-roles-section"><span class="auth-roles-label">Roles</span><div class="rsel" id="roleSel"><button type="button" class="rsel-trigger placeholder" id="roleTrigger" aria-haspopup="true" aria-expanded="false"><span class="rsel-input-area"><span class="rsel-chips" id="rselChips"></span><span class="rsel-placeholder" id="roleTriggerText">Select one or more roles…</span></span><svg class="rsel-caret" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button><div class="rsel-panel" id="rolePanel" hidden><div class="rsel-search-wrap"><input type="text" class="rsel-search" id="roleSearch" placeholder="Search roles…" autocomplete="off" spellcheck="false"></div><label class="rsel-opt rsel-opt-all"><input type="checkbox" id="roleAll"><span class="rsel-box"></span><span class="rsel-txt" id="roleAllTxt">Select all</span></label><div class="rsel-list" id="roleCheckboxes"></div><div class="rsel-panel-ft" id="rolePanelFt"><button type="button" class="rsel-clear-btn" id="roleClearBtn">Clear</button><button type="button" class="rsel-save-btn" id="roleSaveBtn">Save</button></div></div></div><p class="authhint">Pick one or more. Approver roles are granted by an administrator after registration.</p></div>`:''}<label>Email<input name="email" type="email" required autocomplete="${signup?'email':'username'}" spellcheck="false" placeholder="you@cvshealth.com"></label><label>Password<input name="password" type="password" required minlength="12" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'Min. 12 characters':'••••••••••••'}"></label>${signup?'<p class="authhint">Minimum 12 characters.</p>':''}<p class="authhint bad" id="authFormError"></p><button id="authSubmit">${signup?'Create account':'Sign in'}</button></form><p class="authswap"></p></div></div></div></div>`;
+  $('#authForm').onsubmit=async e=>{
   e.preventDefault();const btn=$('#authSubmit'),err=$('#authFormError');const f=Object.fromEntries(new FormData(e.target));
   btn.disabled=true;err.textContent='';
   try{
-   if(signup){
-    // Collect all checked role checkboxes into a roles array.
-    const ticked=[...document.querySelectorAll('#roleCheckboxes input[name="roles"]:checked')];
-    const checkedRoles=ticked.filter(cb=>!cb.dataset.request).map(cb=>cb.value);
-    const requested=ticked.filter(cb=>cb.dataset.request).map(cb=>cb.value);
-    if(!checkedRoles.length){err.textContent='Select at least one working role; approver roles are requested in addition.';btn.disabled=false;return}
-    const payload={name:f.name,email:f.email,password:f.password,roles:checkedRoles,requested_roles:requested};
-    await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify(payload)});
-    return authScreen('login','Account created. Sign in to continue.')}
    const out=await api('/api/v2/auth/login',{method:'POST',body:JSON.stringify({email:f.email,password:f.password})});
    sessionStorage.setItem('access_token',out.access_token);session={user:out.user};
    await afterLogin()
   }catch(x){err.textContent=friendly(x.message);btn.disabled=false}};
+ fillPlatformFigures();
 }
 function friendly(code){
  const m={invalid_credentials:'Email or password is incorrect.',email_already_registered:'That email is already registered.',
@@ -189,6 +195,13 @@ async function afterLogin(){
   session={user:me.user};githubState=me.integrations.github}
  catch(e){if(e.reauth){return signOut('Your session is no longer valid. Sign in again.',true)}}
  nav();renderIdentity();
+
+ if(isAdminOnly()){try{history.replaceState(null,'','#access')}catch(e){location.hash='access'}
+  // Set explicitly even when the address already reads #access, so a route left over from the
+  // previous session can never be what an administrator lands on.
+  render();notifStartPolling();return}
+ // Every other account starts on Dashboard, whatever hash the browser kept.
+ if((location.hash||'').slice(1)!=='dashboard'&&!isAdminOnly()){try{history.replaceState(null,'','#dashboard')}catch(e){location.hash='dashboard'}}
  if(!githubState||!githubState.configured)return openGithub('Add your GitHub URL and token to continue.');
  // Always re-verify the stored GitHub token regardless of its last-known status.
  // A token that was CONNECTED in a previous session may have been revoked.
@@ -247,6 +260,9 @@ async function signOut(message,bad){
  // defeating the entire point of storing it per account. Disconnecting is now
  // a deliberate action (the Disconnect button in the GitHub dialog).
  sessionStorage.removeItem('access_token');forgetGithubToken();session=null;githubState=null;notifStopPolling();
+ // The page the person left must not survive the session: a stale #pipelines/<id> in the
+ // address bar sent the next sign-in to that route instead of its own landing page.
+ try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
  // The topbar markup is static, so an open notification panel would still be
  // open on the next sign-in. Reset it with the rest of the session state.
  const dd=$('#notifDropdown');if(dd)dd.hidden=true;
@@ -309,15 +325,17 @@ const NAV_GROUPS=[
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
- $('#nav').innerHTML=NAV_GROUPS.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
+ const admin=isAdminOnly();
+ const groups=admin?NAV_GROUPS.map(g=>({...g,items:g.items.filter(it=>!ADMIN_HIDDEN_PAGES.includes(it.page))})).filter(g=>g.items.length):NAV_GROUPS;
+ $('#nav').innerHTML=groups.map(g=>`<div class="nav-group"><div class="nav-group-label">${esc(g.label)}</div>${g.items.map(it=>`<button class="nav-item" data-p="${esc(it.page)}">${NAV_ICON[it.page]||_defIcon}${esc(it.label)}</button>`).join('')}</div>`).join('');
  document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>location.hash=b.dataset.p);
- navSetActive((location.hash||'#dashboard').slice(1))}
+ navSetActive((location.hash||'#'+homePage()).slice(1))}
 function navSetActive(page){
  const base=page.startsWith('pipelines/')?'pipelines':page;
  document.querySelectorAll('.nav-item').forEach(b=>{b.classList.toggle('active',b.dataset.p===base)})}
 function table(items,actions=false){if(!items?.length)return '<div class="empty">No live records</div>';const keys=Object.keys(items[0]).filter(k=>k!=='config').slice(0,9);const tdCls=k=>/_at$|^(created|updated|started|finished|timestamp)$/.test(k)?'td-date':/^(id|name|service|workspace_dir|display_name|title|gate)$/.test(k)||keys.indexOf(k)===0?'td-name':'';const fmtCell=(k,v)=>{if(/_at$|^(created|updated|started|finished|timestamp)$/.test(k)&&typeof v==='string')return fmtDt(v);return typeof v==='object'?JSON.stringify(v):String(v??'')};return `<div class="table"><table><thead><tr>${keys.map(k=>`<th>${esc(k.replaceAll('_',' '))}</th>`).join('')}${actions?'<th>Actions</th>':''}</tr></thead><tbody>${items.map(x=>`<tr>${keys.map(k=>`<td class="${tdCls(k)}" title="${esc(typeof x[k]==='object'?JSON.stringify(x[k]):String(x[k]??''))}">${esc(fmtCell(k,x[k])).slice(0,80)}</td>`).join('')}${actions?`<td><button data-test="${esc(x.id)}">Validate</button></td>`:''}</tr>`).join('')}</tbody></table></div>`}
 function gateCard(g){return `<article class="gate-card"><div class="sectionhead"><h3>${esc(g.gate)}</h3><span class="live-dot">LIVE</span></div><form class="gate-form"><input type="hidden" name="gate" value="${esc(g.gate)}"><div class="formgrid"><label>Enabled<select name="enabled"><option value="true" ${g.enabled?'selected':''}>Enabled</option><option value="false" ${!g.enabled?'selected':''}>Disabled</option></select></label><label>Approver role<input name="required_role" value="${esc(g.required_role)}"></label><label class="wide">Allowed decisions<input name="allowed_decisions" value="${esc(g.allowed_decisions.join(','))}"></label><label>Minimum evidence<input name="min_evidence" type="number" min="0" value="${g.min_evidence}"></label><label>Quorum<input name="quorum" type="number" min="1" value="${g.quorum}"></label><label>Timeout minutes<input name="timeout_minutes" type="number" min="0" value="${g.timeout_minutes}"></label><label>Escalation profile<input name="escalation_profile" value="${esc(g.escalation_profile)}"></label><label>Bypass role<input name="bypass_role" value="${esc(g.bypass_role)}"></label><label>Downstream effect<input name="downstream_effect" value="${esc(g.downstream_effect)}"></label></div><button class="btn-primary gate-save"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save changes</button><p class="gate-meta">Last persisted update: ${esc(g.updated_at?fmtDt(g.updated_at):'not yet configured')}</p></form></article>`}
-async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox'),api('/api/v2/approvals')]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
+async function approvalGovernance(){const [g,i,a]=await Promise.all([api('/api/v7/gates'),api('/api/v7/approval-inbox').catch(()=>({items:[]})),api('/api/v2/approvals').catch(()=>({items:[]}))]);$('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Approval Governance</h2><p>Persisted gate policies and controls. Database snapshot: ${esc(g.generated_at)}</p></div><div class="live-summary"><b>${g.items.length}</b> gates <b>${i.items.length}</b> pending <b>${a.items.length}</b> decisions</div><div class="gate-grid">${g.items.map(gateCard).join('')}</div>`;document.querySelectorAll('.gate-form').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const x=Object.fromEntries(new FormData(f));x.enabled=x.enabled==='true';x.allowed_decisions=x.allowed_decisions.split(',').map(v=>v.trim()).filter(Boolean);x.min_evidence=+x.min_evidence;x.quorum=+x.quorum;x.timeout_minutes=+x.timeout_minutes;await api('/api/v7/gates/configure',{method:'POST',body:JSON.stringify(x)});notice(`${x.gate} saved to live database`);approvalGovernance()}catch(err){notice(err.message,true)}})}
 // ---- Learning: what each run has taught, and whether the agents are improving ----------
 let _lessons=[];
 const LESSON_LABEL={SCHEMA_CORRECTION:'Schema correction',EFFORT_STEP_DOWN:'Effort step-down',GATE_GAP:'Skill gap',GATE_FAIL:'Gate failure',REPAIR:'Feedback repair',GAP_UNREPAIRED:'Gap not repaired',RUN_FAILURE:'Run failure'};
@@ -369,6 +387,31 @@ $('#lessonReject').onclick=()=>decideLesson('REJECT');
 $('#lessonRetract').onclick=()=>decideLesson('RETRACT');
 // ---- Agent Models: which model each agent runs on, with the option to change it --------
 let _agentModels=null;
+// ---- Metrics: the overall run analysis ------------------------------------------------
+const metricsOpen=new Set();
+const secText=n=>n==null?'':n<60?n+'s':Math.floor(n/60)+'m '+(n%60)+'s';
+async function metricsPage(soft){
+ const d=await api('/api/v2/run-analysis');
+ if(location.hash!=='#metrics')return;
+ const sm=d.summary;
+ const tile=(label,value,sub)=>`<div class="kpi-card" style="--kpi-color:#2558C4;--kpi-icon-bg:#DDE9F7"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value}</div>${sub?`<div class="kpi-trend trend-neutral">${esc(sub)}</div>`:''}</div>`;
+ const statusSub=Object.entries(sm.by_status||{}).map(([k,v])=>v+' '+k.toLowerCase().replace(/_/g,' ')).join(' · ');
+ const tiles=`<div class="run-tiles">${tile('Pipelines',sm.pipelines,statusSub)}${tile('Agent runs',sm.runs,sm.completed+' completed · '+sm.failed+' not')}${tile('Success rate',sm.success_rate==null?'—':sm.success_rate+'%','')}${tile('Average run time',sm.avg_seconds==null?'—':secText(Math.round(sm.avg_seconds)),'per agent run')}${tile('Open clarifications',sm.open_clarifications,'')}</div>`;
+ const segCls=st=>({COMPLETED:'ok',RUNNING:'run',FAILED:'bad',CANCELLED:'bad',PAUSED:'wait',WAITING_APPROVAL:'wait',WAITING_CLARIFICATION:'wait'}[st]||'idle');
+ const plRows=d.pipelines.map(pl=>{const st=Object.entries(pl.steps);const done=st.filter(([,x])=>x.status==='COMPLETED').length;const total=st.reduce((n,[,x])=>n+(x.seconds||0),0);const open=metricsOpen.has(pl.id);
+  const strip=st.length?`<div class="step-strip">${st.map(([a,x])=>`<span class="seg seg-${segCls(x.status)}" title="${esc(a)} · ${esc(String(x.status).replace(/_/g,' ').toLowerCase())}${x.seconds!=null?' · '+secText(x.seconds):''}"></span>`).join('')}</div>`:'<span class="td-light">No steps</span>';
+  const detail=st.map(([a,x])=>`<div class="step-chip"><span class="seg seg-${segCls(x.status)}"></span><div><b>${esc(a)}</b><small>${esc(String(x.status).replace(/_/g,' ').toLowerCase())}${x.seconds!=null?' · '+secText(x.seconds):''}</small></div></div>`).join('');
+  return `<div class="pl-row${open?' open':''}" data-pl="${esc(pl.id)}"><button class="pl-row-head" type="button" aria-expanded="${open}"><span class="pl-row-name">${esc(wsName(pl.name)||pl.name)}</span><span class="pl-row-status">${stateBadge(String(pl.status||''))}</span><span class="pl-row-strip">${strip}</span><span class="pl-row-count">${done}/${st.length} done${total?' · '+secText(total):''}</span></button><div class="pl-row-body"${open?'':' hidden'}><div class="step-grid">${detail||'<span class="td-light">This pipeline has no steps.</span>'}</div><button class="btn-ghost pl-row-open" data-pl="${esc(pl.id)}" type="button">Open pipeline →</button></div></div>`}).join('');
+ const matrix=d.pipelines.length?`<div class="run-list">${plRows}</div><div class="seg-legend"><span><i class="seg seg-ok"></i>Completed</span><span><i class="seg seg-run"></i>Running</span><span><i class="seg seg-wait"></i>Paused / waiting</span><span><i class="seg seg-bad"></i>Failed / stopped</span><span><i class="seg seg-idle"></i>Not started</span></div>`:'<div class="empty">No pipelines have run yet.</div>';
+ const agentRows=d.agents.length?d.agents.map(a=>{const done=a.completed||0;const rate=a.runs?Math.round(100*done/a.runs):0;return `<tr><td class="td-name">${esc(a.agent_id)}</td><td>${done}/${a.runs}</td><td style="min-width:120px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${rate>=100?' darkgreen':rate<50?' error':''}" style="width:${Math.max(rate,rate?4:0)}%"></div></div><span style="font-size:11px;min-width:30px">${rate}%</span></div></td><td>${a.avg_seconds==null?'—':secText(Math.round(a.avg_seconds))}</td><td class="td-light" style="font-size:12px">${a.avg_attempts??'—'} attempts · ${a.corrections||0} corrections · ${a.avg_gaps??'—'} gaps · ${a.avg_clarifications??'—'} questions</td></tr>`}).join(''):'<tr><td colspan="5" class="empty">No runs recorded yet. They appear here as agents run.</td></tr>';
+ const body=`<div id="metricsBody" style="display:contents">${tiles}
+  <div class="card"><div class="card-head"><div><div class="card-title">Run matrix</div><div class="card-sub">One bar per pipeline, one segment per agent step. Select a row for the step detail.</div></div></div><div class="card-body">${matrix}</div></div>
+  <div class="card"><div class="card-head"><div><div class="card-title">By agent</div><div class="card-sub">Every recorded run, grouped by agent</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Agent</th><th>Completed</th><th>Success</th><th>Avg time</th><th>Per run</th></tr></thead><tbody>${agentRows}</tbody></table></div></div></div></div>`;
+ if(soft&&$('#metricsBody'))$('#metricsBody').outerHTML=body;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Metrics</div><div class="page-sub">Overall run analysis across pipelines and agents</div></div></div><div style="display:flex;flex-direction:column;gap:20px">${body}</div>`;
+ document.querySelectorAll('.pl-row-head').forEach(h=>{h.onclick=()=>{const row=h.closest('.pl-row');const open=row.classList.toggle('open');row.querySelector('.pl-row-body').hidden=!open;h.setAttribute('aria-expanded',String(open));if(open)metricsOpen.add(row.dataset.pl);else metricsOpen.delete(row.dataset.pl)}});
+ document.querySelectorAll('.pl-row-open').forEach(b=>{b.onclick=()=>{location.hash='pipelines/'+b.dataset.pl}});
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash==='#metrics'&&!document.hidden)metricsPage(true).catch(()=>{})},30000)}}
 async function agentModelsPage(){
  const d=await api('/api/v2/agent-models');_agentModels=d;
  const canManage=canManageAgents();
@@ -419,17 +462,30 @@ $('#agentModelForm').onsubmit=async e=>{
   $('#agentModelDialog').close();notice(id+' now runs on '+alias);agentModelsPage()
  }catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 // Access: who holds which role, requests for gate approver roles, grant and revoke.
+let _grantable=[],_gateRoles=new Set();
+function openProfileDialog(){
+ const f=$('#profileForm');f.reset();$('#profileError').textContent='';
+ $('#profileRole').innerHTML=_grantable.map(r=>`<option value="${esc(r)}"${r===DEFAULT_ROLE_NAME?' selected':''}>${esc(r)}${_gateRoles.has(r)?' (gate approver)':''}</option>`).join('');
+ $('#profileDialog').showModal();f.name.focus()}
+$('#profileCancel').onclick=()=>$('#profileDialog').close();
+$('#profileForm').onsubmit=async e=>{e.preventDefault();const f=e.target;const err=$('#profileError');err.textContent='';
+ const btn=$('#profileSubmit');btn.disabled=true;
+ try{await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify({name:f.name.value,email:f.email.value,password:f.password.value,roles:[f.role.value]})});
+  $('#profileDialog').close();notice('Profile created for '+f.email.value);accessPage()}
+ catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 async function accessPage(){
  let d;
  try{d=await api('/api/v2/admin/access')}catch(e){$('#view').innerHTML=`<div class="hero"><h2>Access</h2><p>Granting roles needs the <b>GOVERNANCE_ADMIN</b> role. ${esc(e.message)}</p></div>`;return}
- const gate=new Set(d.gate_roles);
+ const gate=new Set(d.gate_roles);d.default_role=DEFAULT_ROLE_NAME;
  const chip=(u,r)=>`<span class="rsel-chip ${gate.has(r)?'chip-gate':''}">${esc(r)}<span class="rsel-chip-x" data-revoke="${esc(r)}" data-email="${esc(u.email)}" role="button" title="Revoke">&#x2715;</span></span>`;
- const reqs=d.requests.length?`<div class="table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
+ const reqs=d.requests.length?`<div class="table access-table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
  const grantOpts=u=>d.grantable.filter(r=>!u.roles.includes(r)).map(r=>`<option value="${esc(r)}">${esc(r)}${gate.has(r)?' (gate approver)':''}</option>`).join('');
- const users=`<div class="table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
- $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><h3>Role requests</h3>${reqs}<h3>Accounts</h3>${users}`;
+ const users=`<div class="table access-table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
+ $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><div class="access-head"><h3>Accounts</h3><button id="openProfile" class="btn-primary" type="button">+ Create profile</button></div>${users}`;
  const act=async(url,body,msg)=>{try{await api(url,{method:'POST',body:JSON.stringify(body)});notice(msg);accessPage()}catch(e){notice(e.message,true)}};
- document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
+ _grantable=d.grantable;_gateRoles=new Set(d.gate_roles);
+document.getElementById('openProfile').onclick=()=>openProfileDialog();
+document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
  document.querySelectorAll('[data-grant]').forEach(b=>b.onclick=()=>{const sel=document.querySelector(`select[data-pick="${CSS.escape(b.dataset.grant)}"]`);if(sel&&sel.value)act('/api/v2/auth/grant-role',{email:b.dataset.grant,role:sel.value},sel.value+' granted')});
  document.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>{if(confirm('Revoke '+b.dataset.revoke+' from '+b.dataset.email+'?'))act('/api/v2/auth/revoke-role',{email:b.dataset.email,role:b.dataset.revoke},b.dataset.revoke+' revoked')})}
 // Pending packages the signed-in user cannot act on. The inbox filters by role,
@@ -476,8 +532,9 @@ async function approvalInbox(){
 // Auto mode decides most questions; the ones left OPEN are the model's own
 // "high severity and not sure" cases, so say so on the card.
 function severityChip(c){return String(c.suggestion_severity||'').toUpperCase()==='CRITICAL'?'<span class="badge badge-error"><span class="badge-dot"></span>CRITICAL</span>':''}
-async function clarificationsPage(){
+async function clarificationsPage(soft){
  const [cd,jd]=await Promise.all([api('/api/v2/clarifications'),api('/api/v2/jobs').catch(()=>({items:[]}))]);
+ if(location.hash!=='#clarifications')return;
  const all=cd.items||[];
  const jobMap={};(jd.items||[]).forEach(j=>{jobMap[j.id]=j.service||j.workspace_dir||j.id});
  const open=all.filter(c=>c.status==='OPEN');
@@ -485,7 +542,9 @@ async function clarificationsPage(){
  // original is listed, so the copy is not.
  const answered=all.filter(c=>c.status==='ANSWERED');
  const suppressed=all.filter(c=>c.status==='DUPLICATE').length;
- const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim());
+ // Standards-baseline rows are placeholders until the model has had its turn.
+ const unsuggested=open.filter(c=>!String(c.suggested_answer||'').trim()||c.suggestion_mode==='STANDARDS_BASELINE');
+ const sugSource=c=>c.suggestion_mode==='STANDARDS_BASELINE'?'Platform standard':c.suggestion_mode==='PRIOR_ANSWER'?'Earlier answer':"Model's suggestion";
  const stageBadge=stage=>{const colors={ACE_ANALYSIS:'purple',INTAKE:'info',DORMANCY:'indigo',FRAMEWORK_BASELINE:'indigo',MAPPING:'orange',PLAN:'orange',IMPLEMENTATION:'info',BUILD:'info',TESTING:'purple',VARIANCE:'warning',REMEDIATION:'warning'};return`<span class="badge badge-${colors[stage]||'neutral'}"><span class="badge-dot"></span>${esc((stage||'').replace(/_/g,' '))}</span>`};
  const clarifCard=(c,isOpen)=>{
   const svc=esc(jobMap[c.job_id]||c.job_id||'—');
@@ -500,7 +559,7 @@ async function clarificationsPage(){
    </div>
    <div class="clarif-type">${questionType}</div>
    ${c.impact?`<div class="clarif-impact">Impact: ${esc(c.impact)}</div>`:''}
-   ${isOpen&&c.suggested_answer?`<div class="clarif-impact">Model's suggestion${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: ${esc(c.suggested_answer)}</div>`:''}
+   ${isOpen&&c.suggested_answer?`<div class="clarif-impact clarif-sug"><span class="clarif-sug-text">${esc(sugSource(c))}${c.suggestion_confidence?` (${esc(c.suggestion_confidence.toLowerCase())} confidence)`:''}: <span class="clarif-sug-body">${esc(c.suggested_answer)}</span></span> <button class="btn-ghost clarif-use-sug" type="button">Use this answer</button></div>`:''}
    ${isOpen?`<div class="clarif-form">
     <textarea class="clarif-textarea" placeholder="Enter your answer…" rows="3"></textarea>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
@@ -514,14 +573,20 @@ async function clarificationsPage(){
     ${c.answered_at?`<span class="clarif-answered-meta">${esc(fmtDt(c.answered_at))}${c.answered_by?' · '+esc(c.answered_by):''}</span>`:''}
    </div>`}
   </div>`};
- $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div>
-  ${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
+ const clarifBody=`${unsuggested.length?`<div class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">${unsuggested.length} open question${unsuggested.length>1?'s':''} without a suggested answer</div><div class="card-sub">The model drafts an answer for each question when an agent raises it. These were saved before that finished, or it could not be reached. Generate them now.</div></div><button id="genSuggestions" class="btn-primary">Generate suggestions</button></div></div>`:''}
   <div style="display:flex;flex-direction:column;gap:16px">
    ${open.length>0
     ?`<div class="card" style="border-color:rgba(245,158,11,.35)"><div class="card-head" style="background:rgba(245,158,11,.06);border-bottom-color:rgba(245,158,11,.2)"><div style="display:flex;align-items:center;gap:8px"><div class="approval-alert-dot"></div><div><div class="card-title" style="color:var(--warning-text)">Open (${open.length})</div><div class="card-sub">${open.length} question${open.length!==1?'s':''} the model could not settle on its own</div></div></div></div><div class="card-body">${open.map(c=>clarifCard(c,true)).join('')}</div></div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">No open clarifications</div><div class="card-sub">All questions answered — pipelines running freely</div></div></div></div></div>`}
    ${answered.length?`<details class="card clarif-answered-fold"><summary class="card-head" style="cursor:pointer"><div class="card-title">Answered (${answered.length})</div><div class="card-sub">${answered.filter(c=>c.answered_by==='AUTO_MODE').length} decided by auto mode${suppressed?' · '+suppressed+' repeat'+(suppressed!==1?'s':'')+' not raised again':''}</div></summary><div class="card-body">${answered.slice(0,30).map(c=>clarifCard(c,false)).join('')}</div></details>`:''}
   </div>`;
+ if(soft&&$('#clarifBody'))$('#clarifBody').innerHTML=clarifBody;
+ else $('#view').innerHTML=`<div class="page-header page-header-row"><div><div class="page-title">Clarifications</div><div class="page-sub">Pipeline blocking questions requiring human input</div></div></div><div id="clarifBody" style="display:contents">${clarifBody}</div>`;
+ document.querySelectorAll('.clarif-use-sug').forEach(b=>{b.onclick=()=>{const it=b.closest('.clarif-item');const ta=it?.querySelector('.clarif-textarea');if(ta){ta.value=it.querySelector('.clarif-sug-body').textContent;ta.focus()}}});
+ // Ask the model to improve placeholders once per job per session, unprompted.
+ const sugTodo=[...new Set(unsuggested.map(c=>c.job_id))].filter(j=>j&&!sugTried.has(j));
+ if(sugTodo.length){sugTodo.forEach(j=>sugTried.add(j));(async()=>{try{for(const j of sugTodo)await api('/api/v2/clarifications/suggest',{method:'POST',body:JSON.stringify({job_id:j})})}catch(_){}
+  if(location.hash==='#clarifications'&&!document.querySelector('.clarif-textarea:focus'))clarificationsPage()})()}
  const gen=$('#genSuggestions');
  if(gen)gen.onclick=async()=>{
   // One request per job: the model answers in the context of the agent and job that raised the question.
@@ -554,7 +619,7 @@ async function clarificationsPage(){
     notice('Answer submitted. If this was the last open clarification, the pipeline will resume automatically.');
    }catch(e){notice(e.message,true);btn.disabled=false;btn.textContent='Submit Answer'}}});
  // Skipped while anything is being typed: a re-render replaces every textarea.
- refreshTimer=setInterval(()=>{if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage()},15000)}
+ if(!soft){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{if(location.hash!=='#clarifications'||document.hidden)return;if([...document.querySelectorAll('.clarif-textarea')].some(t=>t.value.trim()||t===document.activeElement))return;clarificationsPage(true).catch(()=>{})},15000)}}
 // ---- New migration wizard -------------------------------------------------
 let wizard=null;
 const WIZARD_STEPS=['Migration & Workspace','IBM ACE Repository','Migration Framework Repository','Spring Boot Output','Review','Select Agents'];
@@ -2385,16 +2450,20 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.clarif-suggestion-dismiss').forEach(btn=>{
   btn.onclick=()=>{btn.closest('.clarif-suggestion')?.remove()}})}
 
-async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker();if(!token()||!session)return authScreen('login');renderIdentity();
- const p=(location.hash||'#dashboard').slice(1);navSetActive(p);
+let renderSeq=0,renderSoft=false;const dashOpenJobs=new Set();const sugTried=new Set();
+async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=false;if(!soft){if($('#overrideConfigDialog').open)$('#overrideConfigDialog').close();if($('#agentDialog').open)$('#agentDialog').close();clearInterval(refreshTimer);stopDurationTicker()}if(!token()||!session)return authScreen('login');renderIdentity();
+ const p=(location.hash||'#'+homePage()).slice(1);
+ if(isAdminOnly()&&ADMIN_HIDDEN_PAGES.includes(p.split('/')[0])){location.hash=homePage();return}
+ navSetActive(p);
  // The wizard and pipeline detail views manage their own multi-step/live-poll
  // state and do not want the dashboard metrics bar refetched under them on
  // every internal step change, so they are handled before the generic path.
  if(p==='new-migration')return migrationWizard();
  if(p==='pipelines'){try{notice('');$('#title').textContent='Pipelines';await pipelineList()}catch(e){return renderError(e)}return}
  if(p.startsWith('pipelines/')){try{notice('');await pipelineDetail(p.slice('pipelines/'.length))}catch(e){return renderError(e)}return}
- try{notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+ try{if(!soft)notice('');$('#title').textContent=p.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
  const [d,agentHealth]=await Promise.all([api('/api/v2/dashboard'),api('/api/v2/agent-registry/health').catch(()=>({items:[]}))]);
+ if(seq!==renderSeq)return;
  const _ah=agentHealth.items||agentHealth.agents||[];
  const agentsRunning=d.running_agents??0;
  const totalAgents=_ah.length||15;
@@ -2419,6 +2488,7 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
  if(p==='access'){await accessPage();return}
  if(p==='agent-models'){await agentModelsPage();return}
  if(p==='learning'){await learningPage();return}
+ if(p==='metrics'){$('#metrics').innerHTML='';await metricsPage();return}
  if(p==='approval-governance'){await approvalGovernance();return}
  if(p==='approval-inbox'){await approvalInbox();refreshTimer=setInterval(approvalInbox,5000);return}
  if(p==='agent-registry')return agentRegistryPage();
@@ -2431,13 +2501,15 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // The pipeline worth showing: one doing something, then one that is held, then
   // the latest. Only RUNNING was looked for, so pausing a pipeline (or stopping at
   // an approval) made it vanish from the dashboard.
+  if(seq!==renderSeq)return;
   const plItems=pipelines.items||[];
-  const runPl=['RUNNING','PAUSED','WAITING_APPROVAL','WAITING_CLARIFICATION'].map(st=>plItems.find(x=>x.status===st)).find(Boolean)||plItems[0];
-  let plSteps=[];if(runPl){try{const pl=await api('/api/v2/pipelines/'+runPl.id);plSteps=pl.steps||[]}catch(_){}}
   // The newest pipeline of each job, so a service can lead to the pipeline running it.
   const plByJob={};plItems.slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(pl=>{plByJob[pl.job_id]=pl});
   const svcName=x=>{const name=esc(x.service||x.workspace_dir||x.id);const pl=plByJob[x.id];return pl?`<a class="pl-link" href="#pipelines/${esc(pl.id)}" title="Open this pipeline">${name}</a>`:name};
-  const jobRows=(jobs.items||[]).slice(0,12).map(x=>`<tr><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(x.state||x.status||'CREATED')}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(x.state||x.status,x.progress||0)}" style="width:${dispPct(x.state||x.status,x.progress)}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${dispPct(x.state||x.status,x.progress)}%</span></div></td><td>${riskBadge(x.risk)}</td></tr>`).join('');
+  const progressOf=x=>{const st=String(x.state||x.status||'').toUpperCase();const v=Math.max(0,Math.min(100,Number(dispPct(st,x.progress))||0));return st==='COMPLETED'||v>=100?100:Math.max(v,6)};
+  const jobRows=(jobs.items||[]).slice(0,12).map(x=>{const pl=plByJob[x.id];const st=x.state||x.status||'CREATED';const pct=progressOf(x);const open=pl&&dashOpenJobs.has(x.id);
+   const caps=pl?`<div class="job-caps"><button class="btn-ghost job-steps-btn" data-job="${esc(x.id)}" data-pl="${esc(pl.id)}" aria-expanded="${!!open}">${open?'Hide steps':'Steps'}</button><button class="btn-ghost job-open-btn" data-pl="${esc(pl.id)}">Open pipeline →</button></div>`:'<span class="td-light">No pipeline yet</span>';
+   return `<tr class="job-row"><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(String((pl&&pl.status)||st))}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(st,x.progress||0)}" style="width:${pct}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${pct===100?100:Math.min(pct,99)}%</span></div></td><td>${caps}</td></tr>${pl?`<tr class="job-steps-row" data-job="${esc(x.id)}"${open?'':' hidden'}><td colspan="5"><div class="pipeline-board job-steps-board" style="padding:10px 4px"><div class="empty">Loading steps…</div></div></td></tr>`:''}`}).join('');
   const pendingCount=(approvals.items||[]).length;
   const APPR_LIMIT=5;
   const appRows=(approvals.items||[]).slice(0,APPR_LIMIT).map(x=>`<div class="approval-item"><div class="appr-row-top">${x.gate?`<span class="gate gate-pending">${esc(x.gate)}</span>`:''}<div class="appr-meta"><div class="appr-service">${esc(x.service||x.pipeline_id||'—')}</div><div class="appr-waiting"><span class="appr-waiting-label">Awaiting review by</span><span class="appr-role-chip">${esc(x.role||'Reviewer')}</span></div>${x.description?`<div class="appr-desc">${esc(x.description)}</div>`:''}</div>${x.created_at?`<span class="appr-time">${fmtTime(x.created_at)}</span>`:''}</div><div class="appr-actions"><button class="btn-approve" data-approval-id="${esc(x.id||'')}">Approve</button><button class="btn-reject">Review</button></div></div>`).join('');
@@ -2447,17 +2519,6 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
   // so this read undefined and every step that had started showed "Running…"
   // for good -- including the completed ones. With the right field it can also
   // say how long each one took, which is the point of the card.
-  const stepCards=plSteps.slice(0,12).map(s=>{
-   const st=s.status||'PENDING';const dot=`<div class="stepdot"></div>`;
-   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
-   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`
-    :s.started_at?`Running… ${dur}`:'Waiting';
-   return `<div class="pipeline-step ${esc(st)}">${dot}<div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('');
-  const pipelineTitle=runPl?(wsName(runPl.workspace_dir)||runPl.id||'Pipeline'):'Recent Pipeline';
-  const plStatus=runPl?String(runPl.status||''):'';
-  const pipelineBadge=runPl?`<span class="badge ${plStatus==='RUNNING'?'badge-running':plStatus==='COMPLETED'?'badge-success':plStatus==='FAILED'||plStatus==='CANCELLED'?'badge-error':'badge-warning'}"><span class="badge-dot"></span>${esc(plStatus.replace(/_/g,' '))}</span>`:`<span class="badge badge-neutral">NO ACTIVE PIPELINE</span>`;
-  const openPl=runPl?`<button id="dashOpenPipeline" class="btn-ghost">Open pipeline →</button>`:'';
-  const stepViewerCard=plSteps.length?`<div class="card"><div class="card-head"><div><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div class="card-sub">${plStatus==='PAUSED'?'Paused — holding at the current step':'Live step execution'} · ${plSteps.length} steps</div></div><div style="display:flex;align-items:center;gap:8px">${pipelineBadge}${openPl}</div></div><div class="pipeline-board" style="padding:14px 16px">${stepCards}</div></div>`:runPl?`<div class="card"><div class="card-head"><div class="card-title">${esc(pipelineTitle)} Pipeline</div><div style="display:flex;gap:8px">${pipelineBadge}${openPl}</div></div><div class="empty">Loading pipeline steps…</div></div>`:'';
   const LC_STAGES=[{key:'CREATED',label:'Created',states:['CREATED']},{key:'INTAKE',label:'Intake',states:['INTAKE_VALIDATED']},{key:'DORMANCY',label:'Dormancy',states:['DORMANCY_ASSESSED','FRAMEWORK_BASELINED']},{key:'ANALYSIS',label:'Analysis',states:['ACE_ANALYSED']},{key:'PLANNING',label:'Planning',states:['PLAN_APPROVED']},{key:'TESTING',label:'Testing',states:['IMPLEMENTING','BUILD_VALIDATED','DIFFERENTIAL_TESTING','VARIANCE_REVIEW','REMEDIATING']},{key:'PROMOTE',label:'Promotion',states:['READY_FOR_PROMOTION']},{key:'COMPLETE',label:'Complete',states:['COMPLETED']}];
   const jobList=jobs.items||[];
   const stageCounts=LC_STAGES.map(st=>({...st,count:jobList.filter(j=>st.states.includes(String(j.state||j.status||'').toUpperCase())).length}));
@@ -2473,16 +2534,30 @@ async function render(){if($('#overrideConfigDialog').open)$('#overrideConfigDia
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta">Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Select a service to open its pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Risk</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>${stepViewerCard}</div><div class="dash-stack">${inboxCard}</div></div></div>`;
+  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
+  const metaText=`Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
+  const painted=soft&&$('#dashSecJobs');
+  if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
+  else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
   document.querySelectorAll('.btn-approve[data-approval-id]').forEach(btn=>{btn.onclick=async()=>{try{await api('/api/v7/approval-packages/'+btn.dataset.approvalId+'/approve',{method:'POST',body:JSON.stringify({})});btn.closest('.approval-item').style.opacity='0.4';notice('Approval submitted — pipeline will resume automatically')}catch(e){notice(e.message,true)}}});
   // Every part of the pipeline card leads to the pipeline: the title, the button,
   // and each step. None of it was clickable.
-  if(runPl){
-   const go=()=>{location.hash='pipelines/'+runPl.id};
-   $('#dashOpenPipeline')?.addEventListener('click',go);
-   document.querySelectorAll('.pipeline-board .pipeline-step').forEach(el=>{el.style.cursor='pointer';el.addEventListener('click',go)})}
+  const stepHtml=steps=>steps.slice(0,12).map(s=>{
+   const st=s.status||'PENDING';
+   const dur=durationTag(s,'step-elapsed',st in LIVE_STEP_STATUS);
+   const time=s.completed_at?`Finished ${esc(fmtTime(s.completed_at))}${dur?' · '+dur:''}`:s.started_at?`Running… ${dur}`:'Waiting';
+   return `<div class="pipeline-step ${esc(st)}"><div class="stepdot"></div><div class="stepmeta"><b>${esc(s.name||s.agent_id||'')}</b><small>${time}</small></div><span class="stepstatus">${esc(st)}</span></div>`}).join('')||'<div class="empty">No steps</div>';
+  const fillSteps=async(row,plId)=>{const board=row.querySelector('.job-steps-board');
+   try{const pl=await api('/api/v2/pipelines/'+plId);if(seq!==renderSeq&&!soft)return;board.innerHTML=stepHtml(pl.steps||[]);
+    board.querySelectorAll('.pipeline-step').forEach(el=>{el.style.cursor='pointer';el.onclick=()=>{location.hash='pipelines/'+plId}});startDurationTicker()}
+   catch(_){board.innerHTML='<div class="empty">Steps unavailable</div>'}};
+  document.querySelectorAll('.job-open-btn').forEach(b=>{b.onclick=()=>{location.hash='pipelines/'+b.dataset.pl}});
+  document.querySelectorAll('.job-steps-btn').forEach(b=>{const row=document.querySelector('.job-steps-row[data-job="'+b.dataset.job+'"]');
+   if(dashOpenJobs.has(b.dataset.job))fillSteps(row,b.dataset.pl);
+   b.onclick=()=>{const open=row.hidden;row.hidden=!open;b.textContent=open?'Hide steps':'Steps';b.setAttribute('aria-expanded',String(open));
+    if(open){dashOpenJobs.add(b.dataset.job);fillSteps(row,b.dataset.pl)}else dashOpenJobs.delete(b.dataset.job)}});
   // The header says it refreshes itself; nothing did.
-  refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard')render()},30000);
+  if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},30000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.

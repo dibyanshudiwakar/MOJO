@@ -15,6 +15,7 @@ an auto-mode decision is long over.
 from app.agents import load as load_implementation
 from app.agents.artefact import ArtefactUnavailable, STRUCTURED_EFFORT, produce, run_parallel
 from app.providers import default_provider
+from app.services import standards_suggestion
 from app.repository import now, uid
 
 PROMPT = 'agent/clarification/suggested-answers'
@@ -29,8 +30,9 @@ def suggest_missing(registry, job_id, identity='system', roles=(), provider=None
     rows = repo.rows(
         "select c.id, c.question, c.impact, c.stage, r.agent_id, r.agent_version "
         "from clarifications c join agent_runs r on r.id=c.run_id "
-        "where c.job_id=? and c.status='OPEN' and trim(coalesce(c.suggested_answer,''))='' "
-        "order by c.created_at", (job_id,))
+        "where c.job_id=? and c.status='OPEN' and (trim(coalesce(c.suggested_answer,''))='' "
+        "or c.suggestion_mode=?) "
+        "order by c.created_at", (job_id, standards_suggestion.MODE))
     by_agent = {}
     for row in rows:
         by_agent.setdefault((row['agent_id'], row['agent_version']), []).append(row)
@@ -80,8 +82,24 @@ def suggest_missing(registry, job_id, identity='system', roles=(), provider=None
                         continue
                     c.execute("update clarifications set suggested_answer=?, suggestion_mode=?, "
                               "suggestion_confidence=?, suggestion_severity=?, suggestion_caveat=?, suggested_at=? "
-                              "where id=? and status='OPEN' and trim(coalesce(suggested_answer,''))=''",
+                              "where id=? and status='OPEN' and (trim(coalesce(suggested_answer,''))='' "
+                              "or suggestion_mode=?)",
                               (s['suggested_answer'], provenance.get('mode', ''), s.get('confidence', ''),
-                               s.get('severity', ''), s.get('caveat', ''), now(), row['id']))
+                               s.get('severity', ''), s.get('caveat', ''), now(), row['id'],
+                               standards_suggestion.MODE))
                     result['suggested'] += 1
+    # Whatever the model left (unreachable, malformed, skipped) gets the platform
+    # standard for its kind of question: a suggestion is always there.
+    result['baseline'] = 0
+    with repo.connect() as c:
+        for row in rows:
+            b = standards_suggestion.baseline(row['question'], row['impact'], row['stage'])
+            cur = c.execute(
+                "update clarifications set suggested_answer=?, suggestion_mode=?, suggestion_confidence=?, "
+                "suggestion_severity=?, suggestion_caveat=?, suggested_at=? "
+                "where id=? and status='OPEN' and trim(coalesce(suggested_answer,''))=''",
+                (b['suggested_answer'], b['suggestion_mode'], b['suggestion_confidence'],
+                 b['suggestion_severity'], b['suggestion_caveat'], now(), row['id']))
+            result['baseline'] += cur.rowcount
+    result['suggested'] += result['baseline']
     return result
