@@ -97,17 +97,18 @@ class PlanningAgent(BaseAgent):
                    'risk_count': len(risks),
                    'model_attempts': provenance.get('attempts', 0)}
         if still_open:
-            # The service records the gap as migration_risks/unsupported_mappings
-            # rows but does not raise clarifications itself (clarification
-            # blocking is disabled there -- see migration_lifecycle_v6.py). This
-            # agent holds clarification.create, so it turns each still-OPEN risk
-            # into an answerable question rather than leaving a human to find
-            # the gap only in the risk register.
+            # Only what a person must settle becomes a question. Two kinds qualify:
+            # a CRITICAL risk, and an unsupported mapping that blocks plan generation
+            # (generate_plan refuses while one is OPEN, so every downstream agent
+            # waits on it). Other open risks stay in the register: the model and the
+            # skills answer them, and they never park the migration.
             clarifications = tuple(
                 Clarification(stage='PLANNING', question=r['statement'],
                                owner=r['owner'], impact=r['response'] or r['category'],
                                evidence_ref='migration_risk://' + r['id'])
-                for r in risks if r['status'] == 'OPEN')
+                for r in risks if r['status'] == 'OPEN' and (
+                    str(r['severity']).upper() == 'CRITICAL'
+                    or r['category'] == 'UNSUPPORTED_MAPPING'))
             return AgentResult(
                 status='CLARIFICATION_REQUIRED',
                 outputs={'mapping': catalogue['catalogue_id'], 'risk_register': risks,

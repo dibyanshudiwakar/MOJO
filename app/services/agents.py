@@ -7,7 +7,7 @@ from app.providers import default_provider
 from app.agents.skills import SkillIntegrityError, library, skill_for, skills_required
 from app.services.evidence import EvidenceService
 from app.services.factory_v3 import AuditLedger
-from app.services import automode, precedents, learning
+from app.services import automode, precedents, learning, standards_suggestion
 from app.services.clarification_reuse import PriorAnswers, ACTOR as REUSE_ACTOR, origin as reuse_origin
 from app.services.agent_llm_bindings import AgentLLMBindingService
 
@@ -360,6 +360,13 @@ class AgentRegistry:
        c.execute("update clarifications set status='ANSWERED',answer=?,answered_at=?,answered_by=? where id=? and status='OPEN'",
                  (s['suggested_answer'],now(),automode.ACTOR,cid))
        decided+=1
+   # Whatever the model did not answer still gets the platform-standard answer
+   # for its kind of question, so no clarification is ever raised bare.
+   with self.repo.connect() as c:
+    for cl,cid in zip(result.clarifications,opened):
+     b=standards_suggestion.baseline(cl.question,cl.impact,cl.stage)
+     c.execute("update clarifications set suggested_answer=?,suggestion_mode=?,suggestion_confidence=?,suggestion_severity=?,suggestion_caveat=?,suggested_at=? where id=? and status='OPEN' and trim(coalesce(suggested_answer,''))=''",
+               (b['suggested_answer'],b['suggestion_mode'],b['suggestion_confidence'],b['suggestion_severity'],b['suggestion_caveat'],now(),cid))
    _log_info('Suggested answers: %d/%d (%s)' % (len(by_question),len(opened)-len(reused),sugg_prov.get('mode','')))
    if taken>taken_before:
     _log_info('%d repeated question(s) settled by earlier decisions — not raised again' % (taken-taken_before))

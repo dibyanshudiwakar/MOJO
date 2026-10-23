@@ -41,12 +41,22 @@ email and password; then sign in with that email and password. The token is
 returned by `POST /api/v2/auth/login` and carries the roles granted to the
 account.
 
-The **first** account registered also receives the administration roles
-(`GOVERNANCE_ADMIN`, `CONNECTOR_ADMIN`, `GATE_ADMIN`, `AUDITOR`), because a fresh
-database otherwise has nobody able to grant anything. Registration itself only
-offers operational roles — approver roles such as `PRODUCT_OWNER` are
-granted afterwards through `POST /api/v2/auth/grant-role`, so an account cannot
-self-assign the authority to approve its own gate.
+**First setup creates an administrator.** On an empty database the server creates
+`admin@ace.local` (set `FACTORY_ADMIN_EMAIL` / `FACTORY_ADMIN_PASSWORD` to choose
+them). With no password set, a random one is printed once on the console and saved to
+`<db>.admin-credentials` - sign in, then delete that file. Registering first no longer
+confers any privilege. The administrator holds only administrative roles
+(`GOVERNANCE_ADMIN`, `AI_GOVERNANCE_ADMIN`, `AGENT_REGISTRY_ADMIN`, `GATE_ADMIN`,
+`CONNECTOR_ADMIN`, `CLARIFICATION_ADMIN`, `AUDITOR`): it grants roles, configures gates,
+models and agents, and reads the audit trail. It cannot hold an agent or gate-approver
+role, and the API refuses it any pipeline, job, clarification or approval operation
+(`admin_account_cannot_operate_pipelines`). An existing database that already has a
+`GOVERNANCE_ADMIN` keeps it and is not re-seeded.
+
+There is no self-registration. Only an administrator creates profiles (the Access
+page, or `POST /api/v2/auth/signup` with `GOVERNANCE_ADMIN`). A new profile gets the
+default role `MIGRATION_OPERATOR`, which carries all fifteen operator roles at sign-in.
+Gate approver roles are granted by an administrator, never self-assigned.
 
 `FACTORY_JWT_HS256_SECRET` is optional. When it is not set the server generates a
 signing key on first run and persists it as `<database>.signing-key`; set the

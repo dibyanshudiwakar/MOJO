@@ -1384,3 +1384,48 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .ace-ambig-item:hover{background:var(--bg)}
 .ace-ambig-num{flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:var(--warning-bg);color:var(--warning-text);font-size:10px;font-weight:700;border-radius:50%;margin-top:1px}
 .ace-ambig-q{font-size:13px;color:var(--text);line-height:1.5;flex:1;min-width:0}
+
+/* Jobs table: per-job capabilities and the expandable pipeline steps. */
+.job-caps{display:flex;gap:6px;flex-wrap:wrap}
+.job-steps-row[hidden]{display:none}
+.job-steps-row td{padding:4px 16px 14px;background:var(--surface-2,transparent)}
+.job-steps-board{display:flex;flex-direction:column;gap:6px}
+/* A visible track, so a part-filled bar reads as part-filled. */
+.progress-bar{box-shadow:inset 0 0 0 1px var(--border-2)}
+
+/* Metrics: one bar per pipeline, nothing that scrolls sideways. */
+.run-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.run-list{display:flex;flex-direction:column}
+.pl-row{border-bottom:1px solid var(--border-2)}
+.pl-row:last-child{border-bottom:none}
+.pl-row-head{display:grid;grid-template-columns:minmax(120px,1.2fr) auto minmax(120px,3fr) auto;align-items:center;gap:14px;width:100%;padding:12px 20px;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.pl-row-head:hover{background:var(--surface-2,rgba(127,127,127,.06))}
+.pl-row-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-row-count{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.step-strip{display:flex;gap:3px;height:16px}
+.step-strip .seg{flex:1;min-width:4px;height:100%;border-radius:3px}
+.seg{display:inline-block;border-radius:3px;background:var(--progress-track,#d8dee9)}
+.seg-ok{background:var(--darkgreen,#4a8a5a)}.seg-run{background:var(--primary,#2563eb)}
+.seg-wait{background:var(--warning,#c9923e)}.seg-bad{background:var(--error,#bf6b63)}.seg-idle{background:var(--progress-track,#d8dee9)}
+.pl-row-body{padding:4px 20px 16px}
+.step-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 16px;margin-bottom:10px}
+.step-chip{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.step-chip .seg{width:10px;height:26px;flex-shrink:0}
+.step-chip small{display:block;color:var(--text-2)}
+.seg-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 20px 14px;font-size:11.5px;color:var(--text-2)}
+.seg-legend .seg{width:10px;height:10px;margin-right:6px;vertical-align:-1px}
+@media(max-width:760px){.pl-row-head{grid-template-columns:1fr auto;row-gap:8px}.pl-row-strip{grid-column:1 / -1;order:3}}
+
+/* Access: roles wrap inside their cell, so the table fits the page instead of scrolling sideways. */
+.access-table{overflow-x:visible}
+.access-table table{table-layout:fixed}
+.access-table td{white-space:normal;vertical-align:top;overflow-wrap:anywhere}
+.access-table th:nth-child(1){width:26%}
+.access-table .rsel-chip{display:inline-flex;margin:2px 6px 2px 0;max-width:100%}
+.access-table select{max-width:100%;width:58%}
+.access-table td button{margin-top:2px}
+@media(max-width:900px){.access-table table,.access-table thead,.access-table tbody,.access-table tr,.access-table td{display:block;width:100%}.access-table thead{display:none}.access-table tr{padding:10px 0;border-bottom:1px solid var(--border-2)}}
+
+/* Access: section header with its action. */
+.access-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
+.access-head h3{margin:0}

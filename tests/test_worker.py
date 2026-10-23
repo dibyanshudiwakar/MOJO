@@ -18,7 +18,7 @@ def env(tmp_path, monkeypatch):
     # specifically -- not ACE_ANALYST -- since that is the agent every test
     # here dispatches.
     owner = accounts.sign_up({'name': 'Pipeline Owner', 'email': 'owner@example.com',
-                              'password': 'a-long-enough-password', 'role': 'REPOSITORY_INTAKE'})
+                              'password': 'a-long-enough-password', 'roles': ['REPOSITORY_INTAKE']}, ('GOVERNANCE_ADMIN',))
     job = FactoryService(repo).create_job({'service': 'Orders', 'owner': 'Retail', 'sourceRevision': 'abc'}, owner['email'])
     pipelines = PipelineService(repo)
     workflow = WorkflowOrchestrator(repo)
@@ -125,3 +125,12 @@ def test_roles_are_re_read_at_dispatch_time(tmp_path, env):
     worker.process_one()
     step = find(pipelines.detail(p['id'])['steps'], 'repository-intake')
     assert step['status'] == 'COMPLETED'
+
+
+def test_an_operator_owner_dispatches_with_every_operator_role(env):
+    """The default role stands for the operator roles, so a step must run with them."""
+    repo, job, owner, pipelines, workflow, worker = env
+    with repo.connect() as c:
+        c.execute("update users set granted_roles='MIGRATION_OPERATOR' where id=?", (owner['id'],))
+    _, roles = worker._principal(owner['email'])
+    assert {'REPOSITORY_INTAKE', 'MIGRATION_PLANNER', 'CODE_GENERATOR'} <= set(roles)

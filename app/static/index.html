@@ -196,6 +196,21 @@
     </div>
   </form>
 </dialog>
+<dialog id="profileDialog">
+  <h2>Create profile</h2>
+  <p class="authhint dlg-sub">An administrator creates the account. The person signs in with this password and should change it.</p>
+  <form id="profileForm">
+    <label>Full name<input name="name" required minlength="2" autocomplete="off"></label>
+    <label>Email<input name="email" type="email" required autocomplete="off"></label>
+    <label>Temporary password <small>(at least 12 characters)</small><input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+    <label>Role<select name="role" id="profileRole"></select></label>
+    <p class="authhint bad" id="profileError"></p>
+    <div class="dlg-footer">
+      <button type="button" id="profileCancel">Cancel</button>
+      <button id="profileSubmit">Create profile</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="lessonDialog">
   <h2 id="lessonTitle">Review lesson</h2>
   <p class="authhint dlg-sub" id="lessonSub"></p>

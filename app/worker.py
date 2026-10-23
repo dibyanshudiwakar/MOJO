@@ -319,7 +319,8 @@ class WorkerLoop:
         user = self.repo.one('select * from users where email=?', (email,))
         if not user:
             raise PermissionError('pipeline_owner_account_not_found:' + email)
-        return user, AccountService.roles_of(user)
+        # The same expansion sign-in applies: the default role stands for the operator roles.
+        return user, AccountService.token_roles(AccountService.roles_of(user))
 
     #: How long a cancellation check trusts its last answer, in seconds.
     #:
