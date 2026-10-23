@@ -327,3 +327,15 @@ def test_confirm_requires_draft_and_run_requires_ready(env):
     pipelines.confirm(p['id'])
     with pytest.raises(PipelineError, match='pipeline_not_in_draft'):
         pipelines.confirm(p['id'])
+
+
+def test_progress_counts_finished_and_skipped_steps(env):
+    """The dashboard's percentage is steps done over steps, not the job's lifecycle state."""
+    repo, _job, pipelines, _workflow = env
+    with repo.connect() as c:
+        c.execute("insert into pipelines(id,job_id,name,workspace_dir,status,created_at) values('pp','j','x','w','RUNNING','t')")
+        for i, st in enumerate(('COMPLETED', 'SKIPPED', 'RUNNING', 'PENDING')):
+            c.execute("insert into pipeline_steps(id,pipeline_id,sequence,kind,agent_id,status) values(?,?,?,?,?,?)",
+                      ('s%d' % i, 'pp', i, 'agent', 'a%d' % i, st))
+    assert pipelines.progress_of('pp') == {'steps_total': 4, 'steps_done': 2}
+    assert pipelines.progress_of('missing') == {'steps_total': 0, 'steps_done': 0}

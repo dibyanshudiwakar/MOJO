@@ -557,6 +557,9 @@ class H(BaseHTTPRequestHandler):
                     if job: identity.authorize_job(principal,job)
                 except PermissionError: continue
                 out.append(row)
+            # How far each pipeline has got, counted from its steps.
+            for r in out:
+                r.update(pipelines.progress_of(r['id']))
             return self.sendj(200,{'items':out})
         m=re.fullmatch(r'/api/v2/pipelines/([^/]+)',p)
         if m:

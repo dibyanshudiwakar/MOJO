@@ -1558,6 +1558,16 @@ class PipelineService:
         steps = self.repo.rows('select * from pipeline_steps where pipeline_id=? order by sequence', (pipeline_id,))
         return {**p, 'steps': steps}
 
+    #: A step that finished or was skipped counts as done, the same as on the pipeline page.
+    DONE_STEP_STATUSES = ('COMPLETED', 'SKIPPED')
+
+    def progress_of(self, pipeline_id):
+        """``{'steps_total', 'steps_done'}`` for a pipeline, counted from its steps."""
+        row = self.repo.one(
+            "select count(*) total, sum(case when status in ('COMPLETED','SKIPPED') then 1 else 0 end) done "
+            "from pipeline_steps where pipeline_id=?", (pipeline_id,)) or {}
+        return {'steps_total': int(row.get('total') or 0), 'steps_done': int(row.get('done') or 0)}
+
     def list_for_job(self, job_id=None):
         if job_id:
             return self.repo.rows('select * from pipelines where job_id=? order by created_at desc', (job_id,))
