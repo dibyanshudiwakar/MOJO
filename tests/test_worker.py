@@ -125,3 +125,12 @@ def test_roles_are_re_read_at_dispatch_time(tmp_path, env):
     worker.process_one()
     step = find(pipelines.detail(p['id'])['steps'], 'repository-intake')
     assert step['status'] == 'COMPLETED'
+
+
+def test_an_operator_owner_dispatches_with_every_operator_role(env):
+    """The default role stands for the operator roles, so a step must run with them."""
+    repo, job, owner, pipelines, workflow, worker = env
+    with repo.connect() as c:
+        c.execute("update users set granted_roles='MIGRATION_OPERATOR' where id=?", (owner['id'],))
+    _, roles = worker._principal(owner['email'])
+    assert {'REPOSITORY_INTAKE', 'MIGRATION_PLANNER', 'CODE_GENERATOR'} <= set(roles)
