@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.providers.cvscode_adapter import CvscodeClaudeAdapter, _parse_json
+from app.providers.cvscode_adapter import CvscodeClaudeAdapter, _parse_json, _rebracket
 
 DOCUMENT = ('```json\n{\n "specification": {\n "metadata": {"service": "X"},\n'
             ' "interfaces": ["a", "b"],\n "mappings": [{"id": 1}')  # cut off mid-document
@@ -121,6 +121,37 @@ def test_an_empty_thinking_block_is_reported_as_reasoning_not_as_none():
     with pytest.raises(RuntimeError) as raised:
         adapter.invoke('t', {})
     assert 'reasoned before answering' in str(raised.value)
+
+
+# ---- wrong-closer-type repair ---------------------------------------------------------------
+
+#: Observed live on agent/repository-intake/inventory: Haiku closed the
+#: "inventory" object with `]` instead of `}` after a long run of sibling
+#: arrays (files/flows/subflows/esql/schemas/maps/policies) -- 4 times out of
+#: 5 tries against the same real repository, not a one-off.
+MISCLOSED = ('```json\n{\n "inventory": {\n "files": ["a.java"],\n'
+            ' "policies": []\n ],\n "gaps": ["g"]\n}\n```')
+
+
+def test_a_misclosed_object_deep_in_sibling_arrays_still_parses():
+    parsed = _parse_json(MISCLOSED)
+    assert parsed['inventory']['files'] == ['a.java']
+    assert parsed['gaps'] == ['g']
+
+
+def test_rebracket_corrects_a_wrong_closer_from_its_real_opener():
+    assert _rebracket('{"a": [1, 2]}') == '{"a": [1, 2]}', 'well-formed text is a no-op'
+    assert _rebracket('{"a": [1, 2]]') == '{"a": [1, 2]}', 'the outer } was written as ]'
+
+
+def test_rebracket_never_touches_a_bracket_inside_a_string():
+    text = '{"note": "array like [1, 2] in prose"}'
+    assert _rebracket(text) == text
+
+
+def test_an_unrelated_malformed_document_is_still_reported_as_unparseable():
+    """The repair is narrow: it does not turn every malformed reply into a false positive."""
+    assert _parse_json(DOCUMENT) is None
 
 
 def test_each_alias_maps_one_tier_down():

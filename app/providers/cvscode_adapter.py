@@ -341,6 +341,44 @@ def _span(text, opener, closer):
     return ''
 
 
+_OPENERS = {'{': '}', '[': ']'}
+
+
+def _rebracket(text):
+    """Rewrite each closing bracket to match its actual opener, in nesting order.
+
+    Observed live on ``agent/repository-intake/inventory``: Haiku, after a long
+    run of sibling arrays (``files``, ``flows``, ``subflows``, ``esql``,
+    ``schemas``, ``maps``, ``policies``), closed the enclosing ``inventory``
+    *object* with ``]`` instead of ``}`` -- reproduced 4 times out of 5 tries,
+    not a one-off. The opener at each nesting depth is never ambiguous, so the
+    matching closer is always recoverable from it alone, even when the model's
+    own closer is the wrong character. This makes the fix a safe no-op on
+    already well-formed text: a closer that was already right is replaced with
+    itself. String contents are left untouched so a literal bracket inside a
+    quoted value is never rewritten.
+    """
+    stack = []
+    out = list(text)
+    in_string = escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in _OPENERS:
+            stack.append(_OPENERS[char])
+        elif char in ('}', ']') and stack:
+            out[index] = stack.pop()
+    return ''.join(out)
+
+
 def _parse_json(text):
     """The model's JSON, however it chose to wrap it. ``None`` if unrecoverable.
 
@@ -352,8 +390,11 @@ def _parse_json(text):
     stripping happened and the whole thing failed to parse.
 
     Each plausible reading is now tried in turn, ending with a balanced-span
-    extraction that finds a complete object regardless of what surrounds it. An
-    answer genuinely cut off mid-object still returns ``None``, which the caller
+    extraction that finds a complete object regardless of what surrounds it.
+    Each one is additionally tried through ``_rebracket`` before being given
+    up on, which repairs a wrong-closer-type mistake (``]`` where nesting
+    requires ``}``) without otherwise changing well-formed text. An answer
+    genuinely cut off mid-object still returns ``None``, which the caller
     reports as unparseable rather than disguising as a schema failure.
     """
     if not text:
@@ -378,8 +419,11 @@ def _parse_json(text):
         candidate = (candidate or '').strip()
         if not candidate:
             continue
-        try:
-            return json.loads(candidate)
-        except (ValueError, TypeError):
-            continue
+        # The rebracketed version is tried second, not instead: it is only
+        # ever needed when the literal text does not already parse.
+        for attempt in (candidate, _rebracket(candidate)):
+            try:
+                return json.loads(attempt)
+            except (ValueError, TypeError):
+                continue
     return None
