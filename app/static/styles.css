@@ -1371,6 +1371,10 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .plan-src{font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;color:var(--text-2);display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .plan-ace-badge{font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;background:var(--purple-bg);color:var(--purple-text);padding:2px 6px;border-radius:4px;white-space:nowrap;display:inline-block}
 .plan-tests-cell{font-size:11px;color:var(--text-2);max-width:220px;line-height:1.5}
+.plan-tbl.plan-tbl-fixed{table-layout:fixed;width:100%}
+.plan-tbl.plan-tbl-fixed th{white-space:normal}
+.plan-tbl.plan-tbl-fixed td{overflow:hidden;overflow-wrap:break-word;word-break:break-word;white-space:normal}
+.plan-risk-stmt{font-size:12.5px;line-height:1.55;color:var(--text);overflow-wrap:break-word;word-break:break-word;white-space:normal}
 .plan-raw-tb{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border-2);flex-shrink:0}
 .plan-raw-lbl{font-size:12px;color:var(--text-2)}
 .plan-copy-btn{background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:12px;padding:5px 12px;border-radius:var(--r);cursor:pointer;transition:background .12s,color .12s,border-color .12s}

@@ -1967,6 +1967,7 @@ function renderArtefact(art){
   let secs='';
   if(ambigCount)secs+=`<div class="plan-si" data-ace-tab="ambiguities"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="7" x2="10" y2="10.5"/><circle cx="10" cy="13.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Ambiguities</div><div class="plan-si-meta">${ambigCount} open question${ambigCount!==1?'s':''} · require expert input</div></div></div><span class="plan-si-caret">›</span></div>`;
   if(art.markdown)secs+=`<div class="plan-si" data-ace-tab="report"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Analysis Report</div><div class="plan-si-meta">Full analysis · coverage, patterns, and recommendations</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(art.html_url)secs+=`<div class="plan-si" data-ace-html-url="${esc(art.html_url)}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-4"/><path d="M13 3h4v4M11 9l6-6"/></svg><div><div class="plan-si-name">ACE Analysis HTML Report</div><div class="plan-si-meta">HTML report · full analysis with file listings · opens in new tab</div></div></div><span class="plan-si-caret">›</span></div>`;
   secs+=`<div class="plan-si" data-ace-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full analysis output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
   if(smTable.length){
@@ -2119,6 +2120,15 @@ function renderArtefact(art){
   window._knwArt=art;
   html+=`<div class="plan-sections"><div class="plan-si" data-knw-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full knowledge evidence output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
   return html}
+ // Feedback
+ if(art.format==='feedback'){
+  window._fbkArt=art;
+  const fixCount=(art.applied_fixes||[]).length;
+  const unresolvedCount=(art.unresolved||[]).length;
+  const qs=art.quality_status||'';
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${fixCount}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unresolvedCount>0?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unresolvedCount}</span><span class="plan-stat-l">Unresolved</span></div><div class="plan-stat-chip ${qs==='PASS'?'plan-stat-ok':qs?'plan-stat-warn':''}"><span class="plan-stat-n">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div></div>`;
+  html+=`<div class="plan-sections"><div class="plan-si" data-fbk-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full feedback output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Report-style sections (intake, dormancy)
  if(art.sections){
   art.sections.forEach(s=>{
@@ -2146,7 +2156,7 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template'||artefact?.format==='code'||artefact?.format==='test'||artefact?.format==='variances'||artefact?.format==='rca'||artefact?.format==='remediation'||artefact?.format==='governance'||artefact?.format==='knowledge')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template'||artefact?.format==='code'||artefact?.format==='test'||artefact?.format==='variances'||artefact?.format==='rca'||artefact?.format==='remediation'||artefact?.format==='governance'||artefact?.format==='knowledge'||artefact?.format==='feedback')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
 function renderCloneOutputPane(outputs,params){
  const branch=outputs.branch||params.branch||'—';
@@ -2287,7 +2297,7 @@ function renderPlanMappingsTab(mappings){
  return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search source, ACE construct…"><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${mappings.length} of ${mappings.length}</span></div>
  <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody id="pmTbody">${planMappingRows(mappings,'','')}</tbody></table></div>`}
 function renderPlanRisksTab(risks){
- return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-tests-cell">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl plan-tbl-fixed"><colgroup><col style="width:90px"><col style="width:180px"><col><col style="width:180px"><col style="width:160px"></colgroup><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-risk-stmt">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
 function renderPlanRawTab(){
  const data=window._planOutputs||window._planArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</pre>`}
@@ -2503,13 +2513,13 @@ function openTestModal(tab){
   try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
 
 // ==== Variance Analysis Output Modal ======================================
-async function _openHtmlReport(url){
+async function _openHtmlReport(url,cssFile){
  try{
   const t=sessionStorage.getItem('access_token')||'';
   const res=await fetch(url,{headers:t?{Authorization:'Bearer '+t}:{}});
   if(!res.ok)throw new Error(res.status);
   let html=await res.text();
-  const cssHref=location.origin+'/static/report-styles.css';
+  const cssHref=location.origin+'/static/'+(cssFile||'report-styles.css');
   html=html.replace(/<style>[\s\S]*?<\/style>/i,'<link rel="stylesheet" href="'+cssHref+'">');
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
   const blobUrl=URL.createObjectURL(blob);
@@ -2660,6 +2670,33 @@ function openKnwModal(tab){
  const cpBtn=document.getElementById('knwmCopyJson');
  if(cpBtn)cpBtn.onclick=()=>{
   const data=window._knwOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Feedback Output Modal ===============================================
+function openFbkModal(tab){
+ const art=window._fbkArt;if(!art)return;
+ let m=document.getElementById('fbkModal');
+ if(!m){
+  m=document.createElement('div');m.id='fbkModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="fbkmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Code Quality Feedback — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full feedback output</div>
+   </div>
+   <button id="fbkmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._fbkOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('fbkmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('fbkmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._fbkOutputs||art;
   try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
 
 // ==== Code Generation Output Modal ========================================
@@ -2948,6 +2985,7 @@ async function openStepOutput(pipelineId,stepId,step){
  if(detail.artefact?.format==='remediation')window._remOutputs=outputs;
  if(detail.artefact?.format==='governance')window._govOutputs=outputs;
  if(detail.artefact?.format==='knowledge')window._knwOutputs=outputs;
+ if(detail.artefact?.format==='feedback')window._fbkOutputs=outputs;
  const _outputPaneHtml=detail.kind==='CLONE'?renderCloneOutputPane(outputs,params):renderOutputPane(outputs,detail.artefact);
  panel.innerHTML=`
   <div class="op-header">
@@ -3013,6 +3051,8 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.plan-si[data-rem-tab]').forEach(item=>{item.addEventListener('click',()=>openRemModal(item.dataset.remTab))});
  panel.querySelectorAll('.plan-si[data-gov-tab]').forEach(item=>{item.addEventListener('click',()=>openGovModal(item.dataset.govTab))});
  panel.querySelectorAll('.plan-si[data-knw-tab]').forEach(item=>{item.addEventListener('click',()=>openKnwModal(item.dataset.knwTab))});
+ panel.querySelectorAll('.plan-si[data-fbk-tab]').forEach(item=>{item.addEventListener('click',()=>openFbkModal(item.dataset.fbkTab))});
+ panel.querySelectorAll('[data-ace-html-url]').forEach(item=>{item.addEventListener('click',()=>_openHtmlReport(item.dataset.aceHtmlUrl,'ace-analysis-report-styles.css'))});
  const cloneCopyBtn=panel.querySelector('#cloneCopySHA');
  if(cloneCopyBtn)cloneCopyBtn.onclick=()=>{
   try{navigator.clipboard.writeText(outputs.commit||'').then(()=>{cloneCopyBtn.textContent='Copied ✓';setTimeout(()=>{cloneCopyBtn.textContent='Copy SHA'},1500)}).catch(()=>{})}catch(e){}};
