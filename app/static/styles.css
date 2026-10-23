@@ -1425,3 +1425,7 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .access-table select{max-width:100%;width:58%}
 .access-table td button{margin-top:2px}
 @media(max-width:900px){.access-table table,.access-table thead,.access-table tbody,.access-table tr,.access-table td{display:block;width:100%}.access-table thead{display:none}.access-table tr{padding:10px 0;border-bottom:1px solid var(--border-2)}}
+
+/* Access: section header with its action. */
+.access-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
+.access-head h3{margin:0}

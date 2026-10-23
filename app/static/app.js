@@ -462,6 +462,17 @@ $('#agentModelForm').onsubmit=async e=>{
   $('#agentModelDialog').close();notice(id+' now runs on '+alias);agentModelsPage()
  }catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 // Access: who holds which role, requests for gate approver roles, grant and revoke.
+let _grantable=[],_gateRoles=new Set();
+function openProfileDialog(){
+ const f=$('#profileForm');f.reset();$('#profileError').textContent='';
+ $('#profileRole').innerHTML=_grantable.map(r=>`<option value="${esc(r)}"${r===DEFAULT_ROLE_NAME?' selected':''}>${esc(r)}${_gateRoles.has(r)?' (gate approver)':''}</option>`).join('');
+ $('#profileDialog').showModal();f.name.focus()}
+$('#profileCancel').onclick=()=>$('#profileDialog').close();
+$('#profileForm').onsubmit=async e=>{e.preventDefault();const f=e.target;const err=$('#profileError');err.textContent='';
+ const btn=$('#profileSubmit');btn.disabled=true;
+ try{await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify({name:f.name.value,email:f.email.value,password:f.password.value,roles:[f.role.value]})});
+  $('#profileDialog').close();notice('Profile created for '+f.email.value);accessPage()}
+ catch(x){err.textContent=friendly(x.message)}finally{btn.disabled=false}};
 async function accessPage(){
  let d;
  try{d=await api('/api/v2/admin/access')}catch(e){$('#view').innerHTML=`<div class="hero"><h2>Access</h2><p>Granting roles needs the <b>GOVERNANCE_ADMIN</b> role. ${esc(e.message)}</p></div>`;return}
@@ -470,11 +481,10 @@ async function accessPage(){
  const reqs=d.requests.length?`<div class="table access-table"><table><thead><tr><th>Account</th><th>Role requested</th><th>Requested</th><th>Decision</th></tr></thead><tbody>${d.requests.map(r=>`<tr><td>${esc(r.email)}</td><td>${esc(r.role)}</td><td>${esc(fmtDt(r.requested_at))}</td><td><button class="btn-primary" data-decide="APPROVE" data-id="${esc(r.id)}">Approve</button> <button data-decide="REJECT" data-id="${esc(r.id)}">Reject</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending role requests</div>';
  const grantOpts=u=>d.grantable.filter(r=>!u.roles.includes(r)).map(r=>`<option value="${esc(r)}">${esc(r)}${gate.has(r)?' (gate approver)':''}</option>`).join('');
  const users=`<div class="table access-table"><table><thead><tr><th>Account</th><th>Roles</th><th>Grant a role</th></tr></thead><tbody>${d.users.map(u=>`<tr><td class="td-name">${esc(u.name)}<br><small>${esc(u.email)}</small></td><td>${u.roles.map(r=>chip(u,r)).join('')||'—'}</td><td><select data-pick="${esc(u.email)}">${grantOpts(u)}</select> <button data-grant="${esc(u.email)}">Grant</button></td></tr>`).join('')}</tbody></table></div>`;
- $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><h3>Create a profile</h3><div class="card" style="padding:16px 20px;margin-bottom:16px"><form id="createProfile" class="access-create"><label>Full name<input name="name" required minlength="2" autocomplete="off"></label><label>Email<input name="email" type="email" required autocomplete="off"></label><label>Temporary password<input name="password" type="password" required minlength="12" autocomplete="new-password"></label><label>Role<select name="role">${d.grantable.map(r=>`<option value="${esc(r)}"${r===d.default_role?' selected':''}>${esc(r)}${gate.has(r)?' (gate approver)':''}</option>`).join('')}</select></label><button class="btn-primary" type="submit">Create profile</button></form><p class="authhint">The person signs in with this password and should change it. Operator access is the default role; gate approver roles are granted here, by an administrator.</p></div>
-<h3>Role requests</h3>${reqs}<h3>Accounts</h3>${users}`;
+ $('#view').innerHTML=`<div class="hero"><span class="live-dot">LIVE DATABASE</span><h2>Access</h2><p>Gate approver roles (${d.gate_roles.map(esc).join(', ')}) are what let a person approve G0–G5. A new role applies after that person signs in again.</p></div><div class="access-head"><h3>Accounts</h3><button id="openProfile" class="btn-primary" type="button">+ Create profile</button></div>${users}`;
  const act=async(url,body,msg)=>{try{await api(url,{method:'POST',body:JSON.stringify(body)});notice(msg);accessPage()}catch(e){notice(e.message,true)}};
- document.getElementById('createProfile').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
- try{await api('/api/v2/auth/signup',{method:'POST',body:JSON.stringify({name:f.name,email:f.email,password:f.password,roles:[f.role]})});notice('Profile created for '+f.email);accessPage()}catch(x){notice(x.message,true)}};
+ _grantable=d.grantable;_gateRoles=new Set(d.gate_roles);
+document.getElementById('openProfile').onclick=()=>openProfileDialog();
 document.querySelectorAll('[data-decide]').forEach(b=>b.onclick=()=>act('/api/v2/auth/role-requests/decide',{id:b.dataset.id,decision:b.dataset.decide},'Request '+b.dataset.decide.toLowerCase()+'d'));
  document.querySelectorAll('[data-grant]').forEach(b=>b.onclick=()=>{const sel=document.querySelector(`select[data-pick="${CSS.escape(b.dataset.grant)}"]`);if(sel&&sel.value)act('/api/v2/auth/grant-role',{email:b.dataset.grant,role:sel.value},sel.value+' granted')});
  document.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>{if(confirm('Revoke '+b.dataset.revoke+' from '+b.dataset.email+'?'))act('/api/v2/auth/revoke-role',{email:b.dataset.email,role:b.dataset.revoke},b.dataset.revoke+' revoked')})}
