@@ -32,11 +32,12 @@ reason -- a real backend host in ``config/config-map/*.properties`` or
 violation of it.
 """
 import json
+import os
 import re
 from pathlib import Path
 
 from app.repository import now
-from app.services import skill_repair
+from app.services import dependency_jars, skill_repair
 
 #: Exactly the suffixes and size bound ``quality_validate`` reads, so a fix
 #: cannot miss a file the gate will go on to scan, or edit one it will not.
@@ -106,11 +107,55 @@ def _build_errors(check):
     return len(evidence.get('errors') or []) if isinstance(evidence, dict) else 0
 
 
+def _compiler_ran(check):
+    """Whether the build got far enough to actually invoke the compiler.
+
+    Observed live: a pom Maven cannot even read (an undefined ``${property}``
+    in a dependency version, same shape for any other pom defect) fails
+    before any plugin runs, with a short, fixed shape ("Some problems were
+    encountered while processing the POMs", "The build could not read N
+    project(s)") -- categorically earlier than a real compilation failure,
+    which always prints "COMPILATION ERROR" because the compiler plugin
+    actually ran (``app/services/build_check.py``'s own ``_ERROR`` pattern
+    matches that literal string). Treating both as the same stage and
+    breaking the tie by raw error-line count compares unlike things: a real
+    compile failure against several source files naturally has many more
+    lines than a short pom-read failure, so an edit that made the pom
+    readable -- genuine, necessary progress -- looked like it made things
+    worse and was reverted, on every attempt, every time.
+    """
+    evidence = (check or {}).get('evidence')
+    errors = evidence.get('errors') if isinstance(evidence, dict) else None
+    return any('COMPILATION ERROR' in str(line) for line in (errors or []))
+
+
+def _unresolved_symbols(check):
+    """Whether an import or type the compiler could not even resolve is still in the way.
+
+    Observed live, directly downstream of the pom-readability fix above:
+    clearing the *last* "cannot find symbol"/"package ... does not exist"
+    error in a file can surface several new, real errors in the very same
+    build -- a wrong return type on an ``@Override``, a method call with the
+    wrong argument count -- because javac cannot type-check an expression
+    that depends on a symbol it never resolved in the first place. Fixing the
+    one import that was blocking all of that analysis is still strictly
+    forward progress, even though the error *line count* goes up the moment
+    the deeper, previously-invisible problems become checkable at all.
+    """
+    evidence = (check or {}).get('evidence')
+    errors = evidence.get('errors') if isinstance(evidence, dict) else None
+    return any('cannot find symbol' in str(line) or 'does not exist' in str(line)
+              for line in (errors or []))
+
+
 def score(checks):
     """(open non-build checks, build stages passed, build errors left) for one gate run.
 
-    ``stage`` is 0 while the build fails, 1 once it compiles and its tests pass but
-    the service does not start, 2 when it also starts (or no build was run).
+    ``stage`` is 0 while the pom cannot even be read, 1 once the compiler runs
+    but a symbol/import it cannot resolve is still in the way, 2 once every
+    symbol resolves and only type-level mismatches remain, 3 once it compiles
+    and its tests pass but the service does not start, 4 when it also starts
+    (or no build was run).
     """
     by_name = {c['name']: c for c in checks}
     others = frozenset(c['name'] for c in checks
@@ -118,11 +163,17 @@ def score(checks):
     compile_ = by_name.get('COMPILE_AND_UNIT_TEST', {})
     start = by_name.get('STARTUP_SMOKE', {})
     if compile_.get('status') == 'FAIL':
-        stage, errors = 0, _build_errors(compile_)
+        if not _compiler_ran(compile_):
+            stage = 0
+        elif _unresolved_symbols(compile_):
+            stage = 1
+        else:
+            stage = 2
+        errors = _build_errors(compile_)
     elif start.get('status') == 'FAIL':
-        stage, errors = 1, _build_errors(start)
+        stage, errors = 3, _build_errors(start)
     else:
-        stage, errors = 2, 0
+        stage, errors = 4, 0
     return others, stage, errors
 
 
@@ -170,6 +221,189 @@ def _files(root):
         if (f.is_file() and f.suffix.lower() in SCANNED_SUFFIXES
                 and f.stat().st_size < MAX_FILE_BYTES):
             yield f
+
+
+#: Overridable the same way ``MOJO_MODEL_*``/``MOJO_MAX_TOKENS`` are in
+#: ``app/providers/cvscode_adapter.py`` -- a deployment whose local Maven cache
+#: lives somewhere other than the default.
+def _m2_root():
+    return Path(os.environ.get('MOJO_M2_REPO') or (Path.home() / '.m2' / 'repository'))
+
+
+_PACKAGE_DECL = re.compile(r'(?m)^\s*package\s+([\w.]+)\s*;')
+_TYPE_DECL = re.compile(r'(?m)^\s*(?:public\s+|final\s+|abstract\s+|static\s+)*'
+                        r'(?:class|interface|record|enum)\s+(\w+)')
+_IMPORT = re.compile(r'(?m)^\s*import\s+([\w.]+)\.(\w+)\s*;')
+
+
+def _local_classes(root):
+    """``{simple_name: [fqn, ...]}`` for every type this project's own ``.java`` files declare.
+
+    The other half of "refer the real project" alongside ``dependency_jars``:
+    what the model itself already wrote, read back rather than assumed.
+    """
+    merged = {}
+    for f in Path(root).rglob('*.java'):
+        if f.stat().st_size >= MAX_FILE_BYTES:
+            continue
+        text = f.read_text(errors='ignore')
+        package = _PACKAGE_DECL.search(text)
+        if not package:
+            continue
+        for name in set(_TYPE_DECL.findall(text)):
+            fqn = package.group(1) + '.' + name
+            bucket = merged.setdefault(name, [])
+            if fqn not in bucket:
+                bucket.append(fqn)
+    return merged
+
+
+#: A class/interface header, with whatever it extends/implements -- the two
+#: ends of the contract a cross-file method-signature mismatch always breaks.
+_CLASS_DECL = re.compile(
+    r'(?:public\s+|final\s+|abstract\s+)*(class|interface)\s+(\w+)'
+    r'(?:\s+extends\s+([\w.]+))?(?:\s+implements\s+([\w.,\s]+?))?\s*\{')
+#: A field's declared type -- the other common way a file depends on a
+#: sibling's real signature (``this.connectorService.getClaimStatus(...)``).
+_FIELD_TYPE = re.compile(
+    r'(?m)^\s*(?:private|protected|public)\s+(?:final\s+)?(\w+)(?:<[^<>]*>)?\s+(\w+)\s*[;=]')
+#: Where a method declaration starts -- return type and name only. The
+#: parameter list is found separately (``_balanced_parens``) because it
+#: routinely contains its own nested parens (``@Parameter(description = "...")``
+#: on every argument of an interface method is the normal shape here, and a
+#: naive ``\(([^()]*)\)`` capture breaks on the first one).
+_METHOD_START = re.compile(
+    r'(?<=[;}\n])\s*(?:public\s+|protected\s+)?(?:static\s+)?'
+    r'((?:[A-Z]\w*|void|boolean|int|long|double|float|char|byte|short)(?:<[^<>]*>)?(?:\[\])?)\s+'
+    r'(\w+)\s*\(')
+
+
+def _balanced_parens(text, open_pos):
+    """The span from ``text[open_pos] == '('`` to its true matching ``)``.
+
+    String-aware for the same reason ``cvscode_adapter.py``'s ``_span`` is: a
+    quoted ``@Parameter(example = "6003~123^^1")`` value could otherwise be
+    mistaken for structure.
+    """
+    depth, in_string, escaped = 0, False, False
+    for i in range(open_pos, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return text[open_pos:i + 1]
+    return ''
+
+
+def _split_top_level_commas(params):
+    """Split a parameter list on commas that are not nested inside ``<...>`` or ``(...)``."""
+    parts, current, angle, paren = [], '', 0, 0
+    for ch in params:
+        if ch == '<':
+            angle += 1
+        elif ch == '>':
+            angle = max(0, angle - 1)
+        elif ch == '(':
+            paren += 1
+        elif ch == ')':
+            paren = max(0, paren - 1)
+        if ch == ',' and angle == 0 and paren == 0:
+            parts.append(current)
+            current = ''
+        else:
+            current += ch
+    if current.strip():
+        parts.append(current)
+    return parts
+
+
+def _strip_param_annotations(param):
+    """Drop every leading ``@Annotation`` / ``@Annotation(...)`` before the type and name."""
+    param = param.strip()
+    leading = re.compile(r'^@\w+(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?\s*')
+    while True:
+        m = leading.match(param)
+        if not m:
+            return param
+        param = param[m.end():].strip()
+
+
+def _param_types(params_blob):
+    types = []
+    for raw in _split_top_level_commas(params_blob):
+        tokens = _strip_param_annotations(raw).split()
+        if len(tokens) >= 2:
+            types.append(tokens[-2])
+        elif tokens:
+            types.append(tokens[0])
+    return types
+
+
+def _methods_in(text):
+    """``[(return_type, name, [param_type, ...]), ...]`` for every method this source declares.
+
+    Matches an interface method (ends ``;``, no body, no modifier at all) the
+    same as a class method (ends ``{``) -- both are real contracts a sibling
+    file's call or ``@Override`` must agree with.
+    """
+    found = []
+    for m in _METHOD_START.finditer(text):
+        return_type, name = m.group(1), m.group(2)
+        open_pos = m.end() - 1
+        span = _balanced_parens(text, open_pos)
+        if not span:
+            continue
+        after = text[open_pos + len(span):].lstrip()
+        if not (after.startswith('{') or after.startswith(';')):
+            continue
+        found.append((return_type, name, _param_types(span[1:-1])))
+    return found
+
+
+def _local_contracts(root):
+    """``{simple_name: {'kind', 'implements_extends', 'methods'}}`` for every project class/interface.
+
+    ``methods`` is ``{method_name: ['ReturnType methodName(Type, Type, ...)', ...]}``
+    -- a real signature string per overload, read back from the source rather
+    than assumed. This is what lets a cross-file signature mismatch (a
+    controller's ``@Override`` disagreeing with its own ``Api`` interface, a
+    service calling its connector with the wrong argument shape) be corrected
+    with the real answer instead of another guess.
+    """
+    contracts = {}
+    for f in Path(root).rglob('*.java'):
+        if f.stat().st_size >= MAX_FILE_BYTES:
+            continue
+        text = f.read_text(errors='ignore')
+        cls = _CLASS_DECL.search(text)
+        if not cls:
+            continue
+        kind, name, extends, implements = cls.groups()
+        targets = []
+        if extends:
+            targets.append(extends.strip())
+        if implements:
+            targets += [x.strip() for x in implements.split(',') if x.strip()]
+        methods = {}
+        for return_type, mname, types in _methods_in(text):
+            sig = '%s %s(%s)' % (return_type, mname, ', '.join(types))
+            methods.setdefault(mname, [])
+            if sig not in methods[mname]:
+                methods[mname].append(sig)
+        contracts[name] = {'kind': kind, 'implements_extends': targets, 'methods': methods}
+    return contracts
 
 
 def accept_edit(root, edit):
@@ -323,6 +557,74 @@ class CodeFeedbackService:
     def _accept_edit(self, root, edit):
         return accept_edit(root, edit)
 
+    def _verified_symbols(self, root, files):
+        """Where a shown file's foreign imports actually resolve, if anywhere real.
+
+        Checked against this project's own other generated files and whatever
+        of its declared Maven dependencies are resolvable in the local cache --
+        never a hardcoded table of one framework, so this is the same for
+        whatever stack a given migration targets. ``[]`` when nothing resolves
+        locally at all, which is the signal that this fallback has nothing to
+        add and the model is on its own, exactly as before it existed.
+        """
+        index = _local_classes(root)
+        poms = [p.read_text(errors='ignore') for p in Path(root).rglob('pom.xml')
+               if p.stat().st_size < MAX_FILE_BYTES]
+        for simple, fqns in dependency_jars.project_classes(poms, _m2_root()).items():
+            bucket = index.setdefault(simple, [])
+            for fqn in fqns:
+                if fqn not in bucket:
+                    bucket.append(fqn)
+        if not index:
+            return []
+        found, seen = [], set()
+        for f in files:
+            for pkg, cls in _IMPORT.findall(f.get('content', '')):
+                imported = pkg + '.' + cls
+                if cls in index and imported not in index[cls] and imported not in seen:
+                    seen.add(imported)
+                    found.append({'imported_as': imported, 'class': cls, 'actually_at': index[cls]})
+        return found
+
+    def _verified_contracts(self, root, files):
+        """The real methods of whatever local type a shown file must agree with.
+
+        Two shapes cover what a cross-file signature mismatch actually is:
+        a class/interface the file ``implements``/``extends`` (a controller's
+        ``@Override`` disagreeing with its own Api interface), and a field
+        whose declared type is another local class (a service calling its
+        connector with the wrong argument shape). Both are read back from the
+        real source, never guessed -- the same "refer the real project"
+        principle as ``_verified_symbols``, just for signatures instead of
+        imports. ``[]`` when a shown file references no local type this way.
+        """
+        contracts = _local_contracts(root)
+        if not contracts:
+            return []
+        found, seen = [], set()
+        for f in files:
+            text = f.get('content', '')
+            targets = set()
+            cls = _CLASS_DECL.search(text)
+            if cls:
+                _, _, extends, implements = cls.groups()
+                if extends:
+                    targets.add(extends.strip())
+                if implements:
+                    targets |= {x.strip() for x in implements.split(',') if x.strip()}
+            for field_type, _field_name in _FIELD_TYPE.findall(text):
+                if field_type in contracts:
+                    targets.add(field_type)
+            for name in targets:
+                contract = contracts.get(name)
+                if not contract or name in seen:
+                    continue
+                methods = sorted({sig for sigs in contract['methods'].values() for sig in sigs})
+                if methods:
+                    seen.add(name)
+                    found.append({'class': name, 'kind': contract['kind'], 'methods': methods})
+        return found
+
     def _claude_repair(self, context, root, checks, job_id, plan_id, quality,
                        execute_build='auto', history=None):
         """Ask the model for edits, apply them, and keep them only if the gate improves.
@@ -335,16 +637,31 @@ class CodeFeedbackService:
         The gate is re-run *with the build*. It used to be re-run without it, so a
         build failure showed as "not executed" after any edit, the repair looked like
         an improvement, and an edit that had never been compiled was kept.
+
+        ``verified_symbols``/``verified_contracts`` ride in the payload the same
+        way ``previous_attempts``/``_correction`` do elsewhere in this codebase --
+        new data the approved template never has to name, added only when there is
+        something real to say. The first is where a cited file's import actually
+        resolves; the second is the real method signatures of whatever local type
+        a shown file implements/extends or holds as a field. Both are checked
+        against this project's own other files (plus, for imports, whatever of
+        its declared Maven dependencies are resolvable locally) -- never a
+        hardcoded table of one framework, since this stage is reached by any
+        migration, not only this one.
         """
         from app.agents.reasoning import ReasoningGateway
         # FAIL and GAP both count: a repair that closes a GAP is an improvement
         # the gate can see, and one that opens a new GAP is not.
         failed_before = {c['name'] for c in checks if c['status'] in ('FAIL', 'GAP')}
         detail, files = self._candidates(root, checks)
+        verified = self._verified_symbols(root, files)
+        contracts = self._verified_contracts(root, files)
         answer, provenance = ReasoningGateway(self.repo).reason(
             context, 'agent/feedback/code-repair',
             {'failing_checks': sorted(failed_before), 'check_detail': detail, 'files': files,
-             **({'previous_attempts': list(history)[-3:]} if history else {})})
+             **({'previous_attempts': list(history)[-3:]} if history else {}),
+             **({'verified_symbols': verified} if verified else {}),
+             **({'verified_contracts': contracts} if contracts else {})})
         if not isinstance(answer, dict) or not answer.get('edits'):
             return {'attempted': bool(answer), 'applied': [], 'refused': [],
                     'outcome': 'no_edits_proposed',

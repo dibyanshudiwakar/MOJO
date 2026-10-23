@@ -66,11 +66,11 @@ def _approve_gateway(repo):
             'created_at': now()})
 
 
-def _project(root, yaml_text=None, java_text=None):
+def _project(root, yaml_text=None, java_text=None, pom_text=None):
     proj = root / 'springboot-output'
     (proj / 'src/main/resources').mkdir(parents=True, exist_ok=True)
     (proj / 'src/main/java').mkdir(parents=True, exist_ok=True)
-    (proj / 'pom.xml').write_text(
+    (proj / 'pom.xml').write_text(pom_text if pom_text is not None else
         '<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies><dependency>'
         '<artifactId>framework-restclient</artifactId></dependency></dependencies></project>')
     (proj / 'provenance-manifest.json').write_text('{}')
@@ -297,3 +297,162 @@ def test_edit_count_is_capped(env, monkeypatch):
         job['id'], plan_id, str(proj), max_passes=2, context=_ctx(repo, job['id'], model))
 
     assert len(out['model_rounds'][0]['refused']) <= MAX_EDITS
+
+
+# ---- verified_symbols: refer the real project/jars, never a hardcoded table ------------------
+
+def test_a_wrong_dependency_import_is_resolved_against_the_real_local_jar(env, monkeypatch, tmp_path):
+    """The fallback 'refer the framework repo': whatever THIS project's pom declares.
+
+    Nothing here names a real framework -- a throwaway jar under a throwaway
+    coordinate proves the mechanism is generic, not tuned to one vendor.
+    """
+    import zipfile
+    from app.services.dependency_jars import jar_path
+
+    repo, job, plan_id, tmp = env
+    m2 = tmp_path / 'm2'
+    jar = jar_path(m2, 'com.example.sdk', 'widgets-core', '9.9.9')
+    jar.parent.mkdir(parents=True)
+    with zipfile.ZipFile(jar, 'w') as zf:
+        zf.writestr('com/example/sdk/core/Widget.class', b'')
+    monkeypatch.setenv('MOJO_M2_REPO', str(m2))
+
+    pom = ('<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies><dependency>'
+          '<groupId>com.example.sdk</groupId><artifactId>widgets-core</artifactId>'
+          '<version>9.9.9</version></dependency></dependencies></project>')
+    java = 'package app;\nimport com.example.sdk.wrong.Widget;\nclass Svc{}\n'
+    proj = _project(tmp, pom_text=pom, java_text=java)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    assert {'imported_as': 'com.example.sdk.wrong.Widget', 'class': 'Widget',
+            'actually_at': ['com.example.sdk.core.Widget']} in model.payload['verified_symbols']
+
+
+def test_a_wrong_sibling_import_is_resolved_against_the_rest_of_the_project(env, monkeypatch):
+    """The other half: a class the model itself already wrote, under a different package."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp, java_text='package app.service;\nimport app.wrong.Helper;\nclass Svc{}\n')
+    (proj / 'src/main/java/app/util').mkdir(parents=True)
+    (proj / 'src/main/java/app/util/Helper.java').write_text(
+        'package app.util;\npublic class Helper {}\n')
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    assert {'imported_as': 'app.wrong.Helper', 'class': 'Helper',
+            'actually_at': ['app.util.Helper']} in model.payload['verified_symbols']
+
+
+def test_an_import_that_resolves_nowhere_gets_no_hint(env, monkeypatch):
+    """A genuinely missing class (never generated, not in any dependency) -- no false claim."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp, java_text='package app;\nimport app.swagger.NeverWritten;\nclass Svc{}\n')
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    assert 'verified_symbols' not in model.payload
+
+
+def test_verified_symbols_is_absent_when_nothing_resolves_at_all(env, monkeypatch):
+    """The default fixture project: no real dependency coordinates, no package statements."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    assert 'verified_symbols' not in model.payload
+
+
+# ---- verified_contracts: the real method signature of whatever a file implements/holds -------
+
+def test_an_implemented_interfaces_real_method_is_surfaced(env, monkeypatch):
+    """A controller's @Override disagreeing with its own Api interface -- the real DMRClaimStatus bug.
+
+    The interface method here is annotation-heavy on every parameter
+    (@Parameter(...)), the same shape that broke a naive non-nested-paren
+    regex on the real file -- this is exactly the case _balanced_parens exists for.
+    """
+    repo, job, plan_id, tmp = env
+    controller = (
+        'package app.controller;\n'
+        'public class SvcController implements SvcApi {\n'
+        '    public ResponseEntity<SvcResponse> getSvc(String id) { return null; }\n'
+        '}\n')
+    api = (
+        'package app.api;\n'
+        'public interface SvcApi {\n'
+        '    ResponseEntity<Object> getSvc(\n'
+        '        @Parameter(description = "the id") String id);\n'
+        '}\n')
+    proj = _project(tmp, java_text=controller)
+    (proj / 'src/main/java/app/api').mkdir(parents=True)
+    (proj / 'src/main/java/app/api/SvcApi.java').write_text(api)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    contracts = model.payload['verified_contracts']
+    api_contract = next(c for c in contracts if c['class'] == 'SvcApi')
+    assert api_contract['kind'] == 'interface'
+    assert api_contract['methods'] == ['ResponseEntity<Object> getSvc(String)']
+
+
+def test_a_fields_real_type_signature_is_surfaced(env, monkeypatch):
+    """A service calling its connector with the wrong argument shape -- the other real bug.
+
+    Found via the field's declared type, not an import: the service need not
+    even import the connector by its simple name for this to resolve.
+    """
+    repo, job, plan_id, tmp = env
+    service = (
+        'package app.service;\n'
+        'public class SvcService {\n'
+        '    private final SvcConnector connectorService;\n'
+        '    public void call() { connectorService.getStatus(request); }\n'
+        '}\n')
+    connector = (
+        'package app.connector;\n'
+        'public class SvcConnector {\n'
+        '    public ResponseEntity<String> getStatus(String a, String b, String c) { return null; }\n'
+        '}\n')
+    proj = _project(tmp, java_text=service)
+    (proj / 'src/main/java/app/connector').mkdir(parents=True)
+    (proj / 'src/main/java/app/connector/SvcConnector.java').write_text(connector)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    contracts = model.payload['verified_contracts']
+    connector_contract = next(c for c in contracts if c['class'] == 'SvcConnector')
+    assert connector_contract['kind'] == 'class'
+    assert connector_contract['methods'] == ['ResponseEntity<String> getStatus(String, String, String)']
+
+
+def test_verified_contracts_is_absent_when_nothing_local_is_referenced(env, monkeypatch):
+    """The default fixture project: Svc.java implements/extends/holds nothing local."""
+    repo, job, plan_id, tmp = env
+    proj = _project(tmp)
+    _scripted_gate(monkeypatch, [{'COMPILE_AND_UNIT_TEST'}, {'COMPILE_AND_UNIT_TEST'}])
+    model = _StubModel([])
+
+    CodeFeedbackService(repo).apply(job['id'], plan_id, str(proj), max_passes=1,
+                                    context=_ctx(repo, job['id'], model))
+
+    assert 'verified_contracts' not in model.payload

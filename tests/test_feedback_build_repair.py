@@ -1,13 +1,26 @@
 """The feedback agent repairs a failing build and proves it by building again.
 
-A build failure arrived as "Quality gate failed" and the agent gave up, for two
+A build failure arrived as "Quality gate failed" and the agent gave up, for
 reasons that these pin down:
 
 * an edit was re-checked *without* the build, so a build failure showed as "not
   executed", the edit looked like an improvement and was kept uncompiled;
 * an edit that took the build from 20 errors to 5 was thrown away, because the
   set of failing checks had not shrunk, and getting the build far enough to
-  start the service counted as a new failure.
+  start the service counted as a new failure;
+* an edit that fixed an undefined ``${property}`` so the pom could finally be
+  *read* was thrown away too: that pom-read failure's error list is short and
+  fixed-shape, while the real compilation failure it uncovered naturally has
+  many more lines (one per broken reference), so "the pom can now even be
+  read, and the compiler is actually running" counted as regression by raw
+  line count -- observed live, reverted on every attempt, every time, with the
+  project handed back in its unreadable-pom state after every single pass;
+* one level deeper, the same shape repeats within a single compile failure:
+  an edit that fixed the *last* "cannot find symbol" import error was also
+  thrown away, because clearing it let javac finally type-check expressions
+  it could not reach before, surfacing several real (and previously
+  invisible) type-mismatch errors in the same build -- more error lines for
+  a genuinely more-resolved program.
 """
 import pytest
 
@@ -21,6 +34,14 @@ from tests.test_feedback_model_repair import _ctx, _project, env  # noqa: F401  
 def _compile(status, errors=()):
     return {'name': 'COMPILE_AND_UNIT_TEST', 'status': status,
             'evidence': {'errors': list(errors)} if status == 'FAIL' else {}}
+
+
+def _compile_errors(count):
+    """A real compilation failure's error lines -- always carries the literal
+    marker ``build_check.py``'s own pattern matches, unlike a pom-read failure's
+    short, fixed-shape message."""
+    return ['[ERROR] COMPILATION ERROR :'] + ['[ERROR] Foo.java:[%d,1] cannot find symbol' % i
+                                              for i in range(count)]
 
 
 def _start(status, errors=()):
@@ -59,6 +80,101 @@ def test_no_change_is_not_progress():
 def test_going_back_a_stage_is_not_progress_whatever_the_error_count():
     assert not improved(score([_compile('PASS'), _start('FAIL', ['a', 'b'])]),
                         score([_compile('FAIL', ['a'])]))
+
+
+# ---- the pom-unreadable vs. compiler-actually-ran distinction -----------------------------------
+
+def test_making_the_pom_readable_is_progress_even_with_more_error_lines():
+    """The actual bug: fixing an undefined ${property} let the compiler run at all,
+    which surfaces many real per-file errors -- more LINES than the short, fixed-shape
+    'could not read the project' message it replaced, but strictly further along.
+    """
+    pom_unreadable = score([_compile('FAIL', ['[ERROR] Some problems were encountered '
+                                              'while processing the POMs:',
+                                              '[ERROR] The build could not read 1 project'])])
+    compiler_ran = score([_compile('FAIL', _compile_errors(18))])
+    assert improved(pom_unreadable, compiler_ran)
+    assert not improved(compiler_ran, pom_unreadable)
+
+
+def test_within_an_unreadable_pom_fewer_error_lines_is_still_progress():
+    worse = score([_compile('FAIL', ['[ERROR] a'] * 5)])
+    better = score([_compile('FAIL', ['[ERROR] a'] * 2)])
+    assert improved(worse, better)
+
+
+def test_within_a_real_compile_failure_fewer_error_lines_is_still_progress():
+    worse = score([_compile('FAIL', _compile_errors(18))])
+    better = score([_compile('FAIL', _compile_errors(5))])
+    assert improved(worse, better)
+
+
+def test_compiler_ran_detection_looks_only_at_the_literal_marker():
+    """Not fooled by an unrelated 'COMPILATION ERROR'-free pom failure, nor by one
+    that happens to carry many lines -- only the literal marker build_check.py
+    itself prints when the compiler plugin actually ran decides this."""
+    from app.services.feedback import _compiler_ran
+    assert not _compiler_ran(_compile('FAIL', ['[ERROR] a'] * 30))
+    assert _compiler_ran(_compile('FAIL', _compile_errors(1)))
+    assert not _compiler_ran(_compile('PASS'))
+
+
+# ---- the unresolved-symbol vs. type-level-only distinction, one stage deeper ---------------------
+
+def _type_errors(count):
+    """A real compile failure with only type-level mismatches -- every symbol already resolves.
+
+    The shape observed live immediately after fixing the last unresolved
+    import: @Override return-type mismatches, wrong-argument-count calls --
+    never 'cannot find symbol' or 'does not exist'.
+    """
+    return ['[ERROR] COMPILATION ERROR :'] + [
+        '[ERROR] Foo.java:[%d,1] incompatible types: X is not compatible with Y' % i
+        for i in range(count)]
+
+
+def test_clearing_the_last_unresolved_symbol_is_progress_even_with_more_error_lines():
+    """The actual bug, one level deeper than the pom case: fixing the last 'cannot find
+    symbol' import let javac finally type-check expressions it could not reach before,
+    surfacing several real (and previously invisible) type errors in the same build.
+    """
+    unresolved = score([_compile('FAIL', _compile_errors(10))])          # 'cannot find symbol'
+    type_only = score([_compile('FAIL', _type_errors(12))])              # more lines, no unresolved symbol
+    assert improved(unresolved, type_only)
+    assert not improved(type_only, unresolved)
+
+
+def test_within_unresolved_symbols_fewer_error_lines_is_still_progress():
+    worse = score([_compile('FAIL', _compile_errors(18))])
+    better = score([_compile('FAIL', _compile_errors(5))])
+    assert improved(worse, better)
+
+
+def test_within_type_level_errors_fewer_error_lines_is_still_progress():
+    worse = score([_compile('FAIL', _type_errors(12))])
+    better = score([_compile('FAIL', _type_errors(3))])
+    assert improved(worse, better)
+
+
+def test_unresolved_symbols_detection_recognises_both_javac_phrasings():
+    from app.services.feedback import _unresolved_symbols
+    assert _unresolved_symbols(_compile('FAIL', ['[ERROR] Foo.java:[1,1] cannot find symbol']))
+    assert _unresolved_symbols(_compile('FAIL', ['[ERROR] package com.example.x does not exist']))
+    assert not _unresolved_symbols(_compile('FAIL', _type_errors(3)))
+    assert not _unresolved_symbols(_compile('PASS'))
+
+
+def test_a_build_that_fully_resolves_and_starts_still_beats_everything_before_it():
+    """The complete order, one check per stage: 0 < 1 < 2 < 3 < 4."""
+    unreadable_pom = score([_compile('FAIL', ['[ERROR] Some problems were encountered'])])
+    unresolved = score([_compile('FAIL', _compile_errors(1))])
+    type_only = score([_compile('FAIL', _type_errors(1))])
+    start_fails = score([_compile('PASS'), _start('FAIL', ['boom'])])
+    starts = score([_compile('PASS'), _start('PASS')])
+    ordered = [unreadable_pom, unresolved, type_only, start_fails, starts]
+    for worse, better in zip(ordered, ordered[1:]):
+        assert improved(worse, better)
+        assert not improved(better, worse)
 
 
 # ---- the loop -----------------------------------------------------------------------------------

@@ -177,10 +177,14 @@ def test_governed_dispatch_enforces_role_and_records_evidence(env):
     assert out['outputs']['quality_status'] != 'FAIL'
 
 
-def test_agent_fails_when_the_gate_is_still_failing(env):
-    """A gate still red after the budget must not report COMPLETED.
+def test_agent_completes_even_when_the_gate_is_still_failing(env):
+    """A gate still red after the budget must not halt the pipeline.
 
-    Saying COMPLETED would hand the delivery step code the gate rejects.
+    It used to report FAILED, which stopped every downstream agent -- including
+    ones that need nothing from a compiling build (governance, knowledge-evidence).
+    What is still wrong is fully recorded in metrics/outputs/evidence either way,
+    so a downstream gate or reviewer can still see and act on it; only whether
+    an unrepaired project also blocks the pipeline has changed.
     """
     repo, job, plan_id, tmp = env
     proj = tmp / 'springboot-output'
@@ -198,5 +202,7 @@ def test_agent_fails_when_the_gate_is_still_failing(env):
         job['id'], 'feedback', '1.0.0', ['FEEDBACK_ENGINEER'], 'tester',
         {'plan_id': plan_id, 'project_root': 'springboot-output'})
 
-    assert out['status'] == 'FAILED'
-    assert 'quality_gate_unresolved' in out['error']
+    assert out['status'] == 'COMPLETED'
+    assert out['error'] == ''
+    assert out['outputs']['quality_status'] == 'FAIL'
+    assert out['metrics']['unfixed_checks'] == ['PROJECT_STRUCTURE']
