@@ -4,6 +4,11 @@ Groups a job's open variances by classification and proposes one root-cause
 hypothesis per group, with a confidence score and an explicit list of the
 evidence that is still missing.
 
+The PARTIAL and GAP rows of the variance-analysis static reports (parity and
+hardcoding) are explained the same way, one hypothesis per report and area, so
+every open finding has a root cause that remediation can act on. They are scored
+from their own records, not from differential test cases (see ``_static_components``).
+
 Every confidence component is a ratio measured over the job's own records rather
 than a number chosen by the agent. That matters because the score decides
 whether remediation may be applied directly:
@@ -19,6 +24,7 @@ all three would be too vague to act on.
 import json
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.artefact import produce_many
+from app.services import static_findings
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
 
@@ -26,6 +32,11 @@ from app.services.rca import RCAService
 #: Not a hypothesis and not a fallback: it is coverage arithmetic the scorer
 #: reads, which is why it stays while the hypothesis wording does not.
 STRENGTH = {'STRUCTURAL': 1.0, 'TYPE': 0.8, 'VALUE': 0.6}
+#: The same idea for a static finding: a behaviour that is missing outright says more
+#: about the cause than one that is only partly there.
+STATIC_STRENGTH = {'GAP': 1.0, 'PARTIAL': 0.6}
+#: Findings listed on each hypothesis in the output; the rest are counted.
+MAX_LISTED_FINDINGS = 25
 
 
 class RCAAgent(BaseAgent):
@@ -73,12 +84,48 @@ class RCAAgent(BaseAgent):
             'historical_validation': history,
         }
 
+    @staticmethod
+    def _static_components(group, all_rows, history):
+        """Confidence components for a group of static findings, each a ratio over its rows.
+
+        There are no differential test cases behind these, so the case-based components
+        are re-read for what a static comparison can honestly say: a finding is
+        *reproducible* when more than one row cites the same location (the two reports
+        agree), *traceable* when it names its IIB source, and *isolated* by construction
+        because no test case's other results can confound it.
+        """
+        size = len(group)
+
+        def cited(r):
+            return r['iib_source'] and (r['ms_source'] or r['status'] == 'GAP')
+
+        def places(r):
+            return {x for x in (r['ms_source'], r['iib_source']) if x}
+
+        repeats = sum(1 for r in group
+                      if any(places(r) & places(o) for o in all_rows if o is not r))
+        return {
+            'evidence_coverage': sum(1 for r in group if cited(r)) / size,
+            'reproducible': repeats / size,
+            'traceability': sum(1 for r in group if r['iib_source']) / size,
+            'rule_strength': sum(STATIC_STRENGTH.get(r['status'], 0.6) for r in group) / size,
+            'test_isolation': 1.0,
+            'historical_validation': history,
+        }
+
+    @staticmethod
+    def _listed(group):
+        return [{'status': r['status'], 'area': r['area'], 'iib_source': r['iib_source'],
+                 'ms_source': r['ms_source'], 'remarks': r['remarks'][:300]}
+                for r in group[:MAX_LISTED_FINDINGS]]
+
     def execute(self, context):
         variances = self._open_variances(context.job_id)
-        if not variances:
+        static = static_findings.load(self.repo, context.job_id)
+        if not variances and not static:
             return AgentResult(status='COMPLETED',
                                outputs={'rca_hypotheses': [], 'confidence': 0.0, 'missing_evidence': []},
-                               metrics={'variance_count': 0, 'hypothesis_count': 0})
+                               metrics={'variance_count': 0, 'static_finding_count': 0, 'hypothesis_count': 0})
         service = RCAService(self.repo)
         scorer = ConfidenceRemediationService()
         history = self._history(context.job_id)
@@ -89,13 +136,24 @@ class RCAAgent(BaseAgent):
         # arithmetic over that evidence -- neither is a judgement, and a
         # model-supplied confidence would raise the figure a gate reads without
         # any more evidence existing.
+        static_groups = static_findings.groups(static)
         authored, provenance = produce_many(
             context, self.PROMPT,
             [(kind, {'kind': kind,
                      'variances': [{'path': x['path'], 'kind': x['kind'],
                                     'severity': x['severity']} for x in variances
                                    if x['kind'] == kind]})
-             for kind in kinds])
+             for kind in kinds]
+            # A static finding is shown to the model as the same kind of record, with what the
+            # report said about it, so one prompt explains both.
+            + [(static_findings.label(src, area),
+                {'kind': static_findings.label(src, area),
+                 'variances': [{'path': r['ms_source'] or r['iib_source'] or area, 'kind': src,
+                                'severity': r['severity'], 'status': r['status'],
+                                'iib_source': r['iib_source'], 'iib_value': r['iib_value'][:300],
+                                'ms_source': r['ms_source'], 'ms_value': r['ms_value'][:300],
+                                'remarks': r['remarks'][:400]} for r in rows]})
+               for (src, area), rows in static_groups.items()])
         hypotheses = []
         missing = []
         for kind in kinds:
@@ -126,12 +184,39 @@ class RCAAgent(BaseAgent):
                 context.job_id, [x['id'] for x in group], statement, score['score'],
                 [{'variance_id': x['id'], 'path': x['path'], 'case_id': x.get('case_id') or ''} for x in group],
                 gaps, 'PATHS:' + ','.join(paths[:10]))
-            hypotheses.append({'root_cause_id': recorded['id'], 'kind': kind, 'hypothesis': statement,
+            hypotheses.append({'root_cause_id': recorded['id'], 'kind': kind, 'source': 'DIFFERENTIAL', 'area': '',
+                               'hypothesis': statement,
                                'confidence': score['score'], 'components': score['components'],
                                'variance_ids': [x['id'] for x in group], 'missing_evidence': gaps})
             missing += gaps
-        metrics = {'variance_count': len(variances), 'hypothesis_count': len(hypotheses),
-                   'kinds': kinds, 'history': history}
+        for (src, area), rows in static_groups.items():
+            kind = static_findings.label(src, area)
+            components = self._static_components(rows, static, history)
+            score = scorer.score(**components)
+            gaps = sorted({g for g in (
+                '' if components['reproducible'] else 'a second report or location that confirms the finding',
+                '' if components['evidence_coverage'] == 1.0 else 'the IIB or migrated location for every finding',
+                '' if components['historical_validation'] else 'a previously validated root cause on this job',
+            ) if g})
+            proposed = (authored.get(kind) or {}).get('hypotheses') or []
+            statement = (proposed[0].get('hypothesis') if proposed else '') or ''
+            for item in proposed[:1]:
+                gaps = sorted(set(gaps) | {str(g) for g in item.get('missing_evidence') or []})
+            recorded = service.record_root_cause(
+                context.job_id, [], statement, score['score'],
+                [{'report_id': r['report_id'], 'source': r['source'], 'area': r['area'], 'status': r['status'],
+                  'iib_source': r['iib_source'], 'ms_source': r['ms_source'], 'remarks': r['remarks'][:300]}
+                 for r in rows],
+                gaps, 'STATIC:%s:%s' % (src, area))
+            hypotheses.append({'root_cause_id': recorded['id'], 'kind': kind, 'source': src, 'area': area,
+                               'hypothesis': statement, 'confidence': score['score'],
+                               'components': score['components'], 'variance_ids': [],
+                               'findings': self._listed(rows), 'finding_count': len(rows),
+                               'missing_evidence': gaps})
+            missing += gaps
+        metrics = {'variance_count': len(variances), 'static_finding_count': len(static),
+                   'hypothesis_count': len(hypotheses),
+                   'kinds': kinds + [static_findings.label(s_, a_) for s_, a_ in static_groups], 'history': history}
         metrics['model_attempts'] = provenance.get('attempts', 0)
         # Every hypothesis is model-authored now, so what is worth counting is
         # the kinds the model declined to explain rather than which path ran.

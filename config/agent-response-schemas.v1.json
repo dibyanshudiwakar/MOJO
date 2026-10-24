@@ -1628,5 +1628,38 @@
         }
       }
     }
+    ,
+    "agent/remediation/code-fix": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Targeted fix edits for static-report findings",
+      "description": "Search/replace edits, as for the feedback agent, so the model never reproduces bytes it was not shown. unfixable names the findings it declined rather than guessed at.",
+      "type": "object",
+      "required": ["edits"],
+      "properties": {
+        "edits": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["path", "old_str", "new_str"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "old_str": {"type": "string", "minLength": 1},
+              "new_str": {"type": "string", "maxLength": 20000},
+              "why": {"type": "string"}
+            }
+          }
+        },
+        "unfixable": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["ref"],
+            "properties": {"ref": {"type": "string"}, "reason": {"type": "string"}}
+          }
+        }
+      }
+    }
   }
 }

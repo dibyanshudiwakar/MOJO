@@ -318,10 +318,10 @@ const NAV_ICON={
 const _defIcon=_I('<circle cx="12" cy="12" r="4"/>');
 const NAV_GROUPS=[
  {label:'Overview',items:[{page:'dashboard',label:'Dashboard'},{page:'metrics',label:'Metrics'}]},
- {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'delivery-operations',label:'Delivery'},{page:'versions',label:'Versions'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
- {label:'Governance',items:[{page:'access',label:'Access'},{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'},{page:'security-findings',label:'Security'}]},
+ {label:'Migration Work',items:[{page:'pipelines',label:'Pipelines'},{page:'specifications',label:'Specifications'},{page:'plans',label:'Plans'},{page:'generated',label:'Generated Code'},{page:'quality-runs',label:'Quality Runs'},{page:'agent-templates',label:'Agent Templates'}]},
+ {label:'Governance',items:[{page:'approval-governance',label:'Gate Config'},{page:'approval-inbox',label:'Approval Inbox'},{page:'approvals',label:'Approvals'},{page:'evidence',label:'Evidence'},{page:'events',label:'Events'},{page:'audit-ledger',label:'Audit Ledger'}]},
  {label:'Intelligence',items:[{page:'agent-registry',label:'Agent Registry'},{page:'agent-models',label:'Agent Models'},{page:'learning',label:'Learning'},{page:'agent-health',label:'Agent Health'},{page:'knowledge-index',label:'Knowledge'}]},
- {label:'Platform / AI',items:[{page:'service-registry',label:'Services'},{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'},{page:'observability-events',label:'Observability'},{page:'retention-policies',label:'Retention'}]},
+ {label:'Platform / AI',items:[{page:'prompt-registry',label:'Prompts'},{page:'model-registry',label:'Models'},{page:'model-requests',label:'Model Requests'},{page:'skill-registry',label:'Skills'},{page:'notifications',label:'Notifications'}]},
 ];
 function nav(){
  document.body.classList.remove('auth-mode');
@@ -1822,7 +1822,7 @@ async function pipelineDetail(id){
  const p=await api('/api/v2/pipelines/'+id);
  $('#title').textContent=wsName(p.workspace_dir)||'Pipeline';
  const counts={};p.steps.forEach(s=>counts[s.status]=(counts[s.status]||0)+1);
- const done=(counts.COMPLETED||0),total=p.steps.length,pct=total?Math.round(done/total*100):0;
+ const done=(counts.COMPLETED||0)+(counts.SKIPPED||0),total=p.steps.length,pct=total?Math.round(done/total*100):0;
  // Pipelines carry their own started_at/completed_at (run() stamps the start,
  // _set_status(final=True) the finish), so the total is real wall-clock elapsed
  // rather than the sum of the steps -- which would miss the queue waits between
@@ -1967,6 +1967,7 @@ function renderArtefact(art){
   let secs='';
   if(ambigCount)secs+=`<div class="plan-si" data-ace-tab="ambiguities"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="8"/><line x1="10" y1="7" x2="10" y2="10.5"/><circle cx="10" cy="13.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Ambiguities</div><div class="plan-si-meta">${ambigCount} open question${ambigCount!==1?'s':''} · require expert input</div></div></div><span class="plan-si-caret">›</span></div>`;
   if(art.markdown)secs+=`<div class="plan-si" data-ace-tab="report"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2" width="14" height="16" rx="1.5"/><line x1="6" y1="7" x2="14" y2="7"/><line x1="6" y1="10" x2="14" y2="10"/><line x1="6" y1="13" x2="10" y2="13"/></svg><div><div class="plan-si-name">Analysis Report</div><div class="plan-si-meta">Full analysis · coverage, patterns, and recommendations</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(art.html_url)secs+=`<div class="plan-si" data-ace-html-url="${esc(art.html_url)}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-4"/><path d="M13 3h4v4M11 9l6-6"/></svg><div><div class="plan-si-name">ACE Analysis HTML Report</div><div class="plan-si-meta">HTML report · full analysis with file listings · opens in new tab</div></div></div><span class="plan-si-caret">›</span></div>`;
   secs+=`<div class="plan-si" data-ace-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full analysis output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
   if(smTable.length){
@@ -2066,35 +2067,97 @@ function renderArtefact(art){
   if(risks.length)secs+=`<div class="plan-si" data-plan-tab="risks"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/><circle cx="10" cy="14.5" r=".6" fill="currentColor" stroke="none"/></svg><div><div class="plan-si-name">Risk Register</div><div class="plan-si-meta">${risks.length} risk${risks.length!==1?'s':''} · severity levels and mitigation</div></div></div><span class="plan-si-caret">›</span></div>`;
   secs+=`<div class="plan-si" data-plan-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full plan output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`}
- // Code generation: file list with content
+ // Code generation: chips + section rows; full data opens in modal
  if(art.format==='code'&&art.files&&art.files.length){
-  html+=`<div class="artefact-sub">Generated Files (${art.files.length})</div>`;
-  art.files.forEach(f=>{html+=`<details class="op-raw-section"><summary>${chev} ${esc(f.path)}</summary><pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre></details>`});
-  if(art.quality){
-   const qs=art.quality.status;const qcls=qs==='PASS'?'success':qs==='FAIL'?'error':'warning';
-   html+=`<div class="artefact-sub">Quality Gate: <span class="badge badge-${qcls}">${esc(qs)}</span></div>`;
-   // A GAP is the skill's own word for a non-blocking open item: it is listed with
-   // the checklist item it comes from, what was found, and how to close it.
-   const qbadge=s=>s==='PASS'?'success':s==='FAIL'?'error':s==='GAP'?'warning':'neutral';
-   const qdetail=c=>{const ev=(c.evidence&&c.evidence.length)?(Array.isArray(c.evidence)?c.evidence:[JSON.stringify(c.evidence)]):[];
-    if(!ev.length&&!c.remediation&&!c.skill_ref)return '';
-    return `<div style="font-size:11px;color:var(--text-3)">${c.skill_ref?esc(c.skill_ref):''}</div>${ev.slice(0,4).map(e=>`<div style="font-size:11px;color:var(--text-2)">${esc(String(e))}</div>`).join('')}${c.remediation?`<div style="font-size:11px;color:var(--text-2)"><b>Fix:</b> ${esc(c.remediation)}</div>`:''}`};
-   if(art.quality.checks){html+=`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${art.quality.checks.map(c=>`<tr><td>${esc(c.name)}${qdetail(c)}</td><td><span class="badge badge-${qbadge(c.status)}">${esc(c.status)}</span></td></tr>`).join('')}</tbody></table></div>`}}}
+  window._codeArt=art;
+  const files=art.files||[];
+  const quality=art.quality||null;
+  const qs=quality?.status||'';
+  const checks=quality?.checks||[];
+  const passCount=checks.filter(c=>c.status==='PASS').length;
+  const qStatCls=qs==='PASS'?'plan-stat-ok':qs==='FAIL'?'plan-stat-warn':'';
+  html+=`<div class="plan-stats-row">
+   <div class="plan-stat-chip"><span class="plan-stat-n">${files.length}</span><span class="plan-stat-l">Files Generated</span></div>
+   ${quality?`<div class="plan-stat-chip ${qStatCls}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.4px">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div>`:''}
+   ${checks.length?`<div class="plan-stat-chip ${passCount===checks.length?'plan-stat-ok':passCount>0?'plan-stat-warn':'plan-stat-warn'}"><span class="plan-stat-n">${passCount}<span style="font-size:11px;font-weight:400;opacity:.7"> / ${checks.length}</span></span><span class="plan-stat-l">Checks Passed</span></div>`:''}
+  </div>`;
+  let codeSecs='';
+  codeSecs+=`<div class="plan-si" data-code-tab="files"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 2h8l4 4v12a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="12 2 12 6 16 6"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg><div><div class="plan-si-name">Generated Files</div><div class="plan-si-meta">${files.length} file${files.length!==1?'s':''} · Spring Boot source code</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(quality)codeSecs+=`<div class="plan-si" data-code-tab="quality"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg><div><div class="plan-si-name">Quality Gate</div><div class="plan-si-meta">${checks.length} check${checks.length!==1?'s':''} · ${passCount} passed${qs?' · '+esc(qs):''}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  codeSecs+=`<div class="plan-si" data-code-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full code generation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${codeSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
+ // Test Engineering: chips + section rows; full data opens in modal
+ if(art.format==='test'){
+  window._testArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-test-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full test package · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Variances
- if(art.format==='variances'&&art.items&&art.items.length){
-  html+=`<div class="table-wrap"><table><thead><tr><th>Path</th><th>Kind</th><th>Severity</th><th>Expected</th><th>Actual</th><th>Disposition</th></tr></thead><tbody>${art.items.map(v=>`<tr><td><code style="font-size:11px">${esc(v.path)}</code></td><td>${esc(v.kind)}</td><td><span class="badge badge-${v.severity==='HIGH'?'error':v.severity==='MEDIUM'?'warning':'success'}">${esc(v.severity)}</span></td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.expected)}</td><td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(v.actual)}</td><td>${esc(v.disposition)}</td></tr>`).join('')}</tbody></table></div>`}
+ // Variance Analysis
+ if(art.format==='variances'){
+  window._varArt=art;
+  const _vLinks=[];_collectHtmlLinks(window._varOutputs||{},'',_vLinks);
+  const _vHtmlRows=_vLinks.map(l=>`<div class="plan-si" data-var-html-url="${esc(l.url)}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-4"/><path d="M13 3h4v4M11 9l6-6"/></svg><div><div class="plan-si-name">${esc(l.label)}</div><div class="plan-si-meta">HTML report · opens in new tab</div></div></div><span class="plan-si-caret">›</span></div>`).join('');
+  html+=`<div class="plan-sections"><div class="plan-si" data-var-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full variance analysis · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>${_vHtmlRows}</div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // RCA
- if(art.format==='rca'&&art.hypotheses&&art.hypotheses.length){
-  html+=art.hypotheses.map(h=>`<div class="artefact-rca-item"><div class="artefact-rca-hyp">${esc(h.hypothesis)}</div><div class="artefact-rca-meta">Confidence: <strong>${(h.confidence*100).toFixed(0)}%</strong> · Scope: ${esc(h.scope||'—')} · ${esc(h.status)}</div></div>`).join('')}
+ if(art.format==='rca'){
+  window._rcaArt=art;
+  const hyp=art.hypotheses||[];
+  const fromReports=hyp.filter(h=>h.source!=='DIFFERENTIAL'),fromRuns=hyp.filter(h=>h.source==='DIFFERENTIAL');
+  const top=hyp.length?Math.max(...hyp.map(h=>Number(h.confidence)||0)):0;
+  const missing=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-rca-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${hyp.length}</span><span class="plan-stat-l">Root Causes</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${fromReports.length}</span><span class="plan-stat-l">From Reports</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${fromRuns.length}</span><span class="plan-stat-l">From Test Runs</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${Math.round(top*100)}%</span><span class="plan-stat-l">Top Confidence</span></div></div>`;
+  let secs='';
+  if(hyp.length)secs+=row('causes','<circle cx="10" cy="10" r="7"/><line x1="10" y1="6" x2="10" y2="10"/><circle cx="10" cy="13" r=".6" fill="currentColor" stroke="none"/>','Root Causes',`${hyp.length} hypothes${hyp.length!==1?'es':'is'} with confidence and the evidence behind each`);
+  if(fromReports.length)secs+=row('findings','<path d="M4 3h9l3 3v11H4z"/><line x1="7" y1="9" x2="13" y2="9"/><line x1="7" y1="12" x2="13" y2="12"/>','Report Findings',`${fromReports.reduce((n,h)=>n+(h.finding_count||0),0)} partial or gap finding${fromReports.reduce((n,h)=>n+(h.finding_count||0),0)!==1?'s':''} from the parity and hardcoding reports`);
+  if(missing.length)secs+=row('missing','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Missing Evidence',`${missing.length} item${missing.length!==1?'s':''} that would raise confidence`);
+  secs+=`<div class="plan-si" data-rca-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full RCA output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
  // Remediation
- if(art.format==='remediation'&&art.proposals&&art.proposals.length){
-  html+=art.proposals.map(p=>`<div class="artefact-rem-item"><div class="artefact-sub">${esc(p.pattern||'Proposal')} <span class="badge badge-neutral">${esc(p.status)}</span></div><div style="font-size:12px;color:var(--text-2);margin:4px 0">${esc(typeof p.proposal==='string'?p.proposal:JSON.stringify(p.proposal))}</div>${p.tests&&p.tests.length?`<div style="font-size:11px;color:var(--text-3)">Regression tests: ${p.tests.map(t=>esc(t)).join(', ')}</div>`:''}</div>`).join('')}
+ if(art.format==='remediation'){
+  window._remArt=art;
+  const causes=art.causes||[],tot=art.totals||{},gate=art.gate;
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-rem-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  const gv=gate?(gate.result==='kept'?'KEPT':'REVERTED'):'—';
+  if(causes.length){
+   const unfixed=causes.reduce((n,c)=>n+(c.unfixed||[]).length,0);
+   html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${causes.length}</span><span class="plan-stat-l">Root Causes</span></div><div class="plan-stat-chip ${tot.fixes_applied?'plan-stat-ok':''}"><span class="plan-stat-n">${tot.fixes_applied||0}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unfixed||tot.not_eligible?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unfixed+(tot.not_eligible||0)}</span><span class="plan-stat-l">Not Fixed</span></div><div class="plan-stat-chip ${gate?(gate.result==='kept'?'plan-stat-ok':'plan-stat-warn'):''}"><span class="plan-stat-n" style="font-size:13px;letter-spacing:.4px">${gv}</span><span class="plan-stat-l">Quality Gate</span></div></div>`;
+   let secs='';
+   if(tot.fixes_applied)secs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${tot.fixes_applied} change${tot.fixes_applied!==1?'s':''} made to the generated project`);
+   if(unfixed||tot.not_eligible)secs+=row('unfixed','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Not Fixed',`${unfixed} finding${unfixed!==1?'s':''} left open and ${tot.not_eligible||0} cause${(tot.not_eligible||0)!==1?'s':''} below the confidence bar`);
+   secs+=row('causes','<circle cx="10" cy="10" r="7"/><polyline points="7 10 9.5 12.5 13.5 7.5"/>','Root Causes',`what happened to each of the ${causes.length} root cause${causes.length!==1?'s':''}`);
+   secs+=`<div class="plan-si" data-rem-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full remediation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+   html+=`<div class="plan-sections">${secs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+   return html}
+  html+=`<div class="plan-sections"><div class="plan-si" data-rem-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full remediation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Governance
- if(art.format==='governance'&&art.decision){
-  html+=`<div class="artefact-sub">Gate Decisions</div><div class="table-wrap"><table><thead><tr><th>Target State</th><th>Decision</th></tr></thead><tbody>${Object.entries(art.decision).map(([k,v])=>`<tr><td>${esc(k)}</td><td><span class="badge badge-${v==='ALLOW'?'success':'error'}">${esc(v)}</span></td></tr>`).join('')}</tbody></table></div>`}
+ if(art.format==='governance'){
+  window._govArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-gov-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full governance output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
  // Knowledge
- if(art.format==='knowledge'&&art.cited_context&&art.cited_context.length){
-  html+=`<div class="artefact-sub">Citations (${art.cited_context.length})</div><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Reference</th><th>Version</th><th>Score</th></tr></thead><tbody>${art.cited_context.map(c=>`<tr><td>${esc(c.kind)}</td><td style="font-size:11px">${esc(c.reference)}</td><td>${esc(c.version)}</td><td>${c.score}</td></tr>`).join('')}</tbody></table></div>`}
+ if(art.format==='knowledge'){
+  window._knwArt=art;
+  html+=`<div class="plan-sections"><div class="plan-si" data-knw-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full knowledge evidence output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div></div><div class="plan-hint">Click to explore the full data</div>`;
+  return html}
+ // Feedback
+ if(art.format==='feedback'){
+  window._fbkArt=art;
+  const fixes=art.applied_fixes||[],unresolved=art.unresolved||[],passes=art.passes||[];
+  const qs=art.quality_status||'';
+  const row=(tab,ico,name,meta)=>`<div class="plan-si" data-fbk-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${fixes.length}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unresolved.length?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unresolved.length}</span><span class="plan-stat-l">Unresolved</span></div><div class="plan-stat-chip ${qs==='PASS'?'plan-stat-ok':qs?'plan-stat-warn':''}"><span class="plan-stat-n">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${passes.length}</span><span class="plan-stat-l">Repair Passes</span></div></div>`;
+  let fSecs='';
+  if(fixes.length)fSecs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${fixes.length} change${fixes.length!==1?'s':''} made to the generated project`);
+  if(passes.length)fSecs+=row('passes','<polyline points="4 10 8 14 16 6"/>','Repair Passes',`${passes.length} pass${passes.length!==1?'es':''} run against the quality gate`);
+  if(unresolved.length)fSecs+=row('unresolved','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Unresolved',`${unresolved.length} item${unresolved.length!==1?'s':''} handed to the remediation agent`);
+  fSecs+=`<div class="plan-si" data-fbk-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full feedback output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
+  html+=`<div class="plan-sections">${fSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
+  return html}
  // Report-style sections (intake, dormancy)
  if(art.sections){
   art.sections.forEach(s=>{
@@ -2122,7 +2185,7 @@ function renderOutputPane(outputs,artefact){
  }
  const statusMsg=outputs.message||outputs.status_message||outputs.summary||'';
  const msgHtml=statusMsg?`<div class="op-output-message">${esc(statusMsg)}</div>`:'';
- const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
+ const rawSection=(artefact?.format==='plan'||artefact?.title==='ACE Analysis'||artefact?.format==='yaml'||artefact?.title==='Repository Intake Report'||artefact?.title==='Dormancy Assessment'||artefact?.title==='Framework Baseline Template'||artefact?.format==='code'||artefact?.format==='test'||artefact?.format==='variances'||artefact?.format==='rca'||artefact?.format==='remediation'||artefact?.format==='governance'||artefact?.format==='knowledge'||artefact?.format==='feedback')?'':`<details class="op-raw-section"><summary>${chev} Raw Output</summary><div class="op-json" style="margin-top:8px">${syntaxHighlightJson(outputs)}</div></details>`;
  return`${metricsHtml}${artHtml}${findingsHtml}${msgHtml}${rawSection}`}
 function renderCloneOutputPane(outputs,params){
  const branch=outputs.branch||params.branch||'—';
@@ -2263,10 +2326,10 @@ function renderPlanMappingsTab(mappings){
  return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search source, ACE construct…"><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${mappings.length} of ${mappings.length}</span></div>
  <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>ACE Construct</th><th>Spring Pattern</th><th>Module</th></tr></thead><tbody id="pmTbody">${planMappingRows(mappings,'','')}</tbody></table></div>`}
 function renderPlanRisksTab(risks){
- return`<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-tests-cell">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
+ return`<div class="plan-tbl-wrap"><table class="plan-tbl plan-tbl-fixed"><colgroup><col style="width:90px"><col style="width:180px"><col><col style="width:180px"><col style="width:160px"></colgroup><thead><tr><th>Severity</th><th>Category</th><th>Statement</th><th>Owner</th><th>Status</th></tr></thead><tbody>${risks.map(r=>`<tr><td><span class="badge badge-${r.severity==='HIGH'?'error':r.severity==='MEDIUM'?'warning':'success'}">${esc(r.severity)}</span></td><td>${esc(r.category)}</td><td class="plan-risk-stmt">${esc(r.statement)}</td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`}
 function renderPlanRawTab(){
  const data=window._planOutputs||window._planArt||{};
- return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre">${esc(JSON.stringify(data,null,2))}</pre>`}
+ return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full plan output</span><button id="pmCopyJson" class="plan-copy-btn">Copy JSON</button></div><pre class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</pre>`}
 
 // ==== ACE Analysis Output Modal ============================================
 function openACEModal(tab){
@@ -2450,6 +2513,236 @@ function renderRIListTab(items,label){
 function renderRIRawTab(){
  const data=window._riOutputs||window._riArt||{};
  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full intake output</span><button id="rimCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+
+// ==== Test Engineering Output Modal =======================================
+function openTestModal(tab){
+ const art=window._testArt;if(!art)return;
+ let m=document.getElementById('testModal');
+ if(!m){
+  m=document.createElement('div');m.id='testModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="testmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Test Engineering — Differential Test Package</div>
+    <div class="plan-modal-sub">JSON · full test package</div>
+   </div>
+   <button id="testmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(window._testOutputs||art)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('testmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('testmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  const data=window._testOutputs||art;
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+
+// ==== Variance Analysis Output Modal ======================================
+async function _openHtmlReport(url,cssFile){
+ try{
+  const t=sessionStorage.getItem('access_token')||'';
+  const res=await fetch(url,{headers:t?{Authorization:'Bearer '+t}:{}});
+  if(!res.ok)throw new Error(res.status);
+  let html=await res.text();
+  const cssHref=location.origin+'/static/'+(cssFile||'report-styles.css');
+  html=html.replace(/<style>[\s\S]*?<\/style>/i,'<link rel="stylesheet" href="'+cssHref+'">');
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const blobUrl=URL.createObjectURL(blob);
+  window.open(blobUrl,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+ }catch(e){}}
+
+function _collectHtmlLinks(obj,label,out){
+ if(!obj||typeof obj!=='object')return;
+ if(Array.isArray(obj)){obj.forEach(v=>_collectHtmlLinks(v,label,out));return}
+ if(obj.html_url&&typeof obj.html_url==='string'){
+  const name=label||'Report';
+  const display=name.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  out.push({url:obj.html_url,label:display,status:obj.status||''});return}
+ Object.entries(obj).forEach(([k,v])=>_collectHtmlLinks(v,k,out))}
+
+function openVarModal(tab){
+ const art=window._varArt;if(!art)return;
+ let m=document.getElementById('varModal');
+ if(!m){
+  m=document.createElement('div');m.id='varModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const data=window._varOutputs||art;
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="varmClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Variance Analysis — Raw Output</div>
+    <div class="plan-modal-sub">JSON · full variance analysis</div>
+   </div>
+   <button id="varmCopyJson" class="plan-copy-btn" style="flex-shrink:0">Copy JSON</button>
+  </div>
+  <div class="plan-modal-body"><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div></div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('varmClose').onclick=()=>m.classList.remove('open');
+ const cpBtn=document.getElementById('varmCopyJson');
+ if(cpBtn)cpBtn.onclick=()=>{
+  try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{cpBtn.textContent='Copied ✓';setTimeout(()=>{cpBtn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}};
+}
+
+
+// ==== Root Cause Analysis Output Modal =====================================
+function _pctBar(v){const p=Math.round((Number(v)||0)*100);return `<div style="display:flex;align-items:center;gap:8px;min-width:110px"><div class="progress-bar" style="flex:1"><div class="progress-fill${p>=80?' darkgreen':p<50?' error':''}" style="width:${Math.max(p,p?4:0)}%"></div></div><span style="font-size:11px;min-width:30px">${p}%</span></div>`}
+function _statusBadge(st){const u=String(st||'').toUpperCase();return `<span class="badge badge-${u==='GAP'||u==='FAILED'||u==='REVERTED'?'error':u==='PARTIAL'||u==='NOT_ELIGIBLE'?'warning':u==='APPLIED'||u==='KEPT'||u==='REMEDIATED'?'success':'neutral'}">${esc(String(st||'—').replace(/_/g,' '))}</span>`}
+function _openOutputModal(id,closeId,title,sub,tabs,render,wire,tab,art){
+ let m=document.getElementById(id);
+ if(!m){
+  m=document.createElement('div');m.id=id;m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const active=tabs.find(t=>t.key===tab)?tab:tabs[0].key;
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="${closeId}">← Back</button>
+   <div class="plan-modal-hd-info"><div class="plan-modal-title">${esc(title)}</div><div class="plan-modal-sub">${sub}</div></div>
+  </div>
+  <div class="plan-modal-tabs">${tabs.map(t=>`<button class="plan-modal-tab${t.key===active?' active':''}" data-t="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}</div>
+  <div class="plan-modal-body" id="${id}Body">${render(art,active)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById(closeId).onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  document.getElementById(id+'Body').innerHTML=render(art,btn.dataset.t);wire(btn.dataset.t,art)})});
+ wire(active,art)}
+function _rawTab(label,btnId,data){return `<div class="plan-raw-tb"><span class="plan-raw-lbl">${esc(label)}</span><button id="${btnId}" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json plan-modal-scroll">${syntaxHighlightJson(data)}</div>`}
+function _wireCopy(btnId,data){const b=document.getElementById(btnId);if(b)b.onclick=()=>{try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{b.textContent='Copied ✓';setTimeout(()=>{b.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}
+function openRCAModal(tab){
+ const art=window._rcaArt;if(!art)return;
+ const hyp=art.hypotheses||[],reports=hyp.filter(h=>h.source!=='DIFFERENTIAL');
+ const missing=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+ const tabs=[hyp.length&&{key:'causes',label:'Root Causes',count:hyp.length},reports.length&&{key:'findings',label:'Report Findings',count:reports.reduce((n,h)=>n+(h.finding_count||0),0)},missing.length&&{key:'missing',label:'Missing Evidence',count:missing.length},{key:'raw',label:'Raw Output',count:null}].filter(Boolean);
+ _openOutputModal('rcaModal','rcamClose','Root Cause Analysis',`${hyp.length} root cause${hyp.length!==1?'s':''} · ${reports.length} from the variance-analysis reports`,tabs,renderRCATab,(t,a)=>{if(t==='raw')_wireCopy('rcamCopyJson',window._rcaOutputs||a)},tab,art)}
+function renderRCATab(art,tab){
+ const hyp=art.hypotheses||[];
+ if(tab==='causes')return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Source</th><th>Area</th><th>Root cause</th><th>Confidence</th><th>Findings</th><th>Status</th></tr></thead><tbody>${hyp.map(h=>`<tr><td><span class="badge badge-${h.source==='DIFFERENTIAL'?'neutral':'info'}">${esc(h.source==='DIFFERENTIAL'?'TEST RUN':h.source)}</span></td><td style="font-size:12px">${esc(h.area||'—')}</td><td style="font-size:12px;word-break:break-word;min-width:260px">${esc(h.hypothesis||'No hypothesis offered for this group')}</td><td>${_pctBar(h.confidence)}</td><td>${esc(String(h.finding_count??'—'))}</td><td>${_statusBadge(h.status)}</td></tr>`).join('')}</tbody></table></div>`;
+ if(tab==='findings'){
+  const groups=hyp.filter(h=>h.source!=='DIFFERENTIAL'&&(h.findings||[]).length);
+  if(!groups.length)return '<p class="authhint">No report findings.</p>';
+  return groups.map(h=>`<div class="artefact-sub" style="margin-top:14px">${esc(h.source)} · ${esc(h.area)} <span class="plan-tab-badge">${h.finding_count}</span></div><div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Status</th><th>IIB source</th><th>Migrated code</th><th>Remarks</th></tr></thead><tbody>${h.findings.map(f=>`<tr><td>${_statusBadge(f.status)}</td><td style="font-size:11px;word-break:break-all">${esc(f.iib_source||'—')}</td><td style="font-size:11px;word-break:break-all">${esc(f.ms_source||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(f.remarks||'')}</td></tr>`).join('')}</tbody></table></div>${h.finding_count>h.findings.length?`<p class="authhint">${h.finding_count-h.findings.length} more in the report.</p>`:''}`).join('');
+ }
+ if(tab==='missing'){
+  const items=[...new Set(hyp.flatMap(h=>h.missing_evidence||[]))];
+  return `<ul class="artefact-list">${items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`}
+ if(tab==='raw')return _rawTab('JSON · full RCA output','rcamCopyJson',window._rcaOutputs||art);
+ return ''}
+
+// ==== Remediation Output Modal =============================================
+function openRemModal(tab){
+ const art=window._remArt;if(!art)return;
+ const causes=art.causes||[],tot=art.totals||{};
+ const unfixed=causes.reduce((n,c)=>n+(c.unfixed||[]).length,0);
+ if(!causes.length){_openOutputModal('remModal','remmClose','Remediation','JSON · full remediation output',[{key:'raw',label:'Raw Output',count:null}],renderRemTab,(t,a)=>{if(t==='raw')_wireCopy('remmCopyJson',window._remOutputs||a)},'raw',art);return}
+ const tabs=[tot.fixes_applied&&{key:'fixes',label:'Applied Fixes',count:tot.fixes_applied},(unfixed||tot.not_eligible)&&{key:'unfixed',label:'Not Fixed',count:unfixed+(tot.not_eligible||0)},{key:'causes',label:'Root Causes',count:causes.length},{key:'raw',label:'Raw Output',count:null}].filter(Boolean);
+ const g=art.gate;
+ _openOutputModal('remModal','remmClose','Remediation',`${tot.fixes_applied||0} fix${(tot.fixes_applied||0)!==1?'es':''} applied · ${causes.length} root cause${causes.length!==1?'s':''}${g?' · Quality gate: <span class="badge badge-'+(g.result==='kept'?'success':'warning')+'">'+(g.result==='kept'?'NO WORSE':'REVERTED')+'</span>':''}`,tabs,renderRemTab,(t,a)=>{if(t==='raw')_wireCopy('remmCopyJson',window._remOutputs||a)},tab,art)}
+function renderRemTab(art,tab){
+ const causes=art.causes||[];
+ const label=c=>`${c.source==='DIFFERENTIAL'?'TEST RUN':c.source}${c.area?' · '+c.area:''}`;
+ if(tab==='fixes'){
+  const rows=causes.flatMap(c=>(c.applied||[]).map(f=>({c,f})));
+  if(!rows.length)return '<p class="authhint">No fixes were applied.</p>';
+  const gate=art.gate?`<p class="authhint">${esc(art.gate.basis||'')}. Open checks before: ${(art.gate.open_before||[]).length}, after: ${(art.gate.open_after||[]).length}.</p>`:'';
+  return `${gate}<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>File</th><th>What changed</th><th>Verdict</th></tr></thead><tbody>${rows.map(({c,f})=>`<tr><td style="font-size:12px">${esc(label(c))}</td><td style="font-family:monospace;font-size:11px;word-break:break-all">${esc(f.path)}</td><td style="font-size:12px">${esc(f.action)}</td><td>${_statusBadge(c.verdict==='kept'?'KEPT':c.verdict||'APPLIED')}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='unfixed'){
+  const rows=[...causes.filter(c=>!c.eligible).map(c=>({c,ref:c.hypothesis||label(c),why:`confidence ${Math.round((c.confidence||0)*100)}% is below the ${Math.round((c.threshold||0)*100)}% bar${(c.unmet||[]).length?'; unmet: '+c.unmet.join(', '):''}`})),
+   ...causes.flatMap(c=>(c.unfixed||[]).map(u=>({c,ref:u.ref,why:u.reason})))];
+  if(!rows.length)return '<p class="authhint">Nothing was left unfixed.</p>';
+  return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Item</th><th>Why it is still open</th></tr></thead><tbody>${rows.map(({c,ref,why})=>`<tr><td style="font-size:12px">${esc(label(c))}</td><td style="font-size:12px;word-break:break-word">${esc(ref||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(why||'—')}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='causes')return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Confidence</th><th>Outcome</th><th>Fixes</th><th>Tests</th></tr></thead><tbody>${causes.map(c=>`<tr><td style="font-size:12px;min-width:240px"><b>${esc(label(c))}</b><br>${esc(c.hypothesis||'')}</td><td>${_pctBar(c.confidence)}</td><td>${_statusBadge(String(c.outcome||'').toUpperCase())}</td><td>${(c.applied||[]).length}</td><td style="font-size:11px">${esc((c.tests||[]).join(', '))}</td></tr>`).join('')}</tbody></table></div>`;
+ if(tab==='raw')return _rawTab('JSON · full remediation output','remmCopyJson',window._remOutputs||art);
+ return ''}
+
+// ==== Code Generation Output Modal ========================================
+function openCodeModal(tab){
+ const art=window._codeArt;if(!art)return;
+ let m=document.getElementById('codeModal');
+ if(!m){
+  m=document.createElement('div');m.id='codeModal';m.className='plan-modal-bg';
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open'))m.classList.remove('open')},{passive:true})}
+ const files=art.files||[];
+ const quality=art.quality||null;
+ const checks=quality?.checks||[];
+ const qs=quality?.status||'';
+ const passCount=checks.filter(c=>c.status==='PASS').length;
+ const TABS=[
+  {key:'files',label:'Generated Files',count:files.length},
+  quality&&{key:'quality',label:'Quality Gate',count:checks.length||null},
+  {key:'raw',label:'Raw Output',count:null},
+ ].filter(Boolean);
+ const activeTab=TABS.find(t=>t.key===tab)?tab:'files';
+ const qBadgeCls=qs==='PASS'?'badge-success':qs==='FAIL'?'badge-error':'badge-warning';
+ m.innerHTML=`<div class="plan-modal">
+  <div class="plan-modal-hd">
+   <button class="plan-modal-back" id="codemClose">← Back</button>
+   <div class="plan-modal-hd-info">
+    <div class="plan-modal-title">Code Generation</div>
+    <div class="plan-modal-sub">${files.length} file${files.length!==1?'s':''} generated${qs?' · Quality: <span class="badge '+qBadgeCls+'">'+esc(qs)+'</span>':''} · ${passCount} / ${checks.length} checks passed</div>
+   </div>
+  </div>
+  <div class="plan-modal-tabs">
+   ${TABS.map(t=>`<button class="plan-modal-tab${t.key===activeTab?' active':''}" data-codem-tab="${t.key}">${esc(t.label)}${t.count!=null?` <span class="plan-tab-badge">${t.count}</span>`:''}</button>`).join('')}
+  </div>
+  <div class="plan-modal-body" id="codemBody">${renderCodeModalTab(art,activeTab)}</div>
+ </div>`;
+ m.classList.add('open');
+ document.getElementById('codemClose').onclick=()=>m.classList.remove('open');
+ m.querySelectorAll('.plan-modal-tab').forEach(btn=>{btn.addEventListener('click',()=>{
+  m.querySelectorAll('.plan-modal-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('codemBody').innerHTML=renderCodeModalTab(art,btn.dataset.codemTab);
+  wireCodeModalTab(btn.dataset.codemTab)})});
+ wireCodeModalTab(activeTab)}
+function renderCodeModalTab(art,tab){
+ if(tab==='files'){
+  const files=art.files||[];
+  if(!files.length)return`<p class="authhint">No files generated.</p>`;
+  const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+  return`<div style="display:flex;flex-direction:column;gap:8px">${files.map(f=>`<details class="op-raw-section" style="margin:0"><summary style="display:flex;align-items:center;gap:6px">${chev}<span style="font-family:monospace;font-size:12px;word-break:break-all">${esc(f.path)}</span></summary><pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre></details>`).join('')}</div>`}
+ if(tab==='quality'){
+  const quality=art.quality;
+  if(!quality)return`<p class="authhint">No quality data available.</p>`;
+  const qs=quality.status||'';
+  const checks=quality.checks||[];
+  const passCount=checks.filter(c=>c.status==='PASS').length;
+  const failCount=checks.filter(c=>c.status==='FAIL').length;
+  const gapCount=checks.filter(c=>c.status==='GAP').length;
+  const statusColor=s=>s==='PASS'?'var(--ok,#059669)':s==='FAIL'?'#DC2626':s==='GAP'?'var(--warn,#D97706)':'var(--text-3)';
+  let h=`<div class="meta-row"><div class="meta-key">Overall Status</div><div class="meta-val" style="display:flex;align-items:center;gap:10px"><span style="font-weight:700;color:${statusColor(qs)}">${esc(qs||'—')}</span><span style="color:var(--text-3);font-family:inherit">·</span><span style="color:var(--ok,#059669)">${passCount} passed</span><span style="color:var(--text-3)">·</span><span style="color:#DC2626">${failCount} failed</span>${gapCount?`<span style="color:var(--text-3)">·</span><span style="color:var(--warn,#D97706)">${gapCount} gap${gapCount!==1?'s':''}</span>`:''}</div></div>`;
+  checks.forEach(c=>{
+   const ev=(c.evidence&&c.evidence.length)?(Array.isArray(c.evidence)?c.evidence:[JSON.stringify(c.evidence)]):[];
+   const detail=[
+    c.skill_ref?`<span style="color:var(--text-3)">${esc(c.skill_ref)}</span>`:'',
+    ...ev.slice(0,4).map(e=>`<span>${esc(String(e))}</span>`),
+    c.remediation?`<span><b style="color:${statusColor(c.status)}">Fix:</b> ${esc(c.remediation)}</span>`:'',
+   ].filter(Boolean).join('<br>');
+   h+=`<div class="meta-row"><div class="meta-key" style="font-family:ui-monospace,monospace;font-size:11px">${esc(c.name)}</div><div class="meta-val"><span style="font-weight:700;color:${statusColor(c.status)}">${esc(c.status)}</span>${detail?`<div style="margin-top:4px;font-size:11px;color:var(--text-2);font-family:inherit;line-height:1.6">${detail}</div>`:''}</div></div>`;});
+  return h}
+ if(tab==='raw'){
+  const data=window._codeOutputs||window._codeArt||{};
+  return`<div class="plan-raw-tb"><span class="plan-raw-lbl">JSON · full code generation output</span><button id="codemCopyJson" class="plan-copy-btn">Copy JSON</button></div><div class="plan-raw-pre op-json">${syntaxHighlightJson(data)}</div>`}
+ return ''}
+function wireCodeModalTab(tab){
+ if(tab==='raw'){
+  const btn=document.getElementById('codemCopyJson');
+  if(btn)btn.onclick=()=>{
+   const data=window._codeOutputs||window._codeArt||{};
+   try{navigator.clipboard.writeText(JSON.stringify(data,null,2)).then(()=>{btn.textContent='Copied ✓';setTimeout(()=>{btn.textContent='Copy JSON'},1500)}).catch(()=>{})}catch(e){}}}}
 
 // ==== Framework Baseline Output Modal =====================================
 function openFBModal(tab){
@@ -2652,6 +2945,14 @@ async function openStepOutput(pipelineId,stepId,step){
  if(detail.artefact?.title==='Repository Intake Report')window._riOutputs=outputs;
  if(detail.artefact?.title==='Dormancy Assessment')window._diOutputs=outputs;
  if(detail.artefact?.title==='Framework Baseline Template')window._fbOutputs=outputs;
+ if(detail.artefact?.format==='code')window._codeOutputs=outputs;
+ if(detail.artefact?.format==='test')window._testOutputs=outputs;
+ if(detail.artefact?.format==='variances')window._varOutputs=outputs;
+ if(detail.artefact?.format==='rca')window._rcaOutputs=outputs;
+ if(detail.artefact?.format==='remediation')window._remOutputs=outputs;
+ if(detail.artefact?.format==='governance')window._govOutputs=outputs;
+ if(detail.artefact?.format==='knowledge')window._knwOutputs=outputs;
+ if(detail.artefact?.format==='feedback')window._fbkOutputs=outputs;
  const _outputPaneHtml=detail.kind==='CLONE'?renderCloneOutputPane(outputs,params):renderOutputPane(outputs,detail.artefact);
  panel.innerHTML=`
   <div class="op-header">
@@ -2709,6 +3010,16 @@ async function openStepOutput(pipelineId,stepId,step){
  panel.querySelectorAll('.plan-si[data-ri-tab]').forEach(item=>{item.addEventListener('click',()=>openRIModal(item.dataset.riTab))});
  panel.querySelectorAll('.plan-si[data-fb-tab]').forEach(item=>{item.addEventListener('click',()=>openFBModal(item.dataset.fbTab))});
  panel.querySelectorAll('.plan-si[data-di-tab]').forEach(item=>{item.addEventListener('click',()=>openDIModal(item.dataset.diTab))});
+ panel.querySelectorAll('.plan-si[data-code-tab]').forEach(item=>{item.addEventListener('click',()=>openCodeModal(item.dataset.codeTab))});
+ panel.querySelectorAll('.plan-si[data-test-tab]').forEach(item=>{item.addEventListener('click',()=>openTestModal(item.dataset.testTab))});
+ panel.querySelectorAll('.plan-si[data-var-tab]').forEach(item=>{item.addEventListener('click',()=>openVarModal(item.dataset.varTab))});
+ panel.querySelectorAll('[data-var-html-url]').forEach(item=>{item.addEventListener('click',()=>_openHtmlReport(item.dataset.varHtmlUrl))});
+ panel.querySelectorAll('.plan-si[data-rca-tab]').forEach(item=>{item.addEventListener('click',()=>openRCAModal(item.dataset.rcaTab))});
+ panel.querySelectorAll('.plan-si[data-rem-tab]').forEach(item=>{item.addEventListener('click',()=>openRemModal(item.dataset.remTab))});
+ panel.querySelectorAll('.plan-si[data-gov-tab]').forEach(item=>{item.addEventListener('click',()=>openGovModal(item.dataset.govTab))});
+ panel.querySelectorAll('.plan-si[data-knw-tab]').forEach(item=>{item.addEventListener('click',()=>openKnwModal(item.dataset.knwTab))});
+ panel.querySelectorAll('.plan-si[data-fbk-tab]').forEach(item=>{item.addEventListener('click',()=>openFbkModal(item.dataset.fbkTab))});
+ panel.querySelectorAll('[data-ace-html-url]').forEach(item=>{item.addEventListener('click',()=>_openHtmlReport(item.dataset.aceHtmlUrl,'ace-analysis-report-styles.css'))});
  const cloneCopyBtn=panel.querySelector('#cloneCopySHA');
  if(cloneCopyBtn)cloneCopyBtn.onclick=()=>{
   try{navigator.clipboard.writeText(outputs.commit||'').then(()=>{cloneCopyBtn.textContent='Copied ✓';setTimeout(()=>{cloneCopyBtn.textContent='Copy SHA'},1500)}).catch(()=>{})}catch(e){}};
@@ -2796,7 +3107,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
   // The newest pipeline of each job, so a service can lead to the pipeline running it.
   const plByJob={};plItems.slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(pl=>{plByJob[pl.job_id]=pl});
   const svcName=x=>{const name=esc(x.service||x.workspace_dir||x.id);const pl=plByJob[x.id];return pl?`<a class="pl-link" href="#pipelines/${esc(pl.id)}" title="Open this pipeline">${name}</a>`:name};
-  const progressOf=x=>{const st=String(x.state||x.status||'').toUpperCase();const v=Math.max(0,Math.min(100,Number(dispPct(st,x.progress))||0));return st==='COMPLETED'||v>=100?100:Math.max(v,6)};
+  const progressOf=x=>{const pl=plByJob[x.id];if(pl&&pl.steps_total>0){const v=Math.round(100*pl.steps_done/pl.steps_total);return pl.steps_done>=pl.steps_total?100:Math.min(99,Math.max(v,pl.steps_done?v:4))}const st=String(x.state||x.status||'').toUpperCase();const v=Math.max(0,Math.min(100,Number(dispPct(st,x.progress))||0));return st==='COMPLETED'||v>=100?100:Math.max(v,6)};
   const jobRows=(jobs.items||[]).slice(0,12).map(x=>{const pl=plByJob[x.id];const st=x.state||x.status||'CREATED';const pct=progressOf(x);const open=pl&&dashOpenJobs.has(x.id);
    const caps=pl?`<div class="job-caps"><button class="btn-ghost job-steps-btn" data-job="${esc(x.id)}" data-pl="${esc(pl.id)}" aria-expanded="${!!open}">${open?'Hide steps':'Steps'}</button><button class="btn-ghost job-open-btn" data-pl="${esc(pl.id)}">Open pipeline →</button></div>`:'<span class="td-light">No pipeline yet</span>';
    return `<tr class="job-row"><td class="td-name">${svcName(x)}${x.id?`<div class="td-svc-id">${esc(String(x.id).slice(0,14))}…</div>`:''}</td><td class="td-light">${esc(x.owner||x.created_by||'—')}</td><td>${stateBadge(String((pl&&pl.status)||st))}</td><td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="flex:1"><div class="progress-fill${progressFillClass(st,x.progress||0)}" style="width:${pct}%"></div></div><span style="font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:28px">${pct===100?100:Math.min(pct,99)}%</span></div></td><td>${caps}</td></tr>${pl?`<tr class="job-steps-row" data-job="${esc(x.id)}"${open?'':' hidden'}><td colspan="5"><div class="pipeline-board job-steps-board" style="padding:10px 4px"><div class="empty">Loading steps…</div></div></td></tr>`:''}`}).join('');
@@ -2825,7 +3136,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
   const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
-  const metaText=`Auto-refreshes every 30 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
+  const metaText=`Auto-refreshes every 10 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
   const painted=soft&&$('#dashSecJobs');
   if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
   else $('#view').innerHTML=`<div class="cmd-hero-card"><div class="cmd-hero-left"><svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" style="color:#93C5FD;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div><div class="cmd-hero-title">Dashboard</div><div class="cmd-hero-sub">ACE → Spring Boot migration governance &amp; oversight</div></div></div><div class="cmd-hero-right"><span class="cmd-live-badge"><span class="cmd-live-pulse"></span>LIVE</span><span class="cmd-hero-meta" id="dashMeta">${metaText}</span></div></div><div style="display:flex;flex-direction:column;gap:24px"><div class="dash-grid"><div class="dash-stack"><div id="dashSecJobs" style="display:contents">${jobsCard}</div></div><div class="dash-stack"><div id="dashSecInbox" style="display:contents">${inboxCard}</div></div></div></div>`;
@@ -2847,7 +3158,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
    b.onclick=()=>{const open=row.hidden;row.hidden=!open;b.textContent=open?'Hide steps':'Steps';b.setAttribute('aria-expanded',String(open));
     if(open){dashOpenJobs.add(b.dataset.job);fillSteps(row,b.dataset.pl)}else dashOpenJobs.delete(b.dataset.job)}});
   // The header says it refreshes itself; nothing did.
-  if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},30000);
+  if(!soft)refreshTimer=setInterval(()=>{const h=(location.hash||'#dashboard').slice(1);if(h==='dashboard'&&token()&&!document.hidden){renderSoft=true;render().catch(()=>{})}},10000);
   $('#dashViewAllApprovals')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   $('#dashViewAllApprovals2')?.addEventListener('click',()=>{location.hash='approval-inbox';});
   // The live step card carries an elapsed counter for whatever is running now.

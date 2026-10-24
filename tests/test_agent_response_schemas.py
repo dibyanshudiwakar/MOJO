@@ -125,6 +125,9 @@ SAMPLES = {
     'agent/feedback/code-repair': {
         'edits': [{'path': 'src/main/resources/application.yml', 'old_str': 'password: x',
                    'new_str': 'password: ${DB_PASSWORD}', 'why': 'SECRET_SCAN'}]},
+    'agent/remediation/code-fix': {
+        'edits': [{'path': 'src/main/java/A.java', 'old_str': 'x', 'new_str': 'y', 'why': 'closes a GAP'}],
+        'unfixable': [{'ref': 'B.java:3', 'reason': 'needs a design decision'}]},
     'agent/clarification/suggested-answers': {
         'suggestions': [{'question': 'Which queue?',
                          'suggested_answer': 'Use the default outbound queue manager alias.',

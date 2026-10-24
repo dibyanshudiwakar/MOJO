@@ -1,0 +1,31 @@
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--muted:#5d6b7c;--line:#dde2e8;--match:#1a7f4b;--match-bg:#e3f4ea;
+--partial:#9a6700;--partial-bg:#fdf1d6;--gap:#b42318;--gap-bg:#fde7e4;--other:#475467;--other-bg:#eaecf0;--code:#f1f3f6}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141a;--card:#171e27;--ink:#e6eaf0;--muted:#97a3b3;--line:#2a3441;
+--match:#5ad19a;--match-bg:#10301f;--partial:#f0c05a;--partial-bg:#33280b;--gap:#ff8a7d;--gap-bg:#3a1713;
+--other:#b3bcc9;--other-bg:#252d38;--code:#0f141a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1280px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px}h2 small{color:var(--muted);font-weight:400;margin-left:8px}
+.sub{color:var(--muted);margin:0 0 16px}.note{color:var(--muted);font-size:13px;margin:4px 0 0}
+.tiles{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 18px;min-width:120px}
+.tile b{display:block;font-size:26px;line-height:1.1}.tile span{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.tile.MATCH b{color:var(--match)}.tile.PARTIAL b{color:var(--partial)}.tile.GAP b{color:var(--gap)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
+.card p{margin:.4em 0}
+.banner{border:1px solid var(--partial);background:var(--partial-bg);color:var(--ink);border-radius:8px;padding:10px 14px;margin:12px 0}
+table{width:100%;border-collapse:collapse;table-layout:fixed;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);overflow-wrap:anywhere;word-break:break-word}
+th{background:var(--other-bg);font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+code{display:block;background:var(--code);border-radius:6px;padding:4px 6px;margin-top:4px;font:12px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap}
+code.none{color:var(--muted);font-style:italic}
+.src{color:var(--muted);font-size:12px}
+.badge{display:inline-block;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600}
+.MATCH{background:var(--match-bg);color:var(--match)}.PARTIAL{background:var(--partial-bg);color:var(--partial)}
+.GAP,.CRITICAL{background:var(--gap-bg);color:var(--gap)}.HIGH{background:var(--gap-bg);color:var(--gap)}
+.MEDIUM{background:var(--partial-bg);color:var(--partial)}.LOW,.OTHER{background:var(--other-bg);color:var(--other)}
+.empty{color:var(--muted);font-style:italic}
+footer{margin-top:32px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+footer dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:6px 0}footer dt{font-weight:600}footer dd{margin:0;overflow-wrap:anywhere}
+@media print{body{background:#fff}.tile,.card,table{break-inside:avoid}}

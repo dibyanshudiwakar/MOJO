@@ -56,12 +56,18 @@ def test_a_completed_agent_still_completes(env):
 
 # ---- repair_by -------------------------------------------------------------------------------
 
-def test_a_result_that_needs_repair_fails_the_step_if_nothing_will_repair_it(env):
+def test_a_result_that_needs_repair_completes_if_nothing_will_repair_it(env):
+    """No repairing agent in the pipeline must not block every downstream step.
+
+    Used to fail the step outright; now logs a warning and completes, so a
+    pipeline run without a feedback step (e.g. feedback disabled) still
+    reaches governance/knowledge-evidence/etc. instead of halting on step 1.
+    """
     _, _, _, _, _, worker = env
     _stub(worker, metrics={'repair_by': 'feedback', 'quality_run_id': 'q-1'})
     step = find(_run(env)['steps'], 'repository-intake')
-    assert step['status'] == 'FAILED'
-    assert 'quality_gate_failed:q-1' in step['error'] and 'no feedback step' in step['error']
+    assert step['status'] == 'COMPLETED'
+    assert step['error'] == ''
 
 
 def test_a_result_that_needs_repair_completes_when_the_repairing_step_is_there(env):
@@ -80,6 +86,7 @@ def test_a_result_that_needs_repair_completes_when_the_repairing_step_is_there(e
 
 
 def test_a_skipped_repairing_step_does_not_count(env):
+    """A feedback step present but SKIPPED is the same as absent -- still completes, with a warning."""
     repo, job, owner, pipelines, workflow, worker = env
     _stub(worker, metrics={'repair_by': 'feedback', 'quality_run_id': 'q-1'})
     p = pipelines.create(job['id'], 'workspace/orders', {}, ['repository-intake', 'feedback'], owner['email'])
@@ -89,4 +96,6 @@ def test_a_skipped_repairing_step_does_not_count(env):
     pipelines.confirm(p['id'])
     pipelines.run(p['id'], workflow)
     worker.process_one()
-    assert find(pipelines.detail(p['id'])['steps'], 'repository-intake')['status'] == 'FAILED'
+    step = find(pipelines.detail(p['id'])['steps'], 'repository-intake')
+    assert step['status'] == 'COMPLETED'
+    assert step['error'] == ''

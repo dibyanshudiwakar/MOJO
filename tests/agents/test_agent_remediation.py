@@ -62,8 +62,8 @@ def test_remediation_writes_no_source(repo, job, root_cause, monkeypatch, tmp_pa
     assert repo.one('select count(*) n from generated_artifacts where job_id=?', (job['id'],))['n'] == 0
 
 
-def test_remediation_needs_a_root_cause_that_exists(repo, job):
-    with pytest.raises(ValueError, match='missing_param:root_cause_id'):
-        RemediationAgent(repo).run(job['id'])
+def test_remediation_with_nothing_to_remediate_completes_and_a_named_cause_must_exist(repo, job):
+    result = RemediationAgent(repo).run(job['id'])
+    assert result.status == 'COMPLETED' and result.metrics['reason'] == 'no_root_causes'
     with pytest.raises(ValueError, match='root_cause_not_found'):
         RemediationAgent(repo).run(job['id'], params={'root_cause_id': 'nope'})

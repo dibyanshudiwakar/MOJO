@@ -352,6 +352,11 @@ def _code_repair(payload):
     return {'edits': []}
 
 
+def _code_fix(payload):
+    """No edits and nothing declared unfixable."""
+    return {'edits': [], 'unfixable': []}
+
+
 def _next_action(payload):
     return {'next_agent': None, 'next_state': None,
             'blocked_by': payload.get('stop_reason', ''),
@@ -408,6 +413,7 @@ ANSWERS = {
     'agent/test-engineering/case-design': _case_design,
     'agent/knowledge-evidence/citations': _citations,
     'agent/feedback/code-repair': _code_repair,
+    'agent/remediation/code-fix': _code_fix,
     'agent/feedback/finding-triage': _finding_triage,
     'agent/migration-orchestrator/next-action': _next_action,
     'agent/clarification/suggested-answers': _suggested_answers,
