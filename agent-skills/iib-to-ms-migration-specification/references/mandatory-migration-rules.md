@@ -472,3 +472,14 @@ SomeOtherFolder/Migrated/EmergencyOverrides/EIPMS_cvs-v1-emergencyoverrides-oci/
 ```
 
 If the user names a different target directory, use that instead — the point of this rule is that the question is always asked and always gets a real, captured answer; the same-location suggestion is just what to recommend when asking, not a reason to skip asking.
+
+---
+
+## Rule 14 — Every generated repository carries `settings.xml`, and every Maven build uses it
+
+The org's artifacts (the `framework-starter` parent, `framework-restclient` and the rest) are not on Maven Central. They resolve only through the internal Nexus repositories, which Maven reads from a settings file. Without it the parent POM is non-resolvable and nothing builds — not the HANDOFF build, not the quality gate, not a repair loop.
+
+- Write `settings.xml` at the **repo root** (beside the `Dockerfile`), as a verbatim copy of `references/templates/maven-settings.xml`. Never retype it, never trim a repository out of it, never add a credential to it (credentials come from the build environment, not from the repository).
+- **Every** `mvn` command for this repository — compile, test, `clean verify`, `spring-boot:run`, and the ones in `.github/workflows/` — passes it: `mvn -s <repo-root>/settings.xml ...`. A build that omits `-s` is not a valid build of this repository, whatever it reports.
+- Mechanical check: `gap-checklist.md` [M26].
+

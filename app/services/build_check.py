@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 
 from app.repository import now, digest
+from app.services import maven_settings
 
 #: ``on`` always runs, ``off`` never does, ``auto`` runs when Maven and Java exist.
 MODE_ENV = 'FACTORY_BUILD'
@@ -106,8 +107,53 @@ def error_lines(output):
     return out[:MAX_ERROR_LINES]
 
 
-def build(root, timeout=BUILD_TIMEOUT):
-    """``mvn clean verify`` from the parent pom, then the skill's M24 clean-up."""
+#: A framework repository already built and installed, by (pom, commit): the repair loop builds the
+#: project several times and the framework has not changed between them.
+_framework_built = {}
+
+
+def build_framework(framework, settings_root, timeout=BUILD_TIMEOUT):
+    """Build and install the supplied framework repository so the project's parent POM resolves from it.
+
+    ``framework`` is ``{'root': <clone dir>, 'commit': <resolved commit or ''>}``. ``mvn clean install
+    -DskipTests`` puts its artefacts in the local Maven repository, which is where the generated project
+    looks first. The project's own ``settings.xml`` is used, since the framework's dependencies resolve
+    through the same internal repositories. Tests are skipped: this is a build of the dependency, not a
+    verdict on it. A framework with no pom is reported as skipped, not failed.
+    """
+    pom = build_pom(framework['root'])
+    mvn, _, missing = tools()
+    if pom is None:
+        return {'status': 'SKIPPED', 'note': 'no pom.xml in the framework repository', 'root': str(framework['root'])}
+    if missing:
+        return {'status': 'FAIL', 'root': str(framework['root']),
+                'errors': ['%s is not installed, so the framework could not be built' % ', '.join(missing)]}
+    key = (str(pom), framework.get('commit') or str(pom.stat().st_mtime))
+    if key in _framework_built:
+        return {**_framework_built[key], 'note': 'already built and installed for this commit'}
+    cmd = [mvn, '-B', *maven_settings.args(settings_root), '-f', str(pom), 'clean', 'install', '-DskipTests']
+    started = now()
+    try:
+        done = subprocess.run(cmd, cwd=str(pom.parent), capture_output=True, text=True, errors='replace',
+                              timeout=timeout, env=environment())
+    except subprocess.TimeoutExpired:
+        return {'status': 'TIMEOUT', 'command': cmd, 'root': str(framework['root']), 'started_at': started,
+                'completed_at': now(), 'errors': ['framework build exceeded %d seconds' % timeout]}
+    output = done.stdout + '\n' + done.stderr
+    result = {'status': 'PASS' if done.returncode == 0 else 'FAIL', 'command': cmd, 'root': str(framework['root']),
+              'returncode': done.returncode, 'started_at': started, 'completed_at': now(),
+              'errors': [] if done.returncode == 0 else (error_lines(output) or output.strip().splitlines()[-10:])}
+    if result['status'] == 'PASS':
+        _framework_built[key] = result
+    return result
+
+
+def build(root, timeout=BUILD_TIMEOUT, framework=None):
+    """``mvn clean verify`` from the parent pom, then the skill's M24 clean-up.
+
+    When a framework repository was supplied it is built and installed first (``build_framework``); if
+    that fails the project is not built, because it could only fail for the same reason.
+    """
     pom = build_pom(root)
     mvn, _, missing = tools()
     if pom is None:
@@ -115,7 +161,14 @@ def build(root, timeout=BUILD_TIMEOUT):
     if missing:
         return {'status': 'FAIL', 'reason': 'not installed on this host: ' + ', '.join(missing),
                 'errors': ['%s is not installed, so the build could not run' % ', '.join(missing)]}
-    cmd = [mvn, '-B', '-f', str(pom), 'clean', 'verify']
+    framework_result = None
+    if framework:
+        framework_result = build_framework(framework, root, timeout)
+        if framework_result['status'] in ('FAIL', 'TIMEOUT'):
+            return {'status': 'FAIL', 'reason': 'the framework repository did not build', 'framework': framework_result,
+                    'errors': ['framework: ' + e for e in framework_result.get('errors', [])]}
+    # The org's parent POM resolves only through the repositories settings.xml names.
+    cmd = [mvn, '-B', *maven_settings.args(root), '-f', str(pom), 'clean', 'verify']
     started = now()
     try:
         done = subprocess.run(cmd, cwd=str(pom.parent), capture_output=True, text=True,
@@ -128,10 +181,13 @@ def build(root, timeout=BUILD_TIMEOUT):
     for d in Path(root).glob('*-parent'):
         shutil.rmtree(d / 'target', ignore_errors=True)
     output = done.stdout + '\n' + done.stderr
-    return {'status': 'PASS' if done.returncode == 0 else 'FAIL', 'command': cmd,
-            'returncode': done.returncode, 'started_at': started, 'completed_at': now(),
-            'stdout_hash': digest(done.stdout), 'stderr_hash': digest(done.stderr),
-            'errors': [] if done.returncode == 0 else (error_lines(output) or output.strip().splitlines()[-10:])}
+    result = {'status': 'PASS' if done.returncode == 0 else 'FAIL', 'command': cmd,
+              'returncode': done.returncode, 'started_at': started, 'completed_at': now(),
+              'stdout_hash': digest(done.stdout), 'stderr_hash': digest(done.stderr),
+              'errors': [] if done.returncode == 0 else (error_lines(output) or output.strip().splitlines()[-10:])}
+    if framework_result is not None:
+        result['framework'] = framework_result
+    return result
 
 
 def packaged_jar(root):
@@ -200,13 +256,16 @@ def start(root, timeout=START_TIMEOUT):
             'reason': 'exited with code %s' % proc.returncode if exited else 'no answer within %d seconds' % timeout}
 
 
-def checks(root, flag='auto'):
-    """The gate's build checks: COMPILE_AND_UNIT_TEST and STARTUP_SMOKE."""
+def checks(root, flag='auto', framework=None):
+    """The gate's build checks: COMPILE_AND_UNIT_TEST and STARTUP_SMOKE.
+
+    ``framework`` (``{'root', 'commit'}``) is a framework repository supplied for the job; see ``build``.
+    """
     run, why = decide(flag)
     if not run:
         return [{'name': 'COMPILE_AND_UNIT_TEST', 'status': 'NOT_EXECUTED', 'evidence': why},
                 {'name': 'STARTUP_SMOKE', 'status': 'NOT_EXECUTED', 'evidence': why}]
-    built = build(root)
+    built = build(root, framework=framework)
     out = [{'name': 'COMPILE_AND_UNIT_TEST', 'status': 'PASS' if built['status'] == 'PASS' else 'FAIL',
             'evidence': built}]
     if built['status'] != 'PASS':

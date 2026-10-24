@@ -80,3 +80,40 @@ def test_generation_requires_its_parameters(repo, job, planned, tmp_path):
         del params[missing]
         with pytest.raises(ValueError, match='missing_param:' + missing):
             CodeGenerationAgent(repo).run(job['id'], params=params)
+
+
+def test_generation_writes_the_skills_settings_xml_at_the_repo_root(repo, job, planned, tmp_path):
+    from app.services import maven_settings
+    result = CodeGenerationAgent(repo).run(job['id'], params=_params(planned, tmp_path))
+    root = Path(result.outputs['source_code'])
+    assert (root / 'settings.xml').read_text(encoding='utf-8') == maven_settings.template()
+    names = [c['name'] for c in repo.one('select payload from quality_runs where job_id=?', (job['id'],)) and
+             json.loads(repo.one('select payload from quality_runs where job_id=?', (job['id'],))['payload'])['checks']
+             if c['status'] != 'PASS']
+    assert 'SKILL_M26' not in names
+
+
+def test_a_failed_quality_gate_leaves_an_html_report(repo, job, planned, tmp_path, monkeypatch):
+    """The gate's FAIL used to be a status and a list of names; now it also opens as a report."""
+    import json as _json
+    from app.repository import now, uid
+    from app.services.migration_lifecycle_v6 import MappingAndPlanningService
+
+    real = MappingAndPlanningService.quality_validate
+
+    def failing(self, job_id, plan_id, root, execute_build=False):
+        real(self, job_id, plan_id, root, False)
+        checks = [{'name': 'COMPILE_AND_UNIT_TEST', 'status': 'FAIL',
+                   'evidence': {'status': 'FAIL', 'errors': ['[ERROR] Non-resolvable parent POM'], 'returncode': 1}}]
+        rid = uid()
+        with self.repo.connect() as c:
+            c.execute('insert into quality_runs values(?,?,?,?,?,?,?,?)',
+                      (rid, job_id, plan_id, 'FAIL', _json.dumps({'checks': checks}), 'h', now(), str(root)))
+        return {'quality_run_id': rid, 'status': 'FAIL', 'checks': checks}
+
+    monkeypatch.setattr(MappingAndPlanningService, 'quality_validate', failing)
+    result = CodeGenerationAgent(repo).run(job['id'], params=_params(planned, tmp_path))
+    url = result.metrics['quality_report']
+    assert url.startswith('/api/v2/reports/') and url.endswith('/html')
+    row = repo.one("select * from validation_reports where report_type='QUALITY_GATE_REPORT' and job_id=?", (job['id'],))
+    assert row and row['id'] in url

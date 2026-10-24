@@ -2,7 +2,7 @@
 
 ### Step 4 — HANDOFF: full build & hand-off
 
-1. Run `mvn clean verify`.
+1. Run `mvn -s <repo-root>/settings.xml clean verify`.
 2. **Delete `*-oci-parent/target/`** — the parent module is a pure aggregator pom with no jar of its own, so its `target/` is just empty build noise, not a deliverable; never leave it in the handed-off tree. **Leave `*-oci-web/target/` alone** — that one holds the actual built jar and is expected (`workflow-and-state.md` HANDOFF for the full rationale).
 3. **Run HANDOFF-A0 before HANDOFF-A** (`workflow-and-state.md`): check the literal baseline block in `references/templates/config-map-baseline.properties` byte-for-byte against the packaged `application.properties` AND every config-map independently — this catches the recurring real failure (RankedMatch, GetGrievanceSummary) where the block was missing from *both*, which a packaged-vs-config-map diff alone can't see. Copy that physical file's content, don't retype it from memory.
 4. **Run HANDOFF-A — reconcile runtime properties into every config-map** (`workflow-and-state.md` HANDOFF-A): diff the packaged `application.properties` key list against each of the ten `config/config-map/application.<env>-<cluster>.properties` files.

@@ -67,3 +67,21 @@ def test_remediation_with_nothing_to_remediate_completes_and_a_named_cause_must_
     assert result.status == 'COMPLETED' and result.metrics['reason'] == 'no_root_causes'
     with pytest.raises(ValueError, match='root_cause_not_found'):
         RemediationAgent(repo).run(job['id'], params={'root_cause_id': 'nope'})
+
+
+def test_a_job_with_no_rollback_pointer_does_not_fail_the_step(repo, job, root_cause, monkeypatch):
+    """Jobs created from the wizard have none; the step used to die on 'remediation_requires_pattern_tests_and_rollback'."""
+    monkeypatch.setenv(THRESHOLD_ENV, '0.1')
+    with repo.connect() as c:
+        c.execute("update jobs set rollback_pointer='' where id=?", (job['id'],))
+    result = RemediationAgent(repo).run(job['id'], params={'root_cause_id': root_cause['root_cause_id']})
+    assert result.status == 'COMPLETED'
+    row = repo.one('select rollback_pointer from remediations where id=?', (result.outputs['patch_plan'],))
+    assert row['rollback_pointer'] == 'none:no-source-changed', 'nothing was edited, so there is nothing to undo'
+
+
+def test_a_job_pointer_is_kept_when_it_has_one(repo, job, root_cause, monkeypatch):
+    monkeypatch.setenv(THRESHOLD_ENV, '0.1')
+    result = RemediationAgent(repo).run(job['id'], params={'root_cause_id': root_cause['root_cause_id']})
+    row = repo.one('select rollback_pointer from remediations where id=?', (result.outputs['patch_plan'],))
+    assert row['rollback_pointer'] == 'tag/v1'

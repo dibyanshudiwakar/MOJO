@@ -14,7 +14,7 @@ The source skill is left untouched. `app/agents/skills.py` loads these skills (s
 | `framework-baseline` | [`iib-to-ms-framework-baseline`](iib-to-ms-framework-baseline/SKILL.md) | `fixed-file-templates.md`, `structural-conventions.md`, `config-map-baseline.properties` | 3 |
 | `migration-specification` | [`iib-to-ms-migration-specification`](iib-to-ms-migration-specification/SKILL.md) | `type-and-context-root-rules.md` | 4 |
 | `planning` | [`iib-to-ms-planning`](iib-to-ms-planning/SKILL.md) | `construct-mapping.md` | 9 |
-| `code-generation` | [`iib-to-ms-code-generation`](iib-to-ms-code-generation/SKILL.md) | `gap-checklist.md`, `handoff-build-and-reconcile.md`, `ibm-mq-cobol-copybook.md`, `mandatory-migration-rules.md`, `ql-cics-camel-bindy.md`, `rest-external-direct.md`, `rxclaim-sbo-xml-jaxb.md`, `scaffold-and-generate.md`, `soap-backend.md` | 7 |
+| `code-generation` | [`iib-to-ms-code-generation`](iib-to-ms-code-generation/SKILL.md) | `gap-checklist.md`, `handoff-build-and-reconcile.md`, `ibm-mq-cobol-copybook.md`, `mandatory-migration-rules.md`, `ql-cics-camel-bindy.md`, `rest-external-direct.md`, `rxclaim-sbo-xml-jaxb.md`, `scaffold-and-generate.md`, `soap-backend.md`, `maven-settings.xml` | 7 |
 | `test-engineering` | [`iib-to-ms-test-engineering`](iib-to-ms-test-engineering/SKILL.md) | `smoke-test-procedure.md` | 5 |
 | `variance-analysis` | [`iib-to-ms-variance-analysis`](iib-to-ms-variance-analysis/SKILL.md) | `hardcoding-skill.md`, `known-variance-signatures.md`, `parity-skill.md` | 3 |
 | `rca` | [`iib-to-ms-rca`](iib-to-ms-rca/SKILL.md) | `common-patterns-and-gotchas.md` | 4 |
@@ -84,5 +84,6 @@ Text inside copied and extracted files still uses the **original** names (for ex
 | `state-file-and-resumption.md` | `iib-to-ms-migration-orchestrator` |
 | `structural-conventions.md` | `iib-to-ms-framework-baseline` |
 | `templates/config-map-baseline.properties` | `iib-to-ms-framework-baseline` |
+| `templates/maven-settings.xml` | `iib-to-ms-code-generation` |
 | `type-and-context-root-rules.md` | `iib-to-ms-migration-specification` |
 | `verification-checklists.md` | `iib-to-ms-governance` |

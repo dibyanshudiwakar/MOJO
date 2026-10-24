@@ -15,6 +15,7 @@ EIPMS_cvs-v1-<service>-oci/                          ← repo root
 │       ├── build.yaml
 │       └── deploy.yaml
 ├── Dockerfile                                        ← AT REPO ROOT, not inside the web module
+├── settings.xml                                      ← REQUIRED — Maven settings (internal Nexus repositories); copy `templates/maven-settings.xml` verbatim; every `mvn` command passes it with `-s`
 ├── cvs-v1-<service>-oci-parent/
 │   └── pom.xml
 ├── cvs-v1-<service>-oci-web/

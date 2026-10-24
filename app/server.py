@@ -3,7 +3,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
-from app.services import learning, run_analysis, suggestions
+from app.services import failure_reports, learning, run_analysis, suggestions
 from app.service import FactoryService
 from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
@@ -209,6 +209,7 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
             qr = r.one('select status,payload from quality_runs where job_id=? order by created_at desc limit 1', (job_id,))
             if qr:
                 a['quality'] = {'status': qr['status'], 'checks': json.loads(qr['payload'] or '{}').get('checks', [])}
+                a['report_url'] = (failure_reports.latest_for_job(r, job_id) or {}).get('html_url', '')
             # What the generator could not derive. Recorded on the run's metrics
             # by the agent, so it is visible beside the code rather than only in
             # the generated README.
@@ -265,6 +266,7 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
                  'version_lineage': outputs.get('version_lineage', [])}
         elif agent_id == 'feedback':
             a = {'title': 'Code Quality Feedback', 'format': 'feedback',
+                 'report_url': (failure_reports.latest_for_job(r, job_id) or {}).get('html_url', ''),
                  'quality_status': outputs.get('quality_status', ''),
                  'applied_fixes': outputs.get('applied_fixes', []),
                  'unresolved': outputs.get('unresolved', [])}
@@ -588,11 +590,13 @@ class H(BaseHTTPRequestHandler):
         # The HTML form of a stored parity / hardcoding report, rendered from its JSON on request.
         m=re.fullmatch(r'/api/v2/reports/([^/]+)/html',p)
         if m:
-            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS')",(m.group(1),))
+            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS','QUALITY_GATE_REPORT','FAILURE_REPORT')",(m.group(1),))
             if not row: return self.sendj(404,{'error':'report_not_found'})
             self.authorize_job(self.principal(),row['job_id'])
             stored=json.loads(row['payload'] or '{}')
-            page=static_check_reports.render_html(stored.get('report'),static_check_reports.meta_from_stored(stored,row))
+            # A failed quality gate and a failed step have their own pages, rendered from the stored facts.
+            if row['report_type'] in failure_reports.REPORT_TYPES: page=failure_reports.render(row)
+            else: page=static_check_reports.render_html(stored.get('report'),static_check_reports.meta_from_stored(stored,row))
             # This page has its own inline stylesheet and no script; give it exactly that policy, for this response only.
             self.csp_override=static_check_reports.CONTENT_SECURITY_POLICY
             try: return self.respond(200,'text/html; charset=utf-8',page.encode('utf-8'))
@@ -639,7 +643,13 @@ class H(BaseHTTPRequestHandler):
             # the questions blocking this step, not every clarification on
             # the job.
             clarifications=repo.rows("select * from clarifications where run_id=? and status<>'DUPLICATE' order by created_at",(run_id,)) if run_id else []
-            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact,'clarifications':clarifications})
+            # A failed step carries its failure report, opened like the variance and ACE-analysis reports.
+            failure_report=None
+            if step['status']=='FAILED':
+                # A step that failed before reports existed gets its report the first time it is looked at.
+                try: failure_report=failure_reports.for_step(repo,step['id']) or failure_reports.record_failure(repo,step['id'])
+                except Exception: failure_report=None
+            return self.sendj(200,{**step,'outputs':outputs,'params':json.loads(step['params'] or '{}'),**model_info,'logs':logs,'artefact':artefact,'clarifications':clarifications,'failure_report':failure_report})
         # The inbox previously trusted ?role= from the query string, so any
         # caller could enumerate every pending approval package.
         if p=='/api/v2/skill-registry':return self.sendj(200,{'items':skill7.list_skills((q.get('runtime_id') or [None])[0],(q.get('status') or [None])[0])})

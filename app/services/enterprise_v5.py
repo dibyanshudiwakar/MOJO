@@ -2,6 +2,7 @@ import base64, hashlib, json, os, re, ssl, subprocess, time, urllib.request, url
 from dataclasses import dataclass
 from pathlib import Path
 from app.repository import uid,now,digest
+from app.services import maven_settings
 #: Re-exported so ``from app.services.enterprise_v5 import SpringProjectGenerator``
 #: keeps working. The generator moved to its own module when it stopped being a
 #: scaffolder: it now emits controllers, flow services, ESQL-derived
@@ -285,7 +286,7 @@ class FrameworkConventionExtractor:
 
 class BuildRunner:
  def run(self,project,timeout=600):
-  root=Path(project).resolve();cmd=['./mvnw','-q','verify'] if (root/'mvnw').exists() else (['mvn','-q','verify'] if (root/'pom.xml').exists() else (['./gradlew','test','build'] if (root/'gradlew').exists() else None))
+  root=Path(project).resolve();cmd=['./mvnw','-q','verify'] if (root/'mvnw').exists() else (['mvn','-q',*maven_settings.args(root),'verify'] if (root/'pom.xml').exists() else (['./gradlew','test','build'] if (root/'gradlew').exists() else None))
   if not cmd:raise ValueError('supported_build_not_found')
   started=now()
   try:r=subprocess.run(cmd,cwd=root,capture_output=True,text=True,timeout=timeout,env={'PATH':os.getenv('PATH',''),'HOME':os.getenv('HOME','/tmp')});status='PASS' if r.returncode==0 else 'FAIL';return {'status':status,'command':cmd,'returncode':r.returncode,'stdout_hash':digest(r.stdout),'stderr_hash':digest(r.stderr),'started_at':started,'completed_at':now()}

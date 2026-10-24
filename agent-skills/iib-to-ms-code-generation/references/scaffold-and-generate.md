@@ -6,7 +6,7 @@
 
 Then create the two-module structure (`*-parent`, `*-web`) plus: parent pom, web pom, base `application.properties`, Dockerfile (repo root — see `structural-conventions.md` §3), `logback-spring.xml` (SOAP/QL_CICS/RXCLAIM_SBO/MQ_COBOL only — see `common-patterns-and-gotchas.md` for the REST exception), `.github/` workflows (see `structural-conventions.md` §2), `state.json`.
 
-Then `mvn compile -q`. Must pass before proceeding.
+Then `mvn -s <repo-root>/settings.xml compile -q`. Must pass before proceeding.
 
 **[CHECKPOINT]** "Scaffold compiles. Proceed?"
 
@@ -21,7 +21,7 @@ For each flow with `status == "pending"`, generate layer by layer **in the order
 ```
 attempt = 0
 while attempt < 3:
-  mvn compile -q 2>&1 | tee .iib2spring/last_compile.log
+  mvn -s <repo-root>/settings.xml compile -q 2>&1 | tee .iib2spring/last_compile.log
   exit 0 → return success
   parse first 5 errors:
     "cannot find symbol" on a framework class/method → check whether that framework class actually
@@ -53,6 +53,6 @@ Run every item relevant to the detected backend type from `references/gap-checkl
 
 Either way, state which mode was used at the top of the HANDOFF output, and if structure-only was chosen, note in the action-items section that real test-case content is deferred — don't leave the files silently empty without saying why.
 
-`mvn test -q`. Fix genuine compile/syntax failures before the checkpoint; if full tests were generated, also fix any failing assertion before the checkpoint — never present a checkpoint with a real test failing.
+`mvn -s <repo-root>/settings.xml test -q`. Fix genuine compile/syntax failures before the checkpoint; if full tests were generated, also fix any failing assertion before the checkpoint — never present a checkpoint with a real test failing.
 
 **[CHECKPOINT]** "Tests: {N} files created ({mode}), {M} passing / 0 failing. Approve?"

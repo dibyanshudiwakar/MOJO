@@ -74,6 +74,8 @@ def project(tmp_path):
     _write(root, web + '/src/main/resources/application-local.properties',
            _baseline_text() + 'a=1\nb=2\nc=3\nd=4\ne=5\nf=6\ng=7\n')
     _write(root, 'Dockerfile', DOCKERFILE)
+    from app.services import maven_settings
+    _write(root, 'settings.xml', maven_settings.template())
     _write(root, '.github/config/DeployMetadata.json', '{}')
     _write(root, '.github/workflows/build.yaml', 'name: build')
     _write(root, '.github/workflows/deploy.yaml', 'name: deploy')

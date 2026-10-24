@@ -32,6 +32,7 @@ from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, produce, produ
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
+from app.services import failure_reports, maven_settings
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -120,7 +121,9 @@ class CodeGenerationAgent(BaseAgent):
         # The schema requires minItems 1 on 'files', so an empty layout is a
         # retryable violation inside produce rather than something to check for
         # here -- by the time this returns there is at least one file.
-        wanted = layout['files']
+        # settings.xml is copied from the skill's template, never authored: it names the internal
+        # Maven repositories and a retyped copy that drops one breaks every build.
+        wanted = [item for item in layout['files'] if item['path'] != maven_settings.NAME]
         authored, file_provenance = produce_many(
             context, self.FILE_PROMPT,
             [(item['path'], {'path': item['path'], 'purpose': item.get('purpose', ''),
@@ -137,6 +140,12 @@ class CodeGenerationAgent(BaseAgent):
         # blank response discarded every other file the model had authored.
         files = [(path, answer['content']) for path, answer in authored.items()]
         actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
+        settings = maven_settings.template()
+        if settings is not None:
+            files.append((maven_settings.NAME, settings))
+        else:
+            actions.append('settings.xml was not written: the code-generation skill could not be read. '
+                           'Without it Maven cannot resolve the framework parent POM.')
         recorded = service.record_generated_project(
             context.job_id, plan_id, context.param('output_root'),
             layout.get('root') or '', files, action_items=actions)
@@ -188,6 +197,7 @@ class CodeGenerationAgent(BaseAgent):
         provenance = dict(authoring)
         provenance['quality_triage'] = {k: triage.get(k) for k in ('mode', 'reason')}
         gate_failed = quality['status'] == 'FAIL'
+        quality_report = failure_reports.record_quality(self.repo, context.job_id, quality['quality_run_id']) if gate_failed else None
         # The skill's non-blocking findings, named. HANDOFF-B says to print the
         # residual open items as GAPs with a remediation path rather than refuse
         # the hand-off, so they travel on the run for a reviewer to read.
@@ -199,6 +209,8 @@ class CodeGenerationAgent(BaseAgent):
         if gate_failed and context.logger:
             context.logger.warn('Quality gate FAILED (%s) — the project is generated and handed to the '
                                 'feedback agent to repair' % ', '.join(failed))
+            if quality_report:
+                context.logger.info('Quality gate report: %s' % quality_report['html_url'])
         return AgentResult(
             # Generation is complete either way; the gate's verdict is recorded
             # beside it (``quality_status``, the quality run, the evidence) and is
@@ -230,6 +242,7 @@ class CodeGenerationAgent(BaseAgent):
                      'quality_status': quality['status'], 'failed_checks': failed,
                      'gap_count': len(gaps), 'gaps': gaps,
                      'quality_run_id': quality['quality_run_id'],
+                     'quality_report': (quality_report or {}).get('html_url', ''),
                      'repair_by': 'feedback' if gate_failed else '',
                      # What the model said it left out, surfaced on the run so
                      # the output panel shows it beside the code.
