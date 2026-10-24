@@ -2,7 +2,7 @@
 
 ## HANDOFF — full build, config reconcile, gap re-check, hand-off
 
-`mvn clean verify`.
+`mvn -s <repo-root>/settings.xml clean verify` (Rule 14: `settings.xml` is at the repo root and every build passes it).
 
 > ⚠️ **Two alarming-but-benign log outputs — neither is a build failure. Do NOT "fix" either one.** **[live-tested on `cumulativeCopaySummaries`, framework 3.2.2: `mvn clean verify` exit code `0`, `BUILD SUCCESS`, `Tests run: 52, Failures: 0, Errors: 0`.]**
 > 1. **`cucumber-reporting:5.7.4:generate` prints a full `ValidationException: No JSON report file was found!` stack trace** for any service with no Cucumber tests. The plugin is bound by the `framework-starter` parent pom (not by generated code), logs this at `WARNING` via its own `generateErrorPage` handler, and **continues** — the build still succeeds. Cross-repo check: **0 surveyed workspace repos** add a skip/`<configuration>` block for it (the only `cucumber` mention found anywhere is an unrelated `<cucumber.version>` property in `fepclaimdetail`), so adding one would deviate from every real repo and violate Rule 2. Leave it; mention it in hand-off prose only if the user asks about the stack trace.
@@ -10,7 +10,7 @@
 >
 > 🛑 **Read the exit code, not the log text — and on Windows, get the exit code correctly.** Both outputs above look like failures and neither is. Worse, in **Windows PowerShell 5.1**, piping a native command's output with `2>&1` into the PS pipeline (`mvn ... 2>&1 | Select-String ...`) wraps each stderr line in a `NativeCommandError` and makes the tool report **exit 255 even when Maven returned 0** — this skill's own run was misled by it twice in a row and briefly recorded a non-existent build failure. Redirect to a file and read `$LASTEXITCODE` instead:
 > ```powershell
-> mvn -f <parent>/pom.xml clean verify --offline > "$env:TEMP\verify.log"
+> mvn -s <repo-root>/settings.xml -f <parent>/pom.xml clean verify --offline > "$env:TEMP\verify.log"
 > $code = $LASTEXITCODE          # trustworthy; 0 = success
 > Get-Content "$env:TEMP\verify.log" | Select-String "BUILD SUCCESS|BUILD FAILURE|Tests run:"
 > ```

@@ -32,6 +32,7 @@ from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, produce, produ
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
+from app.services import maven_settings
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -120,7 +121,9 @@ class CodeGenerationAgent(BaseAgent):
         # The schema requires minItems 1 on 'files', so an empty layout is a
         # retryable violation inside produce rather than something to check for
         # here -- by the time this returns there is at least one file.
-        wanted = layout['files']
+        # settings.xml is copied from the skill's template, never authored: it names the internal
+        # Maven repositories and a retyped copy that drops one breaks every build.
+        wanted = [item for item in layout['files'] if item['path'] != maven_settings.NAME]
         authored, file_provenance = produce_many(
             context, self.FILE_PROMPT,
             [(item['path'], {'path': item['path'], 'purpose': item.get('purpose', ''),
@@ -137,6 +140,12 @@ class CodeGenerationAgent(BaseAgent):
         # blank response discarded every other file the model had authored.
         files = [(path, answer['content']) for path, answer in authored.items()]
         actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
+        settings = maven_settings.template()
+        if settings is not None:
+            files.append((maven_settings.NAME, settings))
+        else:
+            actions.append('settings.xml was not written: the code-generation skill could not be read. '
+                           'Without it Maven cannot resolve the framework parent POM.')
         recorded = service.record_generated_project(
             context.job_id, plan_id, context.param('output_root'),
             layout.get('root') or '', files, action_items=actions)

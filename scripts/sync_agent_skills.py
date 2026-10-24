@@ -52,7 +52,7 @@ EXTRACTS = [
     ('code-generation', 'scaffold-and-generate.md', [(W, [(122, 177)])]),
     ('code-generation', 'handoff-build-and-reconcile.md', [(W, [(181, 240), (259, 266)])]),
     ('test-engineering', 'smoke-test-procedure.md', [(W, [(242, 257)])]),
-    ('remediation', 'fix-and-retry-policy.md', [(W, [(251, 257)]), (G, [(178, 183)])]),
+    ('remediation', 'fix-and-retry-policy.md', [(W, [(251, 257)]), (G, [(185, 190)])]),
     ('governance', 'verification-checklists.md', [(S, [(175, 217)])]),
     ('governance', 'hard-constraints.md', [(W, [(282, 293)])]),
     ('knowledge-evidence', 'evidence-hierarchy.md', [(W, [(5, 5)])]),
@@ -62,7 +62,8 @@ EXTRACTS = [
 # whole-file copies of source references (path relative to the source's references/)
 WHOLE = [('code-generation', n) for n in [
     'mandatory-migration-rules.md', 'gap-checklist.md', 'ql-cics-camel-bindy.md', 'rxclaim-sbo-xml-jaxb.md',
-    'ibm-mq-cobol-copybook.md', 'rest-external-direct.md', 'soap-backend.md']] + [
+    'ibm-mq-cobol-copybook.md', 'rest-external-direct.md', 'soap-backend.md',
+    'templates/maven-settings.xml']] + [
     ('framework-baseline', n) for n in [
         'structural-conventions.md', 'fixed-file-templates.md', 'templates/config-map-baseline.properties']] + [
     ('rca', 'common-patterns-and-gotchas.md')]

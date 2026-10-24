@@ -23,7 +23,7 @@
         },
         {
           "path": "references/handoff-and-action-items.md",
-          "sha256": "f90bc908574b4ca5303ef8db3a02243db4c563b357a2ad39e5b78ea278ed745a",
+          "sha256": "df88aacaec05534dd5a0300632835b42ebb185e9f48c4fd69da9d023ae77309e",
           "kind": "owned",
           "owner": "iib-to-ms-migration-orchestrator"
         },
@@ -75,7 +75,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -117,13 +117,13 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }
@@ -153,19 +153,19 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "sha256": "63a295e97f11984fe0526ebfd11ba6a74fc0082cf5cc74aa46a8d3e5cbeeeeca",
           "kind": "owned",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -201,7 +201,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -237,7 +237,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -267,7 +267,7 @@
         },
         {
           "path": "references/scaffold-and-generate.md",
-          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "sha256": "44ebf139efd00ec7b61a3f55123bd2a5dda5a8ed67c5f710aad5a362b6361797",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -279,7 +279,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "sha256": "63a295e97f11984fe0526ebfd11ba6a74fc0082cf5cc74aa46a8d3e5cbeeeeca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -295,7 +295,7 @@
       "agent_id": "code-generation",
       "skill_name": "iib-to-ms-code-generation",
       "skill_path": "iib-to-ms-code-generation/SKILL.md",
-      "skill_sha256": "1bb8dbb2a83d1a7b3093afa651bc09ea23ed23869630f1be6a2105c635d6897d",
+      "skill_sha256": "56fd9c8725a6ef1ccf74d23269a09d379ffee079be381b013f8b0c3cd41250f7",
       "required_role": "CODE_GENERATOR",
       "depends_on": [
         "planning"
@@ -321,19 +321,19 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/handoff-and-action-items.md",
-          "sha256": "f90bc908574b4ca5303ef8db3a02243db4c563b357a2ad39e5b78ea278ed745a",
+          "sha256": "df88aacaec05534dd5a0300632835b42ebb185e9f48c4fd69da9d023ae77309e",
           "kind": "copy",
           "owner": "iib-to-ms-migration-orchestrator"
         },
         {
           "path": "references/handoff-build-and-reconcile.md",
-          "sha256": "32836607b704cf8db4f456b9cc7722ba4cb2c8aead4598a2c3d99265f1602b96",
+          "sha256": "c0bd3f3536a074a8f2c56593e730331bf192117044fd878538c232e8cd939521",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
@@ -345,7 +345,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
@@ -369,7 +369,7 @@
         },
         {
           "path": "references/scaffold-and-generate.md",
-          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "sha256": "44ebf139efd00ec7b61a3f55123bd2a5dda5a8ed67c5f710aad5a362b6361797",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
@@ -381,7 +381,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "sha256": "63a295e97f11984fe0526ebfd11ba6a74fc0082cf5cc74aa46a8d3e5cbeeeeca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -390,6 +390,12 @@
           "sha256": "71247065bfe449aa8f5baa4e2cbfef774375df1b05d18663d9ad7568255bc6fe",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
+        },
+        {
+          "path": "references/templates/maven-settings.xml",
+          "sha256": "e920683f93623b4b9155f0ef8b2656b1d120d4f279c95c32739b43d8dc355b22",
+          "kind": "owned",
+          "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/type-and-context-root-rules.md",
@@ -411,13 +417,13 @@
       "references": [
         {
           "path": "references/handoff-build-and-reconcile.md",
-          "sha256": "32836607b704cf8db4f456b9cc7722ba4cb2c8aead4598a2c3d99265f1602b96",
+          "sha256": "c0bd3f3536a074a8f2c56593e730331bf192117044fd878538c232e8cd939521",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -429,7 +435,7 @@
         },
         {
           "path": "references/scaffold-and-generate.md",
-          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "sha256": "44ebf139efd00ec7b61a3f55123bd2a5dda5a8ed67c5f710aad5a362b6361797",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -465,7 +471,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -519,7 +525,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -531,7 +537,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }
@@ -555,19 +561,19 @@
         },
         {
           "path": "references/fix-and-retry-policy.md",
-          "sha256": "e74d9e852b17d22ca3d88d6a6b8e3fa4b78ea790b6b3f76c4f6dc8bba988c0d5",
+          "sha256": "4e4f9a69375c6e77615af25bf66f613317b3b2ceff6685cf65bdf419089bb21d",
           "kind": "owned",
           "owner": "iib-to-ms-remediation"
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/scaffold-and-generate.md",
-          "sha256": "3f12a3bac61c3eea32aca27c7d68857c6e24e9c428f178aef50c8bfc958aad5c",
+          "sha256": "44ebf139efd00ec7b61a3f55123bd2a5dda5a8ed67c5f710aad5a362b6361797",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -589,7 +595,7 @@
       "references": [
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -601,7 +607,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "b3ac42385bbfc74f6ed9b8a4b0038f4c9130d6977bba05ae394f15ad9e3d79f1",
+          "sha256": "8cca0535cd23cdd085bb7a01ad8639f1cfd9565889e954d90a82666c16b2f063",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -613,7 +619,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "9c993d05529d155eac72fea4dcbc65bd675adc56791376410a427587a790d18d",
+          "sha256": "63a295e97f11984fe0526ebfd11ba6a74fc0082cf5cc74aa46a8d3e5cbeeeeca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -653,7 +659,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "9901952a9268ba1ecccd33b4a5e91f71b4f28a66581a904ad768859bb836a667",
+          "sha256": "5d0e3d685edfcf7173575720d9c97cad0b4281eefa5f7e7608444121546e4188",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }
@@ -698,6 +704,7 @@
     "state-file-and-resumption.md": "iib-to-ms-migration-orchestrator",
     "structural-conventions.md": "iib-to-ms-framework-baseline",
     "templates/config-map-baseline.properties": "iib-to-ms-framework-baseline",
+    "templates/maven-settings.xml": "iib-to-ms-code-generation",
     "type-and-context-root-rules.md": "iib-to-ms-migration-specification",
     "verification-checklists.md": "iib-to-ms-governance"
   }

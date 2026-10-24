@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 
 from app.repository import now, digest
+from app.services import maven_settings
 
 #: ``on`` always runs, ``off`` never does, ``auto`` runs when Maven and Java exist.
 MODE_ENV = 'FACTORY_BUILD'
@@ -115,7 +116,8 @@ def build(root, timeout=BUILD_TIMEOUT):
     if missing:
         return {'status': 'FAIL', 'reason': 'not installed on this host: ' + ', '.join(missing),
                 'errors': ['%s is not installed, so the build could not run' % ', '.join(missing)]}
-    cmd = [mvn, '-B', '-f', str(pom), 'clean', 'verify']
+    # The org's parent POM resolves only through the repositories settings.xml names.
+    cmd = [mvn, '-B', *maven_settings.args(root), '-f', str(pom), 'clean', 'verify']
     started = now()
     try:
         done = subprocess.run(cmd, cwd=str(pom.parent), capture_output=True, text=True,

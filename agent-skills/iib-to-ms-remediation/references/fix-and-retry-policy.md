@@ -1,4 +1,4 @@
-<!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- references/workflow-and-state.md lines 251–257; references/gap-checklist.md lines 178–183. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
+<!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- references/workflow-and-state.md lines 251–257; references/gap-checklist.md lines 185–190. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
 
 6. **If it fails:**
    - Diagnose from the actual response and application logs. Is this a *generated-code* problem — wrong field mapping, wrong endpoint path, missing/wrong config key, wrong header, wrong error-handling branch? (As opposed to something no regeneration can fix — backend unreachable, no test data for that specific input, credentials not yet provisioned.)

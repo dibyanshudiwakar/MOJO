@@ -92,6 +92,7 @@ Owned by this skill:
 
 - `references/scaffold-and-generate.md`, `references/handoff-build-and-reconcile.md`
 - `references/mandatory-migration-rules.md`, `references/gap-checklist.md`
+- `references/templates/maven-settings.xml` — the Maven `settings.xml` written verbatim at the repo root; every `mvn` command passes it with `-s` (Rule 14, [M26])
 - `references/ql-cics-camel-bindy.md`, `references/rxclaim-sbo-xml-jaxb.md`, `references/ibm-mq-cobol-copybook.md`, `references/rest-external-direct.md`, `references/soap-backend.md`
 
 Copies of files owned by other skills (read-only here: edit the owning skill, then run `python scripts/sync_agent_skills.py`):

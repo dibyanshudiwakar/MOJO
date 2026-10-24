@@ -80,3 +80,14 @@ def test_generation_requires_its_parameters(repo, job, planned, tmp_path):
         del params[missing]
         with pytest.raises(ValueError, match='missing_param:' + missing):
             CodeGenerationAgent(repo).run(job['id'], params=params)
+
+
+def test_generation_writes_the_skills_settings_xml_at_the_repo_root(repo, job, planned, tmp_path):
+    from app.services import maven_settings
+    result = CodeGenerationAgent(repo).run(job['id'], params=_params(planned, tmp_path))
+    root = Path(result.outputs['source_code'])
+    assert (root / 'settings.xml').read_text(encoding='utf-8') == maven_settings.template()
+    names = [c['name'] for c in repo.one('select payload from quality_runs where job_id=?', (job['id'],)) and
+             json.loads(repo.one('select payload from quality_runs where job_id=?', (job['id'],))['payload'])['checks']
+             if c['status'] != 'PASS']
+    assert 'SKILL_M26' not in names

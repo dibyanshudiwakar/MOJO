@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+<profiles>
+<profile>
+<id>aetna-nexus</id>
+<repositories>
+<repository>
+<id>ae-build-group</id>
+<name>ae-build-group</name>
+<url>https://repo-man.aetna.com/nexus/content/repositories/ae-build-group/</url>
+</repository>
+<repository>
+<id>ae-internal-snapshot-hosted</id>
+<name>ae-internal-snapshot-hosted</name>
+<url>https://repo-man.aetna.com/nexus/content/repositories/ae-internal-snapshot-hosted/</url>
+</repository>
+<repository>
+<id>ae-internal-release-hosted</id>
+<name>ae-internal-release-hosted</name>
+<url>https://repo-man.aetna.com/nexus/content/repositories/ae-internal-release-hosted/</url>
+</repository>
+<repository>
+<id>nexus-ae-third-party-hosted</id>
+<name>Internal Nexus Repository 3: https://repo-man.aetna.com</name>
+<url>https://repo-man.aetna.com/nexus/repository/ae-third-party-hosted/</url>
+</repository>
+</repositories>
+</profile>
+</profiles>
+<activeProfiles>
+<activeProfile>aetna-nexus</activeProfile>
+</activeProfiles>
+</settings>
