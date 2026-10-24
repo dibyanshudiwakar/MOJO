@@ -109,6 +109,22 @@ def apply_edits(root, edits):
     return applied, refused, snapshot
 
 
+def save_snapshot(root, snapshot_id, snapshot):
+    """Keep the files as they were before the kept edits, so the remediation can be undone.
+
+    Written beside the project, not inside it: the quality gate and the repair loop scan the project
+    tree, and an old copy of a file there would be checked as if it were part of the service.
+    Returns the directory, which is the remediation's rollback pointer.
+    """
+    base = Path(root).resolve()
+    out = base.parent / (base.name + '.remediation-rollback') / snapshot_id
+    for path, text in snapshot.items():
+        target = out / Path(path).resolve().relative_to(base)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding='utf-8')
+    return str(out)
+
+
 def restore(snapshot):
     for path, text in snapshot.items():
         path.write_text(text)

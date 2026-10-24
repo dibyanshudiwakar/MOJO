@@ -22,6 +22,7 @@ import json
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.artefact import produce
 from app.agents.reasoning import NOT_CONSULTED
+from app.services import failure_reports
 from app.services import workspace
 from app.services.feedback import CodeFeedbackService
 
@@ -117,10 +118,16 @@ class FeedbackAgent(BaseAgent):
         # metrics and the evidence payload exactly as before -- so a downstream
         # gate (governance, a human reviewer) can still see and act on it; this
         # only changes whether failing to fully repair also stops the pipeline.
+        # The step completes, but a gate that is still red gets its report: what failed, the build output,
+        # and how to fix it, which the Output tab does not carry.
+        report = (failure_reports.record_quality(self.repo, context.job_id, result['quality_run_id'])
+                  if result['quality_status'] == 'FAIL' else None)
         if result['unfixed_checks'] and context.logger:
             context.logger.warn('Quality gate still unresolved after repair (%s) — completing '
                                 'anyway so downstream agents are not blocked'
                                 % ','.join(result['unfixed_checks']))
+            if report:
+                context.logger.info('Quality gate report: %s' % report['html_url'])
         return AgentResult(
             status='COMPLETED',
             error='',

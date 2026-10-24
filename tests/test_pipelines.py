@@ -401,3 +401,14 @@ def test_an_unfinished_dormancy_step_never_blocks_the_conversion(env):
     p = pipelines.create(job['id'], 'workspace/orders', {}, CONVERSION, 'tester@example.com')
     rows = repo.rows('select * from pipeline_steps where pipeline_id=?', (p['id'],))
     assert pipelines.unused_reason(rows) == ''
+
+
+def test_code_generation_waits_for_the_framework_clone_when_one_is_supplied(env):
+    _, job, pipelines, _ = env
+    p = pipelines.create(job['id'], 'workspace/orders',
+                         {'FRAMEWORK': {'repo_url': 'https://github.com/org/fw.git', 'branch': 'main', 'enabled': True}},
+                         ['repository-intake', 'ace-analysis', 'migration-specification', 'planning', 'code-generation'],
+                         'tester@example.com')
+    clone = find_clone_step(p['steps'], 'FRAMEWORK')
+    codegen = find_agent_step(p['steps'], 'code-generation')
+    assert clone is not None and clone['id'] in json.loads(codegen['depends_on'])

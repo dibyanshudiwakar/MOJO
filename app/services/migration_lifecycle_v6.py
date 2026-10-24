@@ -324,6 +324,14 @@ class MappingAndPlanningService:
    c.execute('delete from generated_artifacts where job_id=? and plan_id=?',(job_id,plan_id))
    c.executemany('insert into generated_artifacts values(?,?,?,?,?,?,?,?,?)',rows)
   return len(rows)
+ def _framework_repo(self,job_id):
+  """The job's FRAMEWORK repository as cloned, if one was supplied and is on disk.
+
+  The generated project's parent POM comes from this framework, so it is built first when the project is.
+  """
+  row=self.repo.one("select local_path,resolved_commit from job_repositories where job_id=? and role='FRAMEWORK' and enabled=1 and local_path<>''",(job_id,))
+  if row and Path(row['local_path']).is_dir():return {'root':row['local_path'],'commit':row.get('resolved_commit') or ''}
+  return None
  def quality_validate(self,job_id,plan_id,project_root,execute_build=False):
   root=Path(project_root);checks=[]
   # A build file at the root (a flat project) or in a module directory directly
@@ -351,7 +359,7 @@ class MappingAndPlanningService:
   # Build and start the service: "generated" has to mean "runs". ``execute_build``
   # True/False is an explicit caller choice; the agents pass 'auto', which builds
   # whenever Maven and Java are installed. See app/services/build_check.py.
-  checks.extend(build_check.checks(root,execute_build))
+  checks.extend(build_check.checks(root,execute_build,self._framework_repo(job_id)))
   # The code-generation skill's own checklist (gap-checklist.md), run mechanically.
   # BLOCKING items fail the gate; the rest are named GAPs, which is what the
   # skill says to do with them. See app/services/skill_gate.py.

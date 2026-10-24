@@ -96,7 +96,10 @@ PARAM_SOURCES = {
 # dependency graph, keyed by role: an agent that reads a repository directly
 # must wait for that repository's CLONE step even though the catalogue's
 # dependency graph (agent-to-agent only) has no way to express that.
-REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-baseline': 'FRAMEWORK'}
+# code-generation also waits for the framework clone: when a framework repository was supplied the
+# quality gate builds it before the project, so it has to be on disk by then.
+REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-baseline': 'FRAMEWORK',
+                  'code-generation': 'FRAMEWORK'}
 
 # A service that is not in use should not be converted. Dormancy-intelligence has no
 # dependency of its own on the conversion, so these agents are made to wait for its verdict,
@@ -1007,6 +1010,13 @@ class PipelineService:
         if status == 'COMPLETED':
             self._try_lifecycle_transition(step_id)
         elif status == 'FAILED':
+            # The report is a convenience for whoever reads the failure; it must never be why the failure
+            # is not recorded properly.
+            try:
+                from app.services import failure_reports
+                failure_reports.record_failure(self.repo, step_id)
+            except Exception:                              # noqa: BLE001
+                _log.warning('could not write the failure report for step %s', step_id, exc_info=True)
             # A failure halts the pipeline, so this step's own queue row has to
             # stop as well. Left alone, ``WorkflowOrchestrator.complete`` turns
             # it into a RETRY scheduled 2**attempt seconds out and the worker

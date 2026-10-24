@@ -81,3 +81,103 @@ def test_a_settings_file_that_differs_from_the_template_is_a_gap(project):
     assert _status(project)['SKILL_M26'] == 'GAP'
     skill_repair.repair(project, ['SKILL_M26'])
     assert _status(project)['SKILL_M26'] == 'PASS'
+
+
+# -- a supplied framework repository is built first ---------------------------------------------------------
+
+@pytest.fixture
+def maven(monkeypatch):
+    """A fake Maven that records each command, answering by a per-pom outcome."""
+    calls, outcomes = [], {}
+
+    class Done:
+        def __init__(self, code, err=''):
+            self.returncode, self.stdout, self.stderr = code, '', err
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        pom = cmd[cmd.index('-f') + 1]
+        code, err = outcomes.get(pom, (0, ''))
+        return Done(code, err)
+
+    build_check._framework_built.clear()
+    monkeypatch.setattr(build_check, 'tools', lambda: ('/usr/bin/mvn', '/usr/bin/java', []))
+    monkeypatch.setattr(build_check.subprocess, 'run', fake_run)
+    return calls, outcomes
+
+
+def _project(tmp_path, framework=True):
+    root = tmp_path / 'service'
+    root.mkdir()
+    (root / 'pom.xml').write_text('<project/>')
+    (root / 'settings.xml').write_text('<settings/>')
+    fw = tmp_path / 'framework'
+    fw.mkdir()
+    if framework:
+        (fw / 'pom.xml').write_text('<project/>')
+    return root, {'root': str(fw), 'commit': 'abc123'}
+
+
+def test_the_framework_is_built_and_installed_before_the_project(tmp_path, maven):
+    calls, _ = maven
+    root, fw = _project(tmp_path)
+    result = build_check.build(root, framework=fw)
+    assert result['status'] == 'PASS' and result['framework']['status'] == 'PASS'
+    assert len(calls) == 2
+    first, second = calls
+    assert str(tmp_path / 'framework' / 'pom.xml') in first and 'install' in first and '-DskipTests' in first
+    assert str(root / 'pom.xml') in second and 'verify' in second
+    # The framework resolves through the same internal repositories as the project.
+    assert first[first.index('-s') + 1] == str(root / 'settings.xml')
+
+
+def test_a_framework_that_does_not_build_stops_the_project_build(tmp_path, maven):
+    calls, outcomes = maven
+    root, fw = _project(tmp_path)
+    outcomes[str(tmp_path / 'framework' / 'pom.xml')] = (1, '[ERROR] COMPILATION ERROR in framework-core')
+    result = build_check.build(root, framework=fw)
+    assert result['status'] == 'FAIL' and 'framework' in result['reason']
+    assert any(e.startswith('framework: ') for e in result['errors'])
+    assert len(calls) == 1, 'the project was not built: it could only fail for the same reason'
+
+
+def test_an_unchanged_framework_is_not_rebuilt_for_the_next_check(tmp_path, maven):
+    calls, _ = maven
+    root, fw = _project(tmp_path)
+    build_check.build(root, framework=fw)
+    again = build_check.build(root, framework=fw)
+    assert again['framework']['note'].startswith('already built')
+    assert sum(1 for c in calls if 'install' in c) == 1
+
+
+def test_a_framework_without_a_pom_is_skipped_not_failed(tmp_path, maven):
+    calls, _ = maven
+    root, fw = _project(tmp_path, framework=False)
+    result = build_check.build(root, framework=fw)
+    assert result['status'] == 'PASS' and result['framework']['status'] == 'SKIPPED'
+    assert len(calls) == 1
+
+
+def test_no_framework_means_no_extra_build(tmp_path, maven):
+    calls, _ = maven
+    root, _fw = _project(tmp_path)
+    result = build_check.build(root)
+    assert 'framework' not in result and len(calls) == 1
+
+
+def test_the_quality_gate_finds_the_jobs_framework_repository(tmp_path):
+    from app.repository import Repository, now, uid
+    from app.service import FactoryService
+    from app.services.migration_lifecycle_v6 import MappingAndPlanningService
+    repo = Repository(str(tmp_path / 'fw.db'))
+    job = FactoryService(repo).create_job({'service': 'Orders', 'owner': 'Retail', 'sourceRevision': 'abc'}, 'tester')
+    service = MappingAndPlanningService(repo)
+    assert service._framework_repo(job['id']) is None
+    fw = tmp_path / 'framework'
+    fw.mkdir()
+    with repo.connect() as c:
+        repo.insert(c, 'job_repositories', {'id': uid(), 'job_id': job['id'], 'role': 'FRAMEWORK',
+                                            'repo_url': 'https://github.com/org/fw.git', 'branch': 'main', 'enabled': 1,
+                                            'local_path': str(fw), 'resolved_commit': 'deadbeef',
+                                            'push_mode': 'LOCAL_OUTPUT', 'created_at': now(), 'updated_at': now()})
+    assert service._framework_repo(job['id']) == {'root': str(fw), 'commit': 'deadbeef'}

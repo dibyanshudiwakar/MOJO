@@ -1933,6 +1933,8 @@ function parseStepError(error,kind,agentId){
   suggestions=['Check the Logs tab for additional context','Retry the step to attempt recovery','Contact support if the issue persists'];
  }
  return{title,desc,suggestions,technical:raw}}
+const _RPT_ICO='<svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-4"/><path d="M13 3h4v4M11 9l6-6"/></svg>';
+function htmlReportRow(url,name,meta){return `<div class="plan-si" data-rpt-url="${esc(url)}"><div class="plan-si-l">${_RPT_ICO}<div><div class="plan-si-name">${esc(name)}</div><div class="plan-si-meta">${esc(meta)}</div></div></div><span class="plan-si-caret">›</span></div>`}
 function renderStepError(detail){
  const{title,desc,suggestions,technical}=parseStepError(detail.error,detail.kind,detail.agent_id);
  const chevron=`<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
@@ -1943,7 +1945,7 @@ function renderStepError(detail){
    <div><div class="err-title">${esc(title)}</div><div class="err-desc">${esc(desc)}</div></div>
   </div>
   ${suggestions.length?`<div class="err-actions"><div class="err-actions-label">Suggested actions</div><ul>${suggestions.map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>`:''}
-  <div class="err-retry"><button id="opRetry" class="btn-sm primary">↺ Retry step</button></div>
+  <div class="err-retry"><button id="opRetry" class="btn-sm primary">↺ Retry step</button>${detail.failure_report?` <button class="btn-sm" data-rpt-url="${esc(detail.failure_report.html_url)}">Open failure report</button>`:''}</div>
  </div>
  <div class="err-technical">
   <button class="err-tech-toggle" id="errTechToggle">${chevron} Technical details</button>
@@ -2083,6 +2085,7 @@ function renderArtefact(art){
   </div>`;
   let codeSecs='';
   codeSecs+=`<div class="plan-si" data-code-tab="files"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 2h8l4 4v12a1 1 0 01-1 1H5a1 1 0 01-1-1V3a1 1 0 011-1z"/><polyline points="12 2 12 6 16 6"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg><div><div class="plan-si-name">Generated Files</div><div class="plan-si-meta">${files.length} file${files.length!==1?'s':''} · Spring Boot source code</div></div></div><span class="plan-si-caret">›</span></div>`;
+  if(art.report_url&&qs==='FAIL')codeSecs+=htmlReportRow(art.report_url,'Quality Gate Report','HTML report · why the gate failed, the build output and how to fix it · opens in new tab');
   if(quality)codeSecs+=`<div class="plan-si" data-code-tab="quality"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg><div><div class="plan-si-name">Quality Gate</div><div class="plan-si-meta">${checks.length} check${checks.length!==1?'s':''} · ${passCount} passed${qs?' · '+esc(qs):''}</div></div></div><span class="plan-si-caret">›</span></div>`;
   codeSecs+=`<div class="plan-si" data-code-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full code generation output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${codeSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
@@ -2155,6 +2158,7 @@ function renderArtefact(art){
   if(fixes.length)fSecs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${fixes.length} change${fixes.length!==1?'s':''} made to the generated project`);
   if(passes.length)fSecs+=row('passes','<polyline points="4 10 8 14 16 6"/>','Repair Passes',`${passes.length} pass${passes.length!==1?'es':''} run against the quality gate`);
   if(unresolved.length)fSecs+=row('unresolved','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Unresolved',`${unresolved.length} item${unresolved.length!==1?'s':''} handed to the remediation agent`);
+  if(art.report_url&&qs==='FAIL')fSecs+=htmlReportRow(art.report_url,'Quality Gate Report','HTML report · what is still failing, the build output and how to fix it · opens in new tab');
   fSecs+=`<div class="plan-si" data-fbk-tab="raw"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="5 8 2 10 5 12"/><polyline points="15 8 18 10 15 12"/><line x1="10" y1="5" x2="10" y2="15"/></svg><div><div class="plan-si-name">Raw Output</div><div class="plan-si-meta">JSON · full feedback output · copy to clipboard</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-sections">${fSecs}</div><div class="plan-hint">Click any section above to explore the full data</div>`;
   return html}
@@ -2999,6 +3003,7 @@ async function openStepOutput(pipelineId,stepId,step){
  const close=()=>{panel.classList.remove('open');backdrop.classList.remove('open')};
  $('#opClose').onclick=close;backdrop.onclick=close;
  panel.querySelector('#errTechToggle')?.addEventListener('click',function(){this.classList.toggle('open')});
+ panel.querySelectorAll('[data-rpt-url]').forEach(item=>{item.addEventListener('click',()=>_openHtmlReport(item.dataset.rptUrl))});
  panel.querySelectorAll('.op-tab').forEach(tab=>{tab.onclick=()=>{
   panel.querySelectorAll('.op-tab').forEach(t=>t.classList.remove('active'));
   panel.querySelectorAll('.op-pane').forEach(p=>p.classList.remove('active'));

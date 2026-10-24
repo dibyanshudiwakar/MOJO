@@ -27,6 +27,7 @@ import json
 import os
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.artefact import produce
+from app.repository import digest, now, uid
 from app.services import feedback, remediation_fix, static_findings
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
@@ -39,6 +40,8 @@ DEFAULT_TESTS = ['targeted_regression', 'impacted_suite']
 STATIC_IMPACT_BOUND = 25
 MAX_CAUSES = 25
 REPORT_TYPE = 'REMEDIATION_REPORT'
+#: The rollback pointer of a remediation that changed no source: there is nothing to undo.
+NO_SOURCE_CHANGED = 'none:no-source-changed'
 
 
 class RemediationAgent(BaseAgent):
@@ -233,8 +236,16 @@ class RemediationAgent(BaseAgent):
         if snapshot:
             verdict = self._verify(context, context.job_id, root, plan_id, snapshot, items)
 
+        # A kept fix keeps the files as they were, so it can be undone; the pointer is that copy. A job's
+        # own rollback pointer still wins where it has one. record_remediation refuses a remediation
+        # with no pointer at all, which used to fail the step for every job created without one.
+        saved = None
+        if snapshot and verdict and verdict['result'] == 'kept':
+            saved = remediation_fix.save_snapshot(root, uid(), snapshot)
         tests_all, changes_all, first_id, results = set(), [], None, []
         for it in items:
+            changed = bool(it['fix'] and it['fix']['applied'])
+            it['pointer'] = it['rollback'] or (('snapshot:' + saved) if (changed and saved) else NO_SOURCE_CHANGED)
             cause, eligible = it['cause'], it['eligibility']['eligible']
             tests = sorted(set(DEFAULT_TESTS) | {t for x in it['variances'] for t in (x['kind'].lower() + '_regression',)}
                            | ({it['scope'][0].lower() + '_regression'} if it['scope'] else set()))
@@ -246,7 +257,7 @@ class RemediationAgent(BaseAgent):
                     body['fix'] = {k: fix.get(k) for k in ('outcome', 'applied', 'refused', 'unfixed', 'files', 'verdict', 'mode')}
                 recorded = RCAService(self.repo).record_remediation(
                     context.job_id, cause['id'], json.dumps(body, sort_keys=True, default=str),
-                    it['proposal']['approved_pattern'], tests, int(job['iteration'] or 1), it['rollback'])
+                    it['proposal']['approved_pattern'], tests, int(job['iteration'] or 1), it['pointer'])
                 recorded_id = recorded['id']
                 first_id = first_id or recorded_id
                 tests_all |= set(tests)
@@ -263,6 +274,7 @@ class RemediationAgent(BaseAgent):
                 'threshold': it['threshold'], 'eligible': eligible, 'route': it['eligibility']['route'],
                 'unmet': sorted(k for k in ('approved_pattern', 'bounded_impact', 'tests_present') if not it['facts'][k]),
                 'finding_count': len(it['rows']), 'planned_changes': it['changes'], 'tests': tests,
+                'rollback_pointer': it['pointer'],
                 'outcome': fix.get('outcome') or ('plan_only' if eligible else 'not_eligible'),
                 'applied': fix.get('applied') or [], 'refused': fix.get('refused') or [],
                 'unfixed': fix.get('unfixed') or [], 'files': fix.get('files') or [],
@@ -282,7 +294,7 @@ class RemediationAgent(BaseAgent):
                 outputs={'patch_plan': first_id, 'code_changes': changes_all, 'tests': sorted(tests_all)},
                 evidence=(EvidenceRef('REMEDIATION_PROPOSAL', '1.0.0', 'remediation://' + (first_id or report_id),
                                       payload, {'root_cause_id': it['cause']['id'], 'confidence': it['cause']['confidence'],
-                                                'threshold': it['threshold'], 'rollback_pointer': it['rollback']}),),
+                                                'threshold': it['threshold'], 'rollback_pointer': it['pointer']}),),
                 metrics={'eligible': True, 'route': it['eligibility']['route'],
                          'confidence': it['cause']['confidence'], 'threshold': it['threshold'],
                          'change_count': len(it['changes']), 'fixes_applied': applied_total,
@@ -297,7 +309,6 @@ class RemediationAgent(BaseAgent):
             reasoning=items[0]['provenance'])
 
     def _store_report(self, job_id, report):
-        from app.repository import digest, now, uid
         rid = uid()
         payload = json.dumps(report, sort_keys=True, default=str)
         with self.repo.connect() as c:

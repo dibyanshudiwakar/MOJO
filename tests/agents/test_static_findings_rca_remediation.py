@@ -1,5 +1,6 @@
 """The PARTIAL and GAP rows of the variance-analysis reports reach RCA and are fixed by remediation."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -158,3 +159,20 @@ def test_remediation_runs_again_without_redoing_fixed_causes(repo, job, project,
     again = RemediationAgent(repo).run(job['id'], params={'execute_build': False})
     # Each fixed cause is no longer PROPOSED, so only what was left over is attempted again.
     assert again.metrics.get('causes', 0) < 2
+
+
+def test_a_kept_fix_leaves_a_snapshot_to_roll_back_to(repo, job, project, monkeypatch, model):
+    _report(repo, job['id'])
+    with repo.connect() as c:
+        c.execute("update jobs set rollback_pointer='' where id=?", (job['id'],))
+    original = (project / 'src/main/java/OrderService.java').read_text()
+    edit = {'path': 'src/main/java/OrderService.java', 'old_str': 'return 1;', 'new_str': 'return 2;'}
+    result = _run(repo, job, project, {'edits': [edit], 'unfixable': []}, monkeypatch, model)
+
+    assert result.status == 'COMPLETED', 'a job with no pointer of its own no longer fails the step'
+    pointers = {r['rollback_pointer'] for r in repo.rows('select rollback_pointer from remediations')}
+    snap = [p for p in pointers if p.startswith('snapshot:')]
+    assert snap, pointers
+    saved = Path(snap[0][len('snapshot:'):]) / 'src' / 'main' / 'java' / 'OrderService.java'
+    assert saved.read_text() == original, 'the snapshot holds the file as it was before the fix'
+    assert not any('remediation-rollback' in str(f) for f in project.rglob('*')), 'and it is kept outside the project'
