@@ -222,6 +222,30 @@ application.<svcName>.queue-manager=<QM_NAME>
 application.<svcName>.mq.receive-timeout-ms=30000
 ```
 
+**Auxiliary DB2 connectors, confirmed real on the training repo (`fepclaimdetail`'s `FepClaimDetailDbConnector` — "QL DB (NPI lookup) and ECS DB (drug master lookup) via REST connectors," replacing what IIB did as direct ODBC/`EXTERNAL NAME` DB calls with no URL at all):**
+
+```properties
+application.http.restclient.ecshc.name=ecshc
+application.http.restclient.ecshc.uri=https://<env>eippbm-oci.cvshealth.com/ecsdb/executeQuery
+application.http.restclient.ecshc.connect-timeout=10000
+application.http.restclient.ecshc.request-timeout=10000
+application.http.restclient.ecshc.socket-timeout=30000
+application.http.restclient.ecshc.max-total-connections=50
+application.http.restclient.ecshc.default-max-per-route=25
+application.http.restclient.ecshc.default-keep-alive-time-millis=20000
+
+application.http.restclient.qlhc.name=qlhc
+application.http.restclient.qlhc.uri=https://<env>eippbm-oci.cvshealth.com/qldb/execute/query/v1
+application.http.restclient.qlhc.connect-timeout=10000
+application.http.restclient.qlhc.request-timeout=10000
+application.http.restclient.qlhc.socket-timeout=30000
+application.http.restclient.qlhc.max-total-connections=50
+application.http.restclient.qlhc.default-max-per-route=25
+application.http.restclient.qlhc.default-keep-alive-time-millis=20000
+```
+
+Same plain-`pbm-oci`, QA-for-local host rule as every other internal-CVS-backend connector (Rule 12) — `ecshc`/`qlhc` are a different **path** on the same gateway host, not a different host family. Only wire these if the IIB flow actually does the corresponding DB2 lookup via the shared-library DB helper — don't add them "just in case" (`gap-checklist.md` [H10]).
+
 ⚠️ **Queue name mismatch common:** IIB msgflow queue names often differ from the MS properties queue names — IIB uses shared ESL queues while MS uses dedicated MS response queues. Always confirm both queue names with the infra/MQ team.
 
 ---

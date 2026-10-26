@@ -150,15 +150,21 @@ This rule does not apply to the **IBM MQ + COBOL Copybook** group (fepclaimdetai
 
 ---
 
-## Rule 6 — Credential handling: encrypt by default; generate real Akeyless scaffolding when the service genuinely requires it
+## Rule 6 — Credential handling: whenever a credential exists, wire it through live Akeyless by default — every new migration, regardless of phase
 
-> **Revised 2026-10-07, superseding the earlier never-generate-Akeyless version of this rule.** The prior version of this rule (2026-09-28 through 2026-10-01) said to never generate any Akeyless/SSL-bundle scaffolding at all, treating it as a strictly later, separate integration step. **Standing instruction from the user now: Akeyless integration is part of a new migration's output wherever it is genuinely required** — not deferred to prose-only action items. This is a deliberate reversal, not an oversight; don't "correct" it back.
+> **Revised 2026-10-23, superseding the 2026-10-07 per-service-determination version.** History of this rule: v1 (2026-09-28–10-01) said never generate Akeyless at all, treat it as a separate later step. v2 (2026-10-07) said generate it only where a per-service check determined it was "genuinely required" — confirmed against a real sibling repo, or by asking the user/team. **v3, now: stop determining it per-service and stop asking. Every new migration that has an actual credential to protect generates live Akeyless scaffolding by default — full stop.** This is a deliberate reversal of v2's "ask the user" clause specifically, because that clause is what was producing a repeated INTAKE-time question during testing ("should this follow Phase 1 or Phase 2 for Akeyless?") that has exactly one correct answer now and never needs re-asking.
 >
-> **"Wherever required" is a real, per-service determination — not a blanket Phase-2/REST-to-vendor rule.** A fresh direct repo investigation (2026-10-07) across the 5 repos with any Akeyless/SSL-cert footprint found a genuine counter-example that rules out defaulting by phase or backend type alone: `RET-Pharmacy-Checkinimzprescriptions` is Phase 2, REST, talking to an external vendor (rxconnect) — exactly the shape the old rule's correlation pointed at — **and has zero Akeyless anywhere in the repo**, using a plain classpath SSL cert reference instead. (The earlier version of this rule had mischaracterized this repo as a confirmed Akeyless example; it isn't — correcting that here.) So "required" means: check the specific service's own real sibling repo if one exists, or ask the user/team whether this service's credential is meant to be Akeyless-managed — never assume it from phase or backend type alone.
+> **Why phase is not the test, and never was the right question to ask about:** Akeyless integration did not exist as CVS infrastructure at the time the original Phase 1 services were built — that's *why* their real IIB/MS sibling repos show no Akeyless anywhere (a historical fact about those old repos, not a convention to replicate). It is not a Phase-1-vs-Phase-2 rule; it is a *when-was-this-generated* rule. **Every migration happening now generates live Akeyless, regardless of whether the service itself carries a "Phase 1" or "Phase 2" label** — the label describes which cohort the service's business logic belongs to, not which credential-handling era its migration output should follow.
+>
+> **Confirmed real mechanics, both pieces present together (`DMRClaimStatus`, live-verified 2026-10-23):** Akeyless replaces the credential in every *deployed* environment's config-map — `grep client-id config/config-map/application.qa-pbmaz.properties` returns nothing at all, not even ciphertext; the value arrives exclusively via the Akeyless-injected `application-akeyless.properties` file pulled in by `spring.config.import`. The CVS-encrypt-endpoint ciphertext approach below still applies, but now only to `application-local.properties` — Akeyless has no sidecar locally, so the local profile is the one place a credential still needs the encrypted-value-in-properties form.
+>
+> **The only placeholder left is the literal secret path value** — see "If you don't yet know the secret path" below. Generate everything else immediately; never pause to ask the user.
+>
+> **If the service genuinely has no credential to manage at all** (several real QL/CICS and RxClaim SBO services call an internal CVS gateway with no client-id/secret/API-key/cert property anywhere — confirmed real examples), there's nothing for Akeyless or the CVS-encrypt-endpoint to protect. Confirm this from the IIB source / a real sibling repo's actual properties — not by asking the user — and skip credential handling entirely rather than inventing a secret.
 
-### Default, every phase, every backend type — encrypt via the CVS endpoint
+### `application-local.properties` only — encrypt via the CVS endpoint
 
-Unless Akeyless is determined to be required for this specific service (see below), encrypt every credential the same way as before:
+The local profile has no Akeyless sidecar, so it still needs the credential as an encrypted value directly in the properties file (confirmed real on `DMRClaimStatus`'s `application-local.properties`, which carries `application.medforce.client-id`/`client-secret` as ciphertext even though every deployed config-map omits them entirely). Every deployed environment's config-map, by contrast, gets the credential exclusively through the live Akeyless scaffolding below — **don't also put an encrypted value in the config-map once Akeyless is wired in; that's the half-done middle state this rule is trying to eliminate.**
 
 1. Take the plaintext client ID / password / secret value.
 2. Encrypt it via the CVS encryption service:
@@ -184,17 +190,17 @@ application.<service>.password=<ENCRYPTED_VALUE_RETURNED_BY_ENDPOINT>
 
 **Never commit plaintext credentials to any properties file, for either phase.** If the actual credential value is not provided by the user, use a clearly-marked placeholder (e.g. `<REPLACE_WITH_ENCRYPTED_VALUE>`) and flag it in the final output as an action item — do not fabricate a value.
 
-### When Akeyless is determined to be required — generate it live, using the real syntax, not a disabled placeholder
+### Every new migration with a real credential — generate live Akeyless, using the real syntax, not a disabled placeholder
 
-Confirmed by direct re-investigation of the 5 real repos with any Akeyless/SSL-cert footprint (2026-10-07) — only 3 of the 5 are genuinely live, enabled Akeyless consumers; the other 2 are cautionary, not templates to copy:
+Confirmed by direct re-investigation of the 5 real repos with any Akeyless/SSL-cert footprint (2026-10-07) — 3 of the 5 are genuinely live, enabled Akeyless consumers; the other 2 are **historical artifacts from before this rule's v3 "always" default, not examples to default a new migration toward**:
 
 | Repo | Shape | Live? |
 |---|---|---|
-| `GetGrievancesAppeal` | creds-only | ✅ `AKEYLESS_ENABLED: true` |
-| `rankedMatch` | creds-only | ✅ `AKEYLESS_ENABLED: true` |
-| `DMRClaimStatus` | creds **+ certs** (vendor uses a private TLS cert) | ✅ `AKEYLESS_ENABLED: true` |
-| `GetGrievanceByCriterias` | values.yaml keys present, but **`AKEYLESS_ENABLED: false`** and `Deployment.yaml`'s annotations block is empty — scaffolded, never actually wired live | ❌ don't default to this half-done shape |
-| `RET-Pharmacy-Checkinimzprescriptions` | **no Akeyless anywhere** — uses a plain classpath SSL cert instead | ❌ not an Akeyless example at all |
+| `GetGrievancesAppeal` | creds-only | ✅ `AKEYLESS_ENABLED: true` — template for Form 1 below |
+| `rankedMatch` | creds-only | ✅ `AKEYLESS_ENABLED: true` — second Form 1 confirmation |
+| `DMRClaimStatus` | creds **+ certs** (vendor uses a private TLS cert) | ✅ `AKEYLESS_ENABLED: true` — template for Form 2 below |
+| `GetGrievanceByCriterias` | values.yaml keys present, but **`AKEYLESS_ENABLED: false`** and `Deployment.yaml`'s annotations block is empty — scaffolded, never actually wired live | ❌ never generate this half-done shape, for any new migration |
+| `RET-Pharmacy-Checkinimzprescriptions` | **no Akeyless anywhere** — uses a plain classpath SSL cert instead | ❌ a pre-v3 repo that predates the "always" default — don't let this justify skipping Akeyless on a new migration that has a real credential |
 
 **Form 1 — creds-only** (no vendor TLS cert needed), verbatim from `GetGrievancesAppeal`'s real repo:
 
@@ -252,13 +258,13 @@ application.http.restclient.<vendor>.custom-ssl-trust-store-enabled=true
 spring.ssl.bundle.pem.<vendor>.truststore.certificate=classpath:<vendor>-truststore.crt.pem
 ```
 
-**Choosing between the two forms:** use Form 2 (creds+certs) only when the vendor backend is confirmed to be on a private/internal TLS certificate (the same condition that triggers the PKIX failure below) — otherwise use Form 1 (creds-only). Don't default to Form 2 just because it's more complete; `GetGrievancesAppeal` and `rankedMatch` both confirm Form 1 alone is the real, correct, complete pattern for a vendor that doesn't need a custom trust store.
+**Choosing between the two forms is a technical check, not a question to ask the user:** use Form 2 (creds+certs) only when the vendor backend is confirmed to be on a private/internal TLS certificate (the same condition that triggers the PKIX failure below) — check the IIB source / a real sibling repo for that signal. Otherwise use Form 1 (creds-only); `GetGrievancesAppeal` and `rankedMatch` both confirm Form 1 alone is the real, correct, complete pattern for a vendor that doesn't need a custom trust store. **If genuinely ambiguous, default to Form 1** (the simpler, more common shape) and flag "confirm whether a custom TLS trust store is needed" as an action item — don't block generation on asking.
 
-**Never generate the half-done `GetGrievanceByCriterias` shape** (values keys present but `AKEYLESS_ENABLED: false`, empty `Deployment.yaml` annotations) as if it were a legitimate target state — that pattern exists in one real repo but isn't something to replicate; if Akeyless is required, wire it live (`true`), not scaffolded-and-off.
+**Never generate the half-done `GetGrievanceByCriterias` shape** (values keys present but `AKEYLESS_ENABLED: false`, empty `Deployment.yaml` annotations) as if it were a legitimate target state — that pattern exists in one real repo but isn't something to replicate. Every new migration with a real credential wires Akeyless live (`true`), never scaffolded-and-off.
 
 **⚠️ [live-proven, DMRClaimStatus → MedForce, 2026-09-30] If Form 2's SSL-bundle properties are omitted when the vendor actually needs them**, every backend call fails with `PKIX path building failed: unable to find valid certification path to requested target`. The service starts cleanly, passes health checks, and correctly returns 400s for bad input — but every real backend call 500s until the cert config is in place. This is exactly why Form 2 needs to be generated live when applicable, not deferred.
 
-**If Akeyless is determined required but you don't yet know which secret path to use for this specific service**, use a clearly-marked placeholder path and flag the real path as an action item for the Akeyless/platform team to confirm — generate the scaffolding structure now, don't wait for the exact path to also exist before generating the surrounding wiring.
+**You will almost never know the real secret path at migration time — that's expected, and it's the one, only placeholder.** Use a clearly-marked placeholder (e.g. `<AKEYLESS_SECRET_PATH_TBD_BY_TEAM>`) in `AKEYLESS_INJECT_FILE_CREDS`/`AKEYLESS_INJECT_FILE_CERTS`, generate the full surrounding structure (annotations, `AKEYLESS_ENABLED: true`, `spring.config.import`) immediately, and flag the real path as an action item for the Akeyless/platform team to provision and confirm. **Never pause the migration or ask the user for this value — placeholder it and move on**, the same way a not-yet-known credential value gets `<REPLACE_WITH_ENCRYPTED_VALUE>` above.
 
 ---
 
@@ -437,23 +443,31 @@ class EmergencyOverridesServiceTest {
 
 ---
 
-## Rule 12 — `application-local.properties` always targets the QA environment for internal CVS backends
+## Rule 12 — internal-CVS-backend host is always plain `pbm-oci` (no `az`/`ri`); `application-local.properties` always targets QA
 
-> **Standing instruction from the user (2026-10-01), confirmed by direct evidence across every internal-CVS-backend connector type checked.** Every real repo's `application-local.properties` points its backend connector(s) at a `qa`/`qa2`-prefixed CVS hostname — never `dev`, never `prod` — confirmed across QL/CICS (`https://qaeippbmaz-oci.cvshealth.com/ql/request/v1`, `ValidateBridgeSupply`/`GetGrievanceSummary`), RxClaim SBO (`https://qaeippbmaz-oci.cvshealth.com/rxclaim/request/v1`, `memberidcardprofile`; `qa2` variant, `EmergencyOverrides`), and reference-data/DB connectors (`https://qa2eippbmaz-oci.cvshealth.com/refdata`, `fepclaimdetail`; `.../ecsdb/...`, `.../qldb/...`). This makes sense independent of being told: local development runs against the shared QA backend, never dev (too unstable/single-tenant) or prod (obviously not for local testing).
+> **Standing instruction from the user (2026-10-01; host-family correction added 2026-10-23, confirmed by a 23-repo cross-check across every internal-CVS-backend connector type).** Two separate rules live here, and both are about the **host**, not the environment-tier naming:
+>
+> 1. **The literal host is always `<env>eippbm-oci.cvshealth.com` — never `<env>eippbmaz-oci` or `<env>eippbmri-oci`.** This is one shared gateway host used by every internal-CVS-backend connector regardless of pattern — QL/CICS gateway (`/ql/request/v1`), RxClaim SBO gateway (`/rxclaim/request/v1`), the QL-DB2 proxy (`/qldb/execute/query/v1`), the ECS-DB2 proxy (`/ecsdb/executeQuery`), and reference-data (`/refdata`) all differ only by **path**, never by host family. The `az`/`ri` suffixes are a production-only artifact of two physical data centers (`structural-conventions.md` §5's `prod-pbmaz`/`prod-pbmri` config-map pair) — real evidence shows some phase-1 and early phase-2 services leaked that suffix into non-prod hosts and even into later-phase prod hosts inconsistently (`beneficiarystatusservice`, `carriersearchservice`, etc. use `pbmaz` everywhere; `BenService-GetBeneficiaries`, `GetGrievanceSummary`, `ValidateBridgeSupply`, `EmergencyOverrides`, `cumulativeCopaySummaries`, `memberseobpreferences` correctly use plain `pbm-oci`). **New migrations always use the plain `pbm-oci` form, in every environment, with no exceptions** — don't copy the `az`/`ri` suffix from an older sibling repo just because it's there.
+> 2. **`application-local.properties` always targets the `qa` tier** (never `dev`/`prod`) for these connectors — local development runs against the shared QA backend, never dev (too unstable/single-tenant) or prod (obviously not for local testing).
 
 ```properties
-# ✅ REQUIRED — application-local.properties, internal CVS backend:
-application.http.restclient.ql.uri=https://qaeippbmaz-oci.cvshealth.com/ql/request/v1
-application.http.restclient.rxclaim.uri=https://qaeippbmaz-oci.cvshealth.com/rxclaim/request/v1
+# ✅ REQUIRED — application-local.properties, internal CVS backend (QA tier, plain pbm-oci host):
+application.http.restclient.ql.uri=https://qaeippbm-oci.cvshealth.com/ql/request/v1
+application.http.restclient.rxclaim.uri=https://qaeippbm-oci.cvshealth.com/rxclaim/request/v1
+application.http.restclient.qlhc.uri=https://qaeippbm-oci.cvshealth.com/qldb/execute/query/v1
+application.http.restclient.ecshc.uri=https://qaeippbm-oci.cvshealth.com/ecsdb/executeQuery
 application.http.restclient.refdata.uri=https://qaeippbm-oci.cvshealth.com/refdata
 
-# ❌ AVOID — dev or prod hostname in the local profile:
+# ❌ AVOID — dev/prod hostname in the local profile, OR an az/ri suffix in ANY environment:
 application.http.restclient.ql.uri=https://deveippbmaz-oci.cvshealth.com/ql/request/v1
+application.http.restclient.rxclaim.uri=https://qaeippbmaz-oci.cvshealth.com/rxclaim/request/v1
 ```
 
-**Does not apply to external-vendor REST connectors** (MedForce, Precisely, Anthem, IngenioRx, etc.) — those don't have a CVS-style `qa` hostname at all; their real `application-local.properties` points at the vendor's own non-prod/staging endpoint instead (`DMRClaimStatus` → MedForce's own test host; `rankedMatch` → `token-amer-staging.spectrum.precisely.com`). For those, use whatever the IIB source's own non-prod environment file shows for that vendor — there's no CVS "QA" equivalent to default to.
+**Applies the same way to every per-environment config-map, not just `application-local.properties`** — only the `<env>` prefix changes (`dev`, `dev2`, `dev3`, `qa`, `qa2`, `qa3`, `stress`, `uat`, `prod`, `prod2`); the host suffix stays `eippbm-oci.cvshealth.com` in all of them. This is the one part of Rule 12 that is **not** limited to the local profile — rule 1 above (no `az`/`ri`) is a host-naming correction that applies everywhere; rule 2 (QA tier) is specifically about `application-local.properties`.
 
-This is specifically about `application-local.properties`. The per-environment `config/config-map/application.<env>-<cluster>.properties` files are unaffected and continue to use each file's own actual environment's hostname (`structural-conventions.md` §5) — this rule does not mean every config-map should also point at QA.
+**Does not apply to external-vendor REST connectors** (MedForce, Precisely, Anthem, IngenioRx, etc.) — those don't have a CVS-style `qa` hostname, or a `pbm-oci` host, at all; their real `application-local.properties` points at the vendor's own non-prod/staging endpoint instead (`DMRClaimStatus` → MedForce's own test host; `rankedMatch` → `token-amer-staging.spectrum.precisely.com`). For those, use whatever the IIB source's own non-prod environment file shows for that vendor — there's no CVS "QA" equivalent to default to.
+
+**Don't confuse the host with the config-map *filename*'s cluster suffix.** `config/config-map/application.<env>-<cluster>.properties` is still named with `pbmaz`/`pbmri`/etc. as its `<cluster>` segment (`structural-conventions.md` §5) — that names the Kubernetes deployment cluster (the Helm `CLUSTER:` value, `structural-conventions.md` §3), a completely different thing from the backend connector's URI host. A file named `application.prod-pbmaz.properties` still carries `application.http.restclient.ql.uri=https://prodeippbm-oci.cvshealth.com/ql/request/v1` (no `az`) inside it — the filename's cluster suffix is untouched by this rule.
 
 ---
 
@@ -472,14 +486,3 @@ SomeOtherFolder/Migrated/EmergencyOverrides/EIPMS_cvs-v1-emergencyoverrides-oci/
 ```
 
 If the user names a different target directory, use that instead — the point of this rule is that the question is always asked and always gets a real, captured answer; the same-location suggestion is just what to recommend when asking, not a reason to skip asking.
-
----
-
-## Rule 14 — Every generated repository carries `settings.xml`, and every Maven build uses it
-
-The org's artifacts (the `framework-starter` parent, `framework-restclient` and the rest) are not on Maven Central. They resolve only through the internal Nexus repositories, which Maven reads from a settings file. Without it the parent POM is non-resolvable and nothing builds — not the HANDOFF build, not the quality gate, not a repair loop.
-
-- Write `settings.xml` at the **repo root** (beside the `Dockerfile`), as a verbatim copy of `references/templates/maven-settings.xml`. Never retype it, never trim a repository out of it, never add a credential to it (credentials come from the build environment, not from the repository).
-- **Every** `mvn` command for this repository — compile, test, `clean verify`, `spring-boot:run`, and the ones in `.github/workflows/` — passes it: `mvn -s <repo-root>/settings.xml ...`. A build that omits `-s` is not a valid build of this repository, whatever it reports.
-- Mechanical check: `gap-checklist.md` [M26].
-
