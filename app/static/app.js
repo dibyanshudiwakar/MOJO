@@ -2,6 +2,15 @@
 // Return just the final path segment so absolute workspace paths show as short names in the UI.
 function wsName(p){if(!p)return'';const s=String(p).replace(/[/\\]+$/,'');const i=Math.max(s.lastIndexOf('/'),s.lastIndexOf('\\'));return i>=0?s.slice(i+1):s}
 function fmtDt(v){if(!v||v==='—')return v||'—';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
+/* A log timestamp in the viewer's own zone, to the second: 2026-10-23 23:55:18.
+   A stamp with no zone is taken as UTC, which is what the server writes. */
+function fmtLogTime(v){
+  if(!v)return '';
+  const s=String(v),d=new Date(/(Z|[+-]\d\d:?\d\d)$/.test(s)?s:s+'Z');
+  if(isNaN(d))return s;
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
 function fmtTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}
 function stateBadge(s){const map={WAITING_APPROVAL:'warning',COMPLETED:'darkgreen',READY_FOR_PROMOTION:'success',TEST_PASSED:'cyan',IMPLEMENTING:'info',BUILD_VALIDATED:'info',PLAN_APPROVED:'orange',REMEDIATING:'error',VARIANCE_REVIEW:'cyan',DIFFERENTIAL_TESTING:'cyan',ACE_ANALYSED:'purple',DORMANCY_ASSESSED:'teal',FRAMEWORK_BASELINED:'purple',INTAKE_VALIDATED:'teal',CREATED:'neutral',FAILED:'error',ROLLED_BACK:'error',WAITING_G0:'warning',WAITING_G1:'warning',WAITING_G2:'warning',WAITING_G3:'warning',WAITING_G4:'warning',WAITING_G5:'warning',RUNNING:'info',PAUSED:'warning',WAITING_CLARIFICATION:'warning',CANCELLED:'error',PENDING:'neutral',CONFIRMED:'neutral'};const cls=map[s]||'neutral';return `<span class="badge badge-${cls}"><span class="badge-dot"></span>${esc(s.replace(/_/g,' '))}</span>`}
 function progressFillClass(state,pct){const s=String(state||'').toUpperCase();const p=s in STATE_PCT?STATE_PCT[s]:(pct||0);if(s==='COMPLETED'||p>=100)return ' darkgreen';if(s==='FAILED'||s==='ROLLED_BACK')return ' error';if(s==='READY_FOR_PROMOTION')return ' done';if(s==='TEST_PASSED')return ' cyan';if(s.startsWith('WAITING_'))return ' orange';if(s==='PLAN_APPROVED')return ' orange';if(s==='REMEDIATING')return ' error';if(['DIFFERENTIAL_TESTING','VARIANCE_REVIEW'].includes(s))return ' cyan';if(['FRAMEWORK_BASELINED','ACE_ANALYSED'].includes(s))return ' purple';if(['INTAKE_VALIDATED','DORMANCY_ASSESSED'].includes(s))return ' teal';if(['IMPLEMENTING','BUILD_VALIDATED'].includes(s))return ' blue';if(s==='CREATED')return ' neutral';return ''}
@@ -1755,6 +1764,15 @@ const LIVE_STEP_STATUS={RUNNING:1,WAITING_APPROVAL:1,WAITING_CLARIFICATION:1};
  */
 function durationTag(row,cls,live){
  if(!row.started_at)return '';
+ // A step carries active_ms: the time it was actually working, banked each time it stops. Waiting on a
+ // gate or a clarification adds nothing and a resume carries on from it. A pipeline has no such column.
+ if(row.active_ms!==undefined){
+  const base=Number(row.active_ms)||0,running=row.status==='RUNNING';
+  // Rows finished before active_ms existed have 0; their start..finish window is all there is.
+  if(!base&&!running&&row.completed_at){const t=fmtSpan(row.started_at,row.completed_at);return t?`<span class="${esc(cls)}">${esc(t)}</span>`:''}
+  if(!running&&!base)return '';
+  const live_=running?Math.max(0,Date.now()-new Date(row.started_at).getTime()):0;
+  return `<span class="${esc(cls)}"${running?` data-dur-from="${esc(row.started_at)}" data-dur-base="${base}"`:''}>${esc(fmtDur(base+live_))}</span>`}
  if(!row.completed_at&&!live)return '';
  const text=fmtSpan(row.started_at,row.completed_at);
  if(!text)return '';
@@ -1796,7 +1814,8 @@ function startDurationTicker(){
  durTimer=setInterval(()=>{
   const open=document.querySelectorAll('[data-dur-from]');
   if(!open.length)return stopDurationTicker();
-  open.forEach(el=>{const t=fmtSpan(el.dataset.durFrom,'');if(t)el.textContent=t})},1000)}
+  open.forEach(el=>{const base=Number(el.dataset.durBase)||0,from=new Date(el.dataset.durFrom).getTime();
+   const t=el.dataset.durBase!==undefined?(isNaN(from)?'':fmtDur(base+Math.max(0,Date.now()-from))):fmtSpan(el.dataset.durFrom,'');if(t)el.textContent=t})},1000)}
 function stopDurationTicker(){if(durTimer){clearInterval(durTimer);durTimer=null}}
 function syntaxHighlightJson(obj){
  return JSON.stringify(obj,null,2).replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,m=>{
@@ -1866,6 +1885,7 @@ async function pipelineDetail(id){
     <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
     <span class="progress-label">${done} / ${total} steps complete</span>
     ${pipeDur?`<span class="progress-label progress-duration">${pipeDur}<span class="progress-duration-label">${p.completed_at?'total':'elapsed'}</span></span>`:''}
+    ${p.started_at?`<span class="progress-label progress-duration" title="Time agents were actually working. Excludes time spent waiting for approvals, clarifications or the queue.">${esc(fmtDur(p.agent_ms||0))}<span class="progress-duration-label">agent runtime</span></span>`:''}
    </div>
    <div class="status-badges">${Object.entries(counts).map(([k,v])=>`<span class="badge badge-${statusBadgeClass(k)}">${v} ${esc(STEP_STATUS_LABEL[k]||k).toLowerCase()}</span>`).join('')}</div>
   </div>
@@ -2938,7 +2958,7 @@ async function openStepOutput(pipelineId,stepId,step){
  ].filter(Boolean);
  const logs=Array.isArray(detail.logs)?detail.logs:[];
  const logsHtml=logs.length
-  ?logs.map(([t,lvl,msg])=>`<div class="log-line"><span class="log-time">${esc(t)}</span><span class="log-${esc(lvl)}">[${esc(lvl)}]</span> ${esc(msg)}</div>`).join('')
+  ?logs.map(([t,lvl,msg])=>`<div class="log-line"><span class="log-time" title="${esc(t)}">${esc(fmtLogTime(t))}</span><span class="log-${esc(lvl)}">[${esc(lvl)}]</span> ${esc(msg)}</div>`).join('')
   :'<p class="authhint">No logs available for this step.</p>';
  // Live for a step still running or parked, so the drawer agrees with the card
  // behind it instead of showing a duration frozen at whenever it was opened.

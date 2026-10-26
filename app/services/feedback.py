@@ -216,11 +216,61 @@ def is_externalized_config(path):
     return 'config-map' in path.parts or path.name.startswith('application-local.')
 
 
+
+_LONG = chr(92) * 2 + '?' + chr(92)          # the extended-length prefix: two backslashes, ?, a backslash
+
+
+def lp(path):
+    """``path`` that Windows can open however deep it is.
+
+    Generated Spring projects sit under a long workspace path and repeat the repository name, so a
+    test class can pass the 260-character limit. Directory listing still names the file, but opening
+    it then fails with "[WinError 3] The system cannot find the path specified". The extended-length
+    prefix lifts the limit. Elsewhere, and for short paths, the path is returned unchanged.
+    """
+    path = Path(path)
+    if os.name != 'nt' or len(str(path)) < 240 or str(path).startswith(_LONG):
+        return path
+    return Path(_LONG + os.path.abspath(str(path)))
+
+
+def find(root, pattern):
+    """Files under ``root`` whose name matches ``pattern`` (e.g. ``*.java``), long paths included.
+
+    ``Path.rglob`` skips directories past the Windows path limit and ``stat`` on a file past it
+    raises, so scans walk the tree with the extended-length prefix and return ordinary paths.
+    """
+    import fnmatch
+    base = Path(root)
+    top = _LONG + os.path.abspath(str(base)) if os.name == 'nt' else str(base)
+    out = []
+    for here, _dirs, names in os.walk(top):
+        rel = os.path.relpath(here, top)
+        for name in names:
+            if fnmatch.fnmatch(name, pattern):
+                out.append(base / name if rel == '.' else base / rel / name)
+    return sorted(out)
+
+
+def small(path):
+    """True when the file can be read and is under the size cap; a file that cannot be statted is skipped."""
+    try:
+        return lp(path).stat().st_size < MAX_FILE_BYTES
+    except OSError:
+        return False
+
+
 def _files(root):
-    for f in sorted(Path(root).rglob('*')):
-        if (f.is_file() and f.suffix.lower() in SCANNED_SUFFIXES
-                and f.stat().st_size < MAX_FILE_BYTES):
-            yield f
+    """The scannable files under ``root``, found by walking so that paths past the Windows limit are listed too."""
+    base = Path(root)
+    found = []
+    for here, _dirs, names in os.walk(_LONG + os.path.abspath(str(base)) if os.name == 'nt' else str(base)):
+        rel = os.path.relpath(here, _LONG + os.path.abspath(str(base)) if os.name == 'nt' else str(base))
+        for name in names:
+            f = base / name if rel == '.' else base / rel / name
+            if f.suffix.lower() in SCANNED_SUFFIXES and lp(f).is_file() and small(f):
+                found.append(f)
+    yield from sorted(found)
 
 
 #: Overridable the same way ``MOJO_MODEL_*``/``MOJO_MAX_TOKENS`` are in
@@ -243,10 +293,10 @@ def _local_classes(root):
     what the model itself already wrote, read back rather than assumed.
     """
     merged = {}
-    for f in Path(root).rglob('*.java'):
-        if f.stat().st_size >= MAX_FILE_BYTES:
+    for f in find(root, '*.java'):
+        if not small(f):
             continue
-        text = f.read_text(errors='ignore')
+        text = lp(f).read_text(errors='ignore')
         package = _PACKAGE_DECL.search(text)
         if not package:
             continue
@@ -383,10 +433,10 @@ def _local_contracts(root):
     with the real answer instead of another guess.
     """
     contracts = {}
-    for f in Path(root).rglob('*.java'):
-        if f.stat().st_size >= MAX_FILE_BYTES:
+    for f in find(root, '*.java'):
+        if not small(f):
             continue
-        text = f.read_text(errors='ignore')
+        text = lp(f).read_text(errors='ignore')
         cls = _CLASS_DECL.search(text)
         if not cls:
             continue
@@ -434,7 +484,7 @@ def accept_edit(root, edit):
         return None, 'path_outside_project:%s' % rel
     if target.suffix.lower() not in SCANNED_SUFFIXES and target.name != 'pom.xml':
         return None, 'suffix_not_editable:%s' % rel
-    if not target.is_file():
+    if not lp(target).is_file():
         return None, 'file_not_found:%s' % rel
     old = str(edit.get('old_str', ''))
     new = str(edit.get('new_str', ''))
@@ -442,7 +492,7 @@ def accept_edit(root, edit):
         return None, 'old_str_empty:%s' % rel
     if len(new) > MAX_NEW_STR_CHARS:
         return None, 'new_str_too_large:%s' % rel
-    text = target.read_text(errors='ignore')
+    text = lp(target).read_text(errors='ignore')
     occurrences = text.count(old)
     if occurrences == 0:
         return None, 'old_str_absent:%s' % rel
@@ -459,12 +509,12 @@ class CodeFeedbackService:
     def _fix_secrets(self, root):
         changed = []
         for f in _files(root):
-            text = f.read_text(errors='ignore')
+            text = lp(f).read_text(errors='ignore')
             new = _SECRET.sub(
                 lambda m: '%s%s${%s}%s' % (m.group(1), m.group(3), m.group(2).upper(), m.group(4)),
                 text)
             if new != text:
-                f.write_text(new)
+                lp(f).write_text(new)
                 changed.append({'path': str(f), 'check': 'SECRET_SCAN',
                                 'action': 'replaced embedded credential with a ${...} placeholder'})
         return changed
@@ -474,17 +524,17 @@ class CodeFeedbackService:
         for f in _files(root):
             if is_externalized_config(f):
                 continue
-            text = f.read_text(errors='ignore')
+            text = lp(f).read_text(errors='ignore')
             new = _URL.sub('${EXTERNAL_ENDPOINT}', text)
             if new != text:
-                f.write_text(new)
+                lp(f).write_text(new)
                 changed.append({'path': str(f), 'check': 'HARDCODED_ENDPOINT_SCAN',
                                 'action': 'externalised absolute endpoint to ${EXTERNAL_ENDPOINT}'})
         return changed
 
     def _fix_provenance(self, root, job_id, plan_id):
         target = Path(root) / 'provenance-manifest.json'
-        if target.exists():
+        if lp(target).exists():
             return []
         plan = self.repo.one('select * from migration_plans where id=?', (plan_id,))
         manifest = {
@@ -496,7 +546,7 @@ class CodeFeedbackService:
             'generated_at': now(),
             'reconstructed_by': 'feedback-agent',
         }
-        target.write_text(json.dumps(manifest, indent=2))
+        lp(target).write_text(json.dumps(manifest, indent=2))
         return [{'path': str(target), 'check': 'PROVENANCE',
                  'action': 'reconstructed the missing provenance manifest'}]
 
@@ -541,15 +591,15 @@ class CodeFeedbackService:
                 detail[c['name']] += NL + 'Remediation: ' + str(c['remediation'])
         cited = ' '.join(detail.values())
         everything = list(_files(root))
-        pom = Path(root).rglob('pom.xml')
-        everything += [p for p in pom if p.stat().st_size < MAX_FILE_BYTES]
+        pom = find(root, 'pom.xml')
+        everything += [p for p in pom if small(p)]
         ordered = sorted(everything, key=lambda f: 0 if f.name in cited else 1)
         files = []
         for f in ordered[:MAX_PAYLOAD_FILES]:
             # A file a compiler error names is shown nearly whole: the line it
             # points at is rarely in the first 6,000 characters.
             limit = MAX_CITED_FILE_CHARS if f.name in cited else MAX_FILE_CHARS
-            body = redact(f.read_text(errors='ignore'))[:limit]
+            body = redact(lp(f).read_text(errors='ignore'))[:limit]
             files.append({'path': str(f.relative_to(Path(root))).replace('\\', '/'),
                           'content': body})
         return detail, files
@@ -568,8 +618,8 @@ class CodeFeedbackService:
         add and the model is on its own, exactly as before it existed.
         """
         index = _local_classes(root)
-        poms = [p.read_text(errors='ignore') for p in Path(root).rglob('pom.xml')
-               if p.stat().st_size < MAX_FILE_BYTES]
+        poms = [lp(p).read_text(errors='ignore') for p in find(root, 'pom.xml')
+               if small(p)]
         for simple, fqns in dependency_jars.project_classes(poms, _m2_root()).items():
             bucket = index.setdefault(simple, [])
             for fqn in fqns:
@@ -673,9 +723,9 @@ class CodeFeedbackService:
             if target is None:
                 refused.append(why)
                 continue
-            text = target.read_text(errors='ignore')
+            text = lp(target).read_text(errors='ignore')
             snapshot.setdefault(target, text)
-            target.write_text(text.replace(str(edit['old_str']), str(edit.get('new_str', '')), 1))
+            lp(target).write_text(text.replace(str(edit['old_str']), str(edit.get('new_str', '')), 1))
             accepted.append({'path': str(target), 'check': 'MODEL_REPAIR',
                              'action': str(edit.get('why', 'model-proposed edit'))[:200]})
         if not accepted:
@@ -688,7 +738,7 @@ class CodeFeedbackService:
         tried = [a['action'] for a in accepted][:6]
         if not better:
             for path, text in snapshot.items():
-                path.write_text(text)
+                lp(path).write_text(text)
             return {'attempted': True, 'applied': [], 'refused': refused,
                     'outcome': 'reverted_no_improvement',
                     'failed_before': sorted(failed_before), 'failed_after': sorted(failed_after),

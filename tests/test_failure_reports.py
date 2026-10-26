@@ -119,3 +119,21 @@ def test_known_errors_get_specific_advice(error, needle):
 def test_a_failure_with_no_report_yet_has_none(env):
     repo, *_ = env
     assert fr.for_step(repo, 'missing') is None
+
+
+def test_feedback_scans_read_a_file_past_the_windows_path_limit(tmp_path):
+    """The feedback agent failed with WinError 3 on a test class whose full path was over 260 characters."""
+    import os
+    from pathlib import Path
+    from app.services import feedback
+    if os.name != 'nt':
+        return
+    deep = tmp_path
+    for i in range(6):
+        deep = deep / ('long_directory_name_number_%d_padding_padding' % i)
+    long_dir = Path(feedback._LONG + str(deep))
+    long_dir.mkdir(parents=True)
+    (long_dir / 'WidgetTest.java').write_text('package a.b;\npublic class WidgetTest {}\n')
+    assert len(str(deep / 'WidgetTest.java')) > 260
+    assert feedback._local_classes(tmp_path) == {'WidgetTest': ['a.b.WidgetTest']}
+    assert [f.name for f in feedback._files(tmp_path)] == ['WidgetTest.java']

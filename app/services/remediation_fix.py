@@ -78,7 +78,7 @@ def propose(context, repo, cause, rows, root):
     """Ask the model for edits to the files the findings point at. Returns ``(answer, provenance, files)``."""
     from app.agents.reasoning import ReasoningGateway
     files = candidate_files(root, rows)
-    shown = [{'path': rel, 'content': feedback.redact(f.read_text(errors='ignore')[:feedback.MAX_CITED_FILE_CHARS])}
+    shown = [{'path': rel, 'content': feedback.redact(feedback.lp(f).read_text(errors='ignore')[:feedback.MAX_CITED_FILE_CHARS])}
              for rel, f in files]
     listing = [str(f.relative_to(Path(root))).replace('\\', '/') for f in feedback._files(root)][:MAX_PROJECT_FILES_LISTED]
     payload = {
@@ -101,9 +101,9 @@ def apply_edits(root, edits):
         if target is None:
             refused.append(why)
             continue
-        text = target.read_text(errors='ignore')
+        text = feedback.lp(target).read_text(errors='ignore')
         snapshot.setdefault(target, text)
-        target.write_text(text.replace(str(edit['old_str']), str(edit.get('new_str', '')), 1))
+        feedback.lp(target).write_text(text.replace(str(edit['old_str']), str(edit.get('new_str', '')), 1))
         applied.append({'path': str(target), 'check': 'REMEDIATION',
                         'action': str(edit.get('why') or edit.get('reason') or 'model-proposed edit')[:200]})
     return applied, refused, snapshot
@@ -121,13 +121,13 @@ def save_snapshot(root, snapshot_id, snapshot):
     for path, text in snapshot.items():
         target = out / Path(path).resolve().relative_to(base)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding='utf-8')
+        feedback.lp(target).write_text(text, encoding='utf-8')
     return str(out)
 
 
 def restore(snapshot):
     for path, text in snapshot.items():
-        path.write_text(text)
+        feedback.lp(path).write_text(text)
 
 
 def not_worse(before, after):
