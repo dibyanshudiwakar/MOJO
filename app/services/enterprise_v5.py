@@ -259,9 +259,11 @@ class FrameworkConventionExtractor:
   elif gradle:
    t=gradle.read_text(errors='ignore');rules['build']={'tool':'GRADLE','javaVersion':self._first(t,[r'JavaVersion\.VERSION_(\d+)',r'languageVersion\s*=\s*JavaLanguageVersion\.of\((\d+)\)'])};rules['dependencies']=sorted(set(re.findall(r"['\"]([\w.-]+:[\w.-]+):",t)))
   else:conflicts.append('missing_supported_build_file')
-  for f in root.rglob('*'):
-   if not f.is_file():continue
-   rel=str(f.relative_to(root));parts=set(f.parts);text=f.read_text(errors='ignore') if f.stat().st_size<2_000_000 else ''
+  # Walked with the long-path-safe finder and without build output: a framework repository's
+  # target/ tree is deeper than Windows opens ("[WinError 3]") and says nothing about conventions.
+  from app.services import feedback
+  for f in feedback.find(root,'*',prune=feedback.BUILD_DIRS):
+   rel=str(f.relative_to(root));parts=set(f.parts);text=feedback.lp(f).read_text(errors='ignore') if feedback.small(f) else ''
    if 'src' in parts:rules['projectStructure'].append(rel)
    self._scan_java(rules,rel,text);self._scan_config(rules,rel,text)
   if not rules['security']:conflicts.append('security_standard_not_detected')
@@ -287,10 +289,11 @@ class FrameworkConventionExtractor:
   for name in ('pom.xml','build.gradle','build.gradle.kts'):
    f=root/name
    if f.exists():picked.append((name,f.read_text(errors='ignore')[:chars*4]))
-  for f in sorted(root.rglob('*')):
+  from app.services import feedback
+  for f in feedback.find(root,'*',prune=feedback.BUILD_DIRS):
    if len(picked)>=limit:break
-   if f.is_file() and f.suffix.lower() in ('.java','.yml','.yaml','.properties') and f.stat().st_size<2_000_000:
-    picked.append((str(f.relative_to(root)),f.read_text(errors='ignore')[:chars]))
+   if f.suffix.lower() in ('.java','.yml','.yaml','.properties') and feedback.small(f):
+    picked.append((str(f.relative_to(root)),feedback.lp(f).read_text(errors='ignore')[:chars]))
   return picked
  def verify_golden(self,root,baseline):
   actual=self.extract(root,baseline['version'],baseline['effective_from']);required=set(baseline['standards'].get('dependencies',[]));found=set(actual['standards'].get('dependencies',[]));return {'status':'PASS' if required<=found and not actual['conflicts'] else 'FAIL','missingDependencies':sorted(required-found),'conflicts':actual['conflicts']}

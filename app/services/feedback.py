@@ -234,17 +234,25 @@ def lp(path):
     return Path(_LONG + os.path.abspath(str(path)))
 
 
-def find(root, pattern):
+#: Folders that hold build output or version-control data, never source. A framework repository's
+#: ``target/site/jacoco-aggregate`` tree alone runs past 300 characters of path.
+BUILD_DIRS = ('target', '.git', 'node_modules')
+
+
+def find(root, pattern, prune=()):
     """Files under ``root`` whose name matches ``pattern`` (e.g. ``*.java``), long paths included.
 
     ``Path.rglob`` skips directories past the Windows path limit and ``stat`` on a file past it
     raises, so scans walk the tree with the extended-length prefix and return ordinary paths.
+    ``prune`` names directories that are not entered at all (see ``BUILD_DIRS``).
     """
     import fnmatch
     base = Path(root)
     top = _LONG + os.path.abspath(str(base)) if os.name == 'nt' else str(base)
     out = []
-    for here, _dirs, names in os.walk(top):
+    for here, dirs, names in os.walk(top):
+        if prune:
+            dirs[:] = [d for d in dirs if d not in prune]
         rel = os.path.relpath(here, top)
         for name in names:
             if fnmatch.fnmatch(name, pattern):
