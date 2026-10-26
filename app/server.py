@@ -3,7 +3,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from app.repository import Repository, uid, now, digest
-from app.services import failure_reports, learning, run_analysis, suggestions
+from app.services import failure_reports, learning, run_analysis, suggestions, todo_report
 from app.service import FactoryService
 from app.services.clarification_reuse import settle_siblings
 from app.services.evidence import EvidenceService
@@ -255,6 +255,11 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
                 a['causes'] = report.get('causes', [])
                 a['gate'] = report.get('gate')
                 a['totals'] = report.get('totals', {})
+            # The hand-over list of everything still to do by hand, opened like the variance reports.
+            todo = todo_report.latest(r, job_id)
+            if todo:
+                a['todo_url'] = todo['html_url']
+                a['todo_count'] = todo['todo_count']
         elif agent_id == 'governance':
             a = {'title': 'Governance Evaluation', 'format': 'governance',
                  'decision': outputs.get('allow_deny_decision', {}),
@@ -590,12 +595,13 @@ class H(BaseHTTPRequestHandler):
         # The HTML form of a stored parity / hardcoding report, rendered from its JSON on request.
         m=re.fullmatch(r'/api/v2/reports/([^/]+)/html',p)
         if m:
-            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS','QUALITY_GATE_REPORT','FAILURE_REPORT')",(m.group(1),))
+            row=repo.one("select * from validation_reports where id=? and report_type in ('PARITY_ANALYSIS','HARDCODING_ANALYSIS','QUALITY_GATE_REPORT','FAILURE_REPORT','TODO_REPORT')",(m.group(1),))
             if not row: return self.sendj(404,{'error':'report_not_found'})
             self.authorize_job(self.principal(),row['job_id'])
             stored=json.loads(row['payload'] or '{}')
             # A failed quality gate and a failed step have their own pages, rendered from the stored facts.
-            if row['report_type'] in failure_reports.REPORT_TYPES: page=failure_reports.render(row)
+            if row['report_type']==todo_report.TODO: page=todo_report.render_row(row)
+            elif row['report_type'] in failure_reports.REPORT_TYPES: page=failure_reports.render(row)
             else: page=static_check_reports.render_html(stored.get('report'),static_check_reports.meta_from_stored(stored,row))
             # This page has its own inline stylesheet and no script; give it exactly that policy, for this response only.
             self.csp_override=static_check_reports.CONTENT_SECURITY_POLICY

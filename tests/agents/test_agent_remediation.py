@@ -85,3 +85,20 @@ def test_a_job_pointer_is_kept_when_it_has_one(repo, job, root_cause, monkeypatc
     result = RemediationAgent(repo).run(job['id'], params={'root_cause_id': root_cause['root_cause_id']})
     row = repo.one('select rollback_pointer from remediations where id=?', (result.outputs['patch_plan'],))
     assert row['rollback_pointer'] == 'tag/v1'
+
+
+def test_remediation_ends_by_writing_the_todo_report(repo, job, root_cause, monkeypatch, tmp_path):
+    """The hand-over list is stored like the other reports and written beside them."""
+    monkeypatch.setenv(THRESHOLD_ENV, '0.1')
+    result = RemediationAgent(repo).run(job['id'], params={'root_cause_id': root_cause['root_cause_id']})
+    assert result.status == 'COMPLETED' and 'todo_error' not in result.metrics
+    rid = result.metrics['todo_report_id']
+    assert result.metrics['todo_html_url'] == '/api/v2/reports/%s/html' % rid
+    row = repo.one('select report_type,job_id from validation_reports where id=?', (rid,))
+    assert (row['report_type'], row['job_id']) == ('TODO_REPORT', job['id'])
+    assert 'TODO report' in (tmp_path / result.metrics['todo_html_path']).read_text(encoding='utf-8')
+
+
+def test_a_run_with_nothing_to_remediate_still_writes_the_todo_report(repo, job):
+    result = RemediationAgent(repo).run(job['id'])
+    assert result.metrics['skipped'] is True and result.metrics['todo_report_id']

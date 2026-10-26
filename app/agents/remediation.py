@@ -22,13 +22,18 @@ Two boundaries this agent holds deliberately:
 With no ``root_cause_id`` every cause still waiting is remediated; the run's report
 (fixes applied, what could not be fixed, the gate verdict) is stored as a
 ``REMEDIATION_REPORT`` for the Output tab.
+
+Whatever the outcome, the run ends by writing the TODO report (``todo_report``): every ``TODO`` left
+in the generated code, the decisions code generation could not make, and what remediation left
+open -- the hand-over list for the person who finishes the service. It is an HTML page opened from
+the Output tab like the variance reports, and it never fails the run.
 """
 import json
 import os
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.artefact import produce
 from app.repository import digest, now, uid
-from app.services import feedback, remediation_fix, static_findings
+from app.services import feedback, remediation_fix, static_findings, todo_report
 from app.services.enterprise_v5 import ConfidenceRemediationService
 from app.services.rca import RCAService
 
@@ -206,7 +211,8 @@ class RemediationAgent(BaseAgent):
                 n = (self.repo.one('select count(*) n from root_causes where job_id=?', (context.job_id,)) or {}).get('n', 0)
                 return AgentResult(status='COMPLETED',
                                    outputs={'patch_plan': None, 'code_changes': [], 'tests': []},
-                                   metrics={'skipped': True, 'reason': 'no_root_causes' if not n else 'nothing_left_to_remediate'})
+                                   metrics={'skipped': True, 'reason': 'no_root_causes' if not n else 'nothing_left_to_remediate',
+                                            **todo_report.record(self.repo, context.job_id)})
         items = [self._assess(context, job, c) for c in causes]
 
         # A single named cause that is not eligible keeps the old behaviour: ask, do not proceed.
@@ -286,6 +292,7 @@ class RemediationAgent(BaseAgent):
                              'not_fixed': sum(len(r['unfixed']) for r in results),
                              'not_eligible': sum(1 for r in results if not r['eligible'])}}
         report_id = self._store_report(context.job_id, report)
+        todos = todo_report.record(self.repo, context.job_id, report)
 
         payload = json.dumps({'report_id': report_id, **report}, sort_keys=True, default=str)
         if explicit:
@@ -298,13 +305,13 @@ class RemediationAgent(BaseAgent):
                 metrics={'eligible': True, 'route': it['eligibility']['route'],
                          'confidence': it['cause']['confidence'], 'threshold': it['threshold'],
                          'change_count': len(it['changes']), 'fixes_applied': applied_total,
-                         'report_id': report_id},
+                         'report_id': report_id, **todos},
                 reasoning=it['provenance'])
         return AgentResult(
             outputs={'patch_plan': first_id, 'code_changes': changes_all, 'tests': sorted(tests_all)},
             evidence=(EvidenceRef('REMEDIATION_REPORT', '1.0.0', 'remediation://' + report_id, payload,
                                   {'causes': len(results), 'fixes_applied': applied_total}),),
-            metrics={**{'report_id': report_id}, **report['totals'],
+            metrics={**{'report_id': report_id}, **report['totals'], **todos,
                      'gate': (verdict or {}).get('result', 'not_run')},
             reasoning=items[0]['provenance'])
 
