@@ -201,6 +201,9 @@ class Repository:
    # catalogue's stable agent_id, to the principal that started it, or to the
    # prompt and model versions that produced its output. Without
    # operator_identity any caller could complete somebody else's run.
+   # Milliseconds a step has spent running, banked each time it stops (waiting on a gate or a
+   # clarification, finishing, failing). started_at restarts on every resume, so it cannot give this.
+   "pipeline_steps":{"active_ms":"integer default 0"},
    "agent_runs":{"agent_id":"text","operator_identity":"text default ''","requested_tools":"text default '[]'","params_hash":"text default ''","outputs":"text default '{}'","model_provenance":"text default '{}'","iteration":"integer default 1","reasoning":"text default ''","effective_model_alias":"text default ''","binding_source":"text default ''"}
   }
   for table,cols in upgrades.items():

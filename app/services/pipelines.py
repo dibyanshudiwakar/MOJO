@@ -17,6 +17,7 @@ existing Approval Governance screens, which this module does not reimplement.
 import json
 import logging
 import re as _re
+from datetime import datetime, timezone
 from pathlib import Path
 from app.repository import uid, now, digest
 from app.services import workspace
@@ -971,12 +972,33 @@ class PipelineService:
     _REQUEUE = ("update pipeline_steps set status='PENDING',completed_at='',"
                 "error='',queue_id='',updated_at=? where id=?")
 
+    @staticmethod
+    def _bank_active(c, step_id):
+        """Add the running stretch that is ending to the step's ``active_ms``.
+
+        ``started_at`` restarts every time a step resumes after a gate or a clarification, so the
+        time it was actually working is kept here and the waiting is never added. Only a RUNNING step
+        banks, so a late second write cannot count the same stretch twice.
+        """
+        row = c.execute('select status,started_at,active_ms from pipeline_steps where id=?', (step_id,)).fetchone()
+        if not row or row['status'] != 'RUNNING' or not row['started_at']:
+            return
+        try:
+            began = datetime.fromisoformat(row['started_at'])
+        except ValueError:
+            return
+        if began.tzinfo is None:
+            began = began.replace(tzinfo=timezone.utc)
+        ms = max(0, int((datetime.now(timezone.utc) - began).total_seconds() * 1000))
+        c.execute('update pipeline_steps set active_ms=? where id=?', (int(row['active_ms'] or 0) + ms, step_id))
+
     def _requeue(self, c, step_id, guard=''):
         """Send a step back to PENDING for another attempt.
 
         ``guard`` appends a status condition, for the callers that must only
         act on a step still in a particular state.
         """
+        self._bank_active(c, step_id)
         return c.execute(self._REQUEUE + guard, (now(), step_id))
 
     def mark_step(self, step_id, status, outputs=None, error=''):
@@ -1003,6 +1025,7 @@ class PipelineService:
             # StepCancelled, or COMPLETED if it happened to finish first --
             # would overwrite the operator's decision with a fault or a success
             # nobody wanted. The cancellation is the final word.
+            self._bank_active(c, step_id)
             written = c.execute("update pipeline_steps set status=?,completed_at=?,outputs=?,error=?,updated_at=? where id=? and status not in (?,?,?)",
                                 (status, now(), json.dumps(outputs or {}, default=str), error, now(), step_id, HELD, 'WAITING_CLARIFICATION', 'CANCELLED')).rowcount
         if not written:
@@ -1278,6 +1301,7 @@ class PipelineService:
         would.
         """
         with self.repo.connect() as c:
+            self._bank_active(c, step_id)
             parked = c.execute(
                 "update pipeline_steps set status='WAITING_CLARIFICATION',outputs=?,error=?,updated_at=? "
                 "where id=? and status!='COMPLETED'",
@@ -1446,6 +1470,7 @@ class PipelineService:
         if error_msg:
             tag = tag + ';' + error_msg
         with self.repo.connect() as c:
+            self._bank_active(c, step_id)
             # Only park the step if it has not already completed — a step that
             # ran successfully and then triggered a gate-blocked lifecycle advance
             # must stay COMPLETED so the lifecycle query can still count it as a
@@ -1618,7 +1643,65 @@ class PipelineService:
         if not p:
             raise ValueError('pipeline_not_found')
         steps = self.repo.rows('select * from pipeline_steps where pipeline_id=? order by sequence', (pipeline_id,))
-        return {**p, 'steps': steps}
+        return {**p, 'steps': steps, 'agent_ms': self.agent_runtime_ms(p)}
+
+    def agent_runtime_ms(self, pipeline):
+        """Milliseconds agents were actually working for this pipeline's job.
+
+        Elapsed time also counts the hours a step sits at a gate or on a clarification, so this sums
+        the agent runs themselves (start to finish of each dispatch). Runs that overlap are merged, so
+        agents working in parallel are counted once and the figure never exceeds the elapsed time.
+        A run still going counts up to now.
+        """
+        from datetime import datetime, timezone
+
+        def parse(v):
+            try:
+                d = datetime.fromisoformat(str(v))
+            except (TypeError, ValueError):
+                return None
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+        since = parse(pipeline.get('started_at'))
+        if not since or not pipeline.get('job_id'):
+            return 0
+        now_ = datetime.now(timezone.utc)
+        # A run that never recorded a finish (a step that parked, failed or was stopped leaves one
+        # behind) must not count up to now for ever. It runs to now only while one of the pipeline's
+        # steps for that agent is RUNNING; otherwise it ends when the step last changed.
+        steps = self.repo.rows('select agent_id,status,updated_at,completed_at from pipeline_steps where pipeline_id=?',
+                               (pipeline['id'],)) if pipeline.get('id') else []
+        running = {s['agent_id'] for s in steps if s['status'] == 'RUNNING'}
+        stopped = {}
+        for s in steps:
+            end = parse(s['completed_at'] or s['updated_at'])
+            if end and (s['agent_id'] not in stopped or end > stopped[s['agent_id']]):
+                stopped[s['agent_id']] = end
+        closed = parse(pipeline.get('completed_at'))
+        spans = []
+        for r in self.repo.rows('select agent_id,started_at,completed_at from agent_runs where job_id=?', (pipeline['job_id'],)):
+            a = parse(r['started_at'])
+            if not a or a < since:
+                continue
+            if r['completed_at']:
+                b = parse(r['completed_at'])
+            elif r['agent_id'] in running and not closed:
+                b = now_
+            else:
+                b = stopped.get(r['agent_id']) or closed or a
+            if b and b > a:
+                spans.append((a, b))
+        total, cur_a, cur_b = 0.0, None, None
+        for a, b in sorted(spans):
+            if cur_b is None or a > cur_b:
+                if cur_b is not None:
+                    total += (cur_b - cur_a).total_seconds()
+                cur_a, cur_b = a, b
+            elif b > cur_b:
+                cur_b = b
+        if cur_b is not None:
+            total += (cur_b - cur_a).total_seconds()
+        return int(total * 1000)
 
     #: A step that finished or was skipped counts as done, the same as on the pipeline page.
     DONE_STEP_STATUSES = ('COMPLETED', 'SKIPPED')

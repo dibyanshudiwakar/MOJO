@@ -1448,3 +1448,29 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 /* Access: section header with its action. */
 .access-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
 .access-head h3{margin:0}
+
+/* ── Pop-ups and output panels: wrap, never scroll sideways ───────────────────
+   Long paths, class names and build lines used to stretch tables and rows past the
+   pop-up, which then scrolled side to side. Everything wraps instead, and only the
+   vertical direction scrolls. */
+.plan-modal{min-width:0}
+.plan-modal-body{overflow-x:hidden;overflow-y:auto;min-width:0}
+.plan-tbl-wrap,.plan-modal-scroll{overflow-x:hidden;overflow-y:auto;min-width:0}
+.plan-tbl{table-layout:auto;width:100%}
+.plan-tbl th{white-space:normal;overflow-wrap:anywhere}
+.plan-tbl td{overflow-wrap:anywhere;word-break:normal;min-width:0}
+.plan-tbl td code,.plan-tbl td .plan-id{overflow-wrap:anywhere;white-space:normal}
+.plan-src,.plan-tests-cell{max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.plan-ace-badge{white-space:normal;overflow-wrap:anywhere}
+.plan-raw-pre,.plan-raw-pre.op-json,.op-json{white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;overflow-x:hidden}
+.plan-modal-body>.meta-row{padding:9px 20px}
+.meta-row{min-width:0}
+.meta-key{overflow-wrap:anywhere}
+.meta-val{min-width:0;flex:1;overflow-wrap:anywhere;word-break:normal}
+.plan-modal-body>.authhint,.plan-modal-body>p{padding:14px 20px}
+.artefact-pre{overflow-x:hidden}
+.op-pane,.output-panel{overflow-x:hidden}
+.op-pane pre,.op-pane code{white-space:pre-wrap;overflow-wrap:anywhere}
+.plan-tb{flex-wrap:wrap}
+.plan-search{width:min(300px,100%)}
+@media(max-width:700px){.plan-modal{margin:8px}.plan-modal-hd{padding:10px 12px}}

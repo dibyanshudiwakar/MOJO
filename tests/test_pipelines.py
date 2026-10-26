@@ -412,3 +412,64 @@ def test_code_generation_waits_for_the_framework_clone_when_one_is_supplied(env)
     clone = find_clone_step(p['steps'], 'FRAMEWORK')
     codegen = find_agent_step(p['steps'], 'code-generation')
     assert clone is not None and clone['id'] in json.loads(codegen['depends_on'])
+
+
+def test_agent_runtime_excludes_waiting_and_counts_parallel_runs_once(env):
+    """Elapsed time includes time parked at a gate; agent runtime is only the agents working."""
+    repo, _job, pipelines, _workflow = env
+    t = '2026-10-23T10:00:%02d+00:00'
+    with repo.connect() as c:
+        c.execute("insert into pipelines(id,job_id,name,workspace_dir,status,created_at,started_at) "
+                  "values('pr','jr','x','w','RUNNING','t',?)", (t % 0,))
+        # 0-10s, an overlapping 5-20s (merged: 20s together), then a 50-55s run after a long wait.
+        for i, (a, b) in enumerate(((0, 10), (5, 20), (50, 55))):
+            c.execute("insert into agent_runs(id,job_id,agent_name,status,started_at,completed_at) values(?,?,?,?,?,?)",
+                      ('r%d' % i, 'jr', 'a', 'COMPLETED', t % a, t % b))
+        # A run from before the pipeline started is not part of it.
+        c.execute("insert into agent_runs(id,job_id,agent_name,status,started_at,completed_at) values('old','jr','a','COMPLETED',"
+                  "'2026-10-22T10:00:00+00:00','2026-10-22T11:00:00+00:00')")
+    assert pipelines.agent_runtime_ms(pipelines.detail('pr')) == 25000
+    assert pipelines.detail('pr')['agent_ms'] == 25000
+
+
+def test_step_time_holds_while_waiting_and_continues_after(env):
+    """started_at restarts on resume, so the running time is banked when a step stops and carried over."""
+    from datetime import datetime, timedelta, timezone
+    repo, _job, pipelines, _workflow = env
+
+    def ago(s):
+        return (datetime.now(timezone.utc) - timedelta(seconds=s)).isoformat()
+
+    with repo.connect() as c:
+        c.execute("insert into pipelines(id,job_id,name,workspace_dir,status,created_at) values('pw','j','x','w','RUNNING','t')")
+        c.execute("insert into pipeline_steps(id,pipeline_id,sequence,kind,agent_id,status,started_at) "
+                  "values('sw','pw',0,'agent','planning','RUNNING',?)", (ago(30),))
+    pipelines.park_for_clarification('sw', {}, ['c1'])
+    first = repo.one("select active_ms,status from pipeline_steps where id='sw'")
+    assert first['status'] == 'WAITING_CLARIFICATION' and 29000 <= first['active_ms'] < 40000
+    # Waiting does not add time: banking again while parked changes nothing.
+    with repo.connect() as c:
+        pipelines._bank_active(c, 'sw')
+    assert repo.one("select active_ms from pipeline_steps where id='sw'")['active_ms'] == first['active_ms']
+    # Resume: started_at restarts, the banked time stays, and the next stretch is added on top.
+    with repo.connect() as c:
+        c.execute("update pipeline_steps set status='RUNNING',started_at=? where id='sw'", (ago(10),))
+    pipelines.mark_step('sw', 'COMPLETED')
+    total = repo.one("select active_ms from pipeline_steps where id='sw'")['active_ms']
+    assert first['active_ms'] + 9000 <= total < first['active_ms'] + 20000
+
+
+def test_a_run_left_unfinished_stops_counting_once_its_step_has_finished(env):
+    """An agent run with no recorded finish must not keep adding time after the step is COMPLETED."""
+    repo, _job, pipelines, _workflow = env
+    with repo.connect() as c:
+        c.execute("insert into pipelines(id,job_id,name,workspace_dir,status,created_at,started_at,completed_at) "
+                  "values('pu','ju','x','w','COMPLETED','t','2026-10-23T10:00:00+00:00','2026-10-23T10:01:00+00:00')")
+        c.execute("insert into pipeline_steps(id,pipeline_id,sequence,kind,agent_id,status,started_at,completed_at,updated_at) "
+                  "values('su','pu',0,'agent','planning','COMPLETED','2026-10-23T10:00:00+00:00',"
+                  "'2026-10-23T10:00:20+00:00','2026-10-23T10:00:20+00:00')")
+        c.execute("insert into agent_runs(id,job_id,agent_name,agent_id,status,started_at,completed_at) "
+                  "values('ru','ju','Planning Agent','planning','RUNNING','2026-10-23T10:00:00+00:00','')")
+    assert pipelines.agent_runtime_ms(pipelines.detail('pu')) == 20000
+    # And it stays put: the answer does not depend on when it is asked.
+    assert pipelines.agent_runtime_ms(pipelines.detail('pu')) == 20000

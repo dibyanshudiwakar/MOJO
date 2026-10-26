@@ -244,7 +244,14 @@ class MappingAndPlanningService:
   p,a,f,s=self.generation_inputs(job_id,plan_id)
   base=_ws.resolve(Path(output_root)/(root_name or ''),must_exist=False,create=True)
   manifest=[];refused=[]
+  # The model names the repository root once, as the layout's ``root``, and sometimes again at the
+  # front of every file path. Written as given that nests the project one directory too deep
+  # (<root>/<root>/pom.xml), and the quality gate, run on <root>, finds no pom.xml. A path that
+  # already starts with the root is taken as relative to it.
+  bare=(root_name or '').strip('/\\');lead=bare+'/' if bare else ''
   for rel,content in files:
+   rel=str(rel).replace('\\','/')
+   while lead and rel.startswith(lead):rel=rel[len(lead):]
    try:target=_ws.resolve(base/rel,must_exist=False)
    except Exception as exc:refused.append('%s:%s' % (rel,type(exc).__name__));continue
    if base not in target.parents and target!=base:refused.append(rel+':path_outside_project');continue
