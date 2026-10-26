@@ -42,7 +42,17 @@ _CONNECTOR_REFERENCE = {
     'REST_EXTERNAL_DIRECT': 'rest-external-direct.md', 'SOAP': 'soap-backend.md',
     'QL_CICS': 'ql-cics-camel-bindy.md', 'RXCLAIM_SBO': 'rxclaim-sbo-xml-jaxb.md',
     'MQ_COBOL': 'ibm-mq-cobol-copybook.md',
+    # RECAP is IBM MQ with fixed-width buffers, which is what that reference
+    # covers; the skill's own table has no RECAP reference of its own yet.
+    'RECAP': 'ibm-mq-cobol-copybook.md',
 }
+
+
+def backends_of(model):
+    """Every backend type the analysis found, primary first; ``[]`` when none was determined."""
+    detected = model.get('backend_type') or {}
+    listed = [b for b in (detected.get('backends') or []) if b]
+    return listed or ([detected['type']] if detected.get('type') else [])
 
 
 def _omission(item):
@@ -63,14 +73,19 @@ class CodeGenerationAgent(BaseAgent):
 
     def _skill_for_backend(self, context, model):
         """The skill, narrowed to the structure plus this backend's connector."""
-        connector = _CONNECTOR_REFERENCE.get((model.get('backend_type') or {}).get('type', ''))
+        # One reference per backend the service talks to: a service routing to
+        # RxClaim and RECAP needs both, and loading only the first generated it
+        # for one backend and left the other unimplemented (501).
+        connectors = []
+        for backend in backends_of(model):
+            ref = _CONNECTOR_REFERENCE.get(backend)
+            if ref and ref not in connectors:
+                connectors.append(ref)
         try:
             own = context.skill()
             if own is None:
                 return None
-            wanted = ['structural-conventions.md', 'mandatory-migration-rules.md']
-            if connector:
-                wanted.append(connector)
+            wanted = ['structural-conventions.md', 'mandatory-migration-rules.md'] + connectors
             return own.focus_many(wanted)
         except (AttributeError, KeyError, SkillIntegrityError):
             return None
@@ -111,6 +126,7 @@ class CodeGenerationAgent(BaseAgent):
             {'service_name': context.param('service_name'),
              'package_name': context.param('package_name'),
              'backend_type': (model.get('backend_type') or {}).get('type', ''),
+             'backends': backends_of(model),
              'tasks': tasks,
              'semantic_model': model, 'framework_standards': standards},
             skill=skill,

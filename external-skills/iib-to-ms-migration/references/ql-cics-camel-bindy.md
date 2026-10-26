@@ -232,7 +232,8 @@ public class *CamelBindyUtility extends RouteBuilder {
 # QL/CICS connector (env-specific config-map file)
 application.http.enabled=true
 application.http.restclient.ql.name=ql
-application.http.restclient.ql.uri=https://<env>eippbmaz-oci.cvshealth.com/ql/request/v1
+application.http.restclient.ql.uri=https://<env>eippbm-oci.cvshealth.com/ql/request/v1
+# ^ plain "pbm-oci" host, never "pbmaz"/"pbmri" — standing instruction, 2026-10-23 (see Rule 12)
 application.http.restclient.ql.connect-timeout=10000
 application.http.restclient.ql.request-timeout=<timeoutForServer * 1000>
 application.http.restclient.ql.socket-timeout=<timeoutForServer * 1000>
@@ -250,6 +251,30 @@ application.<serviceName>.ql.service-code=<SRV_CD, e.g. "BNF","AGL">
 application.<serviceName>.ql.action-code=<ACN_CD, e.g. "R","U">
 application.<serviceName>.timeout.seconds=<timeoutForServer value from IIB .properties>
 ```
+
+### 6a. Optional secondary connectors — QL-DB2 proxy, image retrieval
+
+**[live-confirmed, `orderimageinfoservice` — QL/CICS + LINKS + DB2 multi-backend variant]** Not every QL/CICS service is QL-only. When the IIB flow also does a direct DB2 lookup (via a shared-library DB helper like `QLDBHelper.esql`/`ECSDBHelper.esql` — `EXTERNAL NAME`-declared ODBC calls, **no URL anywhere in the IIB source**) or a separate image-retrieval web service call, the MS replaces each one with its own named REST connector, never folded into the `ql` connector above:
+
+```properties
+# QL-DB2 proxy connector (replaces a direct QLDBHelper.esql ODBC call — IIB had no URL for this)
+application.http.restclient.qlhc.name=qlhc
+application.http.restclient.qlhc.uri=https://<env>eippbm-oci.cvshealth.com/qldb/execute/query/v1
+application.http.restclient.qlhc.connect-timeout=10000
+application.http.restclient.qlhc.request-timeout=10000
+application.http.restclient.qlhc.socket-timeout=30000
+application.http.restclient.qlhc.max-total-connections=50
+application.http.restclient.qlhc.default-max-per-route=25
+application.http.restclient.qlhc.default-keep-alive-time-millis=20000
+
+# Image-retrieval connector (only if this flow actually retrieves an order image — service-specific host, confirm with the LINKS/image team before assuming it's reusable)
+application.http.restclient.image-retrieval.name=image-retrieval
+application.http.restclient.image-retrieval.uri=<the real LINKS image-service URL from the IIB source's own non-QL config — do not invent one>
+```
+
+Same plain-`pbm-oci`, QA-for-local rule applies to `qlhc` as to `ql` (Rule 12) — this is not a separate hostname family, just a different path on the same gateway host. `image-retrieval` is a different, external (`wslinks.caremark.com`-shaped) host entirely — don't default it to the `pbm-oci` family.
+
+Don't wire either of these just because the service name suggests it (`gap-checklist.md` [H10]-style check) — confirm the IIB ESQL actually makes the corresponding DB/image call first.
 
 ---
 

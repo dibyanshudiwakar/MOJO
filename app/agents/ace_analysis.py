@@ -86,15 +86,28 @@ class ACEAnalysisAgent(BaseAgent):
         constructs = [(rel, text, ext) for rel, text, ext in sources if ext != '.properties']
         by_path = {rel: (text, ext) for rel, text, ext in constructs}
         skill = self._focused_skill(context, by_path)
-        items = [(rel, {'path': rel, 'kind': ext, 'text': text})
-                 for rel, text, ext in constructs]
+        items, order = [], []
+        for rel, text, ext in constructs:
+            pieces = self._chunks(text)
+            for n, piece in enumerate(pieces, 1):
+                key = rel if len(pieces) == 1 else '%s#part%d' % (rel, n)
+                payload = {'path': rel, 'kind': ext, 'text': piece}
+                if len(pieces) > 1:
+                    payload.update({'part': n, 'of_parts': len(pieces),
+                                    'note': 'This is one line-aligned part of a larger file; '
+                                            'report only the constructs that begin in this part.'})
+                items.append((key, payload))
+                order.append(key)
         fragments, provenance = produce_many(context, self.PROMPT, items, skill=skill)
+        # A split file is still one source: report files read, not requests made.
+        if provenance.get('item_count'):
+            provenance['item_count'] = len(constructs)
         # The merge stays deterministic: it is list concatenation, and leaving
         # it in code is what stops the assembly inventing, dropping or
         # reordering a construct the per-file answers established.
         for fragment in fragments.values():
             self._literals_as_text(fragment)
-        model = parser.merge([fragments[rel] for rel, _, _ in constructs if rel in fragments])
+        model = parser.merge([fragments[k] for k in order if k in fragments])
         for rel, text, ext in properties:
             parser.fold(model, rel, text, ext)
         # Folded deterministically, not asked of the model, but still real
@@ -104,6 +117,42 @@ class ACEAnalysisAgent(BaseAgent):
         if properties:
             provenance = dict(provenance, item_count=provenance.get('item_count', 0) + len(properties))
         return model, provenance
+
+    #: Serialised characters of file text per request. Well under
+    #: ``artefact.MAX_PAYLOAD_CHARS`` so the path, precedents, lessons and the
+    #: retry correction that share the payload still fit.
+    CHUNK_CHARS = 120_000
+
+    @classmethod
+    def _chunks(cls, text):
+        """``text`` as one or more line-aligned parts that each fit a request.
+
+        Sized by JSON-escaped length, since that is what the payload limit
+        measures. A file that fits stays one part, so the common case is
+        unchanged; only an oversized file is split.
+        """
+        if len(json.dumps(text)) <= cls.CHUNK_CHARS:
+            return [text]
+        parts, current, size = [], [], 0
+        step = cls.CHUNK_CHARS // 6
+        for line in text.splitlines(keepends=True):
+            while len(json.dumps(line)) > cls.CHUNK_CHARS:
+                # One line larger than a whole request: cut it, there is no
+                # line boundary to honour.
+                if current:
+                    parts.append(''.join(current))
+                    current, size = [], 0
+                parts.append(line[:step])
+                line = line[step:]
+            cost = len(json.dumps(line))
+            if current and size + cost > cls.CHUNK_CHARS:
+                parts.append(''.join(current))
+                current, size = [], 0
+            current.append(line)
+            size += cost
+        if current:
+            parts.append(''.join(current))
+        return parts
 
     @staticmethod
     def _literals_as_text(fragment):
@@ -174,6 +223,7 @@ class ACEAnalysisAgent(BaseAgent):
                    # directly rather than re-deriving it later.
                    'backend_type': model.get('backend_type', {}).get('type', 'UNDETERMINED'),
                    'backend_type_signal': model.get('backend_type', {}).get('signal', ''),
+                   'backends': model.get('backend_type', {}).get('backends', []),
                    # Every source file is model-read or the agent failed, so
                    # sources_from_model/sources_computed no longer describe
                    # anything: produce_many is all-or-nothing. What is left to

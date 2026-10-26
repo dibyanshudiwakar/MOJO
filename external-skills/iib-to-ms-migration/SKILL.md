@@ -68,13 +68,13 @@ A 2026-09-29 survey found 22 real, buildable MS repos actually sitting in the sa
 | 3 | Dockerfile — full template, not just the label | Repo root, exact base image/labels/non-root-user/JVM-flags — see `structural-conventions.md` §3 |
 | 4 | No `RestTemplate` | Always `RestClientWrapper` — even for test-harness bypass, even for QL/CICS |
 | 5 | No `StringBuilder` for QL buffers | Always Camel Bindy `@FixedLengthRecord` + marshaller for QL/CICS request **and** response field content |
-| 6 | Credential encryption | Encrypt via the CVS endpoint by default, every phase — never plaintext. **Generate real, live Akeyless scaffolding when this specific service genuinely requires it** (checked per-service, never assumed from phase/backend type alone — a Phase 2 REST-to-vendor service can still need zero Akeyless, confirmed real counter-example) |
+| 6 | Credential encryption | **Whenever this service has an actual credential, generate live Akeyless scaffolding by default — every new migration, regardless of phase, never gated on asking the user "is it needed" or "which phase convention."** Phase 1's real repos predate Akeyless as infra, which is why they lack it — that's history, not a rule to follow now. `application-local.properties` still uses the CVS-encrypt-endpoint ciphertext (no Akeyless sidecar locally). The only placeholder is the literal secret path value — generate everything else immediately. Skip entirely only if the service genuinely has no credential at all |
 | 7 | Framework version and Java version | Default `framework-starter` to **3.2.2** and the JDK to **21**; ask the user only if that doesn't apply (they want a different/specific version) — don't inspect sibling repos to infer either one. Java 21 is checked twice: the toolchain itself (Batch C/D) and the generated parent pom's `<java.version>` property |
 | 8 | `EieHeader` verified per accessor; `framework-eieusercontext` need is category/service-dependent | Never invent a getter by analogy; check whether the context arrives pre-populated (skip the dependency) or must be built from an ID token (`EieHeaderBuilder.createEieUserContextString`, include it) — confirmed genuinely needed in RxClaim SBO/MQ_COBOL, not needed in the one QL_CICS service checked. JWT/JWKS **validation** for a requester ID stays an absolute never, in every category |
 | 9 | No Kong/gateway token-validator reimplementation | Even if the IIB ESQL has an ID-token-check node, never generate a connector/service/exception/config for it — Kong already validates it upstream, confirmed by real-sibling-repo diff (`EmergencyOverrides`) |
 | 10 | No custom exception classes or `exception` package | Never `extends RuntimeException`/`Exception`, and no `@RestControllerAdvice` fallback handler either — call `ErrorUtil.errorResponse(...)` (the framework's mechanism) directly at the point of failure; catching the framework's own `EIPMicroserviceException` to re-map it is fine |
 | 11 | JUnit tests — ask the user, then generate accordingly | Always ask at INTAKE: full test cases with real content, or structure-only empty skeletons? Honor the answer — generate real `@Test` methods/assertions if they want full content, empty classes if not |
-| 12 | `application-local.properties` → always QA for internal CVS backends | Internal-CVS-backend connector URIs point at `qa`/`qa2`, never `dev`/`prod`, confirmed across every HTTP-based backend type checked; external-vendor connectors use that vendor's own non-prod endpoint instead, no CVS "QA" equivalent exists for those |
+| 12 | Internal-CVS-backend host is always plain `pbm-oci` (no `az`/`ri`); `application-local.properties` → always QA | Every internal-CVS-backend connector (`ql`, `rxclaim`, `qlhc`, `ecshc`, `refdata`) shares one host family, `<env>eippbm-oci.cvshealth.com` — never `pbmaz`/`pbmri`, in any environment including prod. Separately, `application-local.properties` always points that host at the `qa`/`qa2` tier, never `dev`/`prod`. External-vendor connectors use that vendor's own non-prod endpoint instead — no CVS "QA"/`pbm-oci` equivalent exists for those |
 | 13 | Target directory — same location as the IIB source by default | New MS repo defaults to being created as a sibling of the IIB source repo, not a separate output location picked ad hoc — state the default, let the user override it |
 
 ---
@@ -88,6 +88,7 @@ A 2026-09-29 survey found 22 real, buildable MS repos actually sitting in the sa
 | `references/translation-table.md` | IIB shared-library → MS framework mapping table, used during ESQL→Java mapping |
 | `references/structural-conventions.md` | Folder layout, file organization, and annotation conventions common to every backend type — Dockerfile, Helm chart, `.github/` workflows, full environment list, DTO annotations, `EieHeader` accessors |
 | `references/common-patterns-and-gotchas.md` | Cross-cutting behavioral gotchas, several confirmed by live execution, plus the cross-category meta-lessons at the end |
+| `references/framework-repo-fallback.md` | **Only when the backend is none of the 5 trained types, or has no trained reference repo** — how to read the org frameworks repo (version branch, module map, what is *not* a migration target) instead of guessing |
 
 ---
 
@@ -100,7 +101,7 @@ The migration runs as four sequential steps — **INTAKE → SCAFFOLD → GENERA
 Follow `references/workflow-and-state.md` INTAKE in full:
 
 1. **Always take these 5 inputs directly from the user before moving ahead — ask explicitly, wait for a real answer, never silently default past any of them** (standing instruction, 2026-10-09): (1) IIB source repo path, (2) migrated MS destination directory, (3) framework version, (4) one successful request's data, (5) the expected response for that request. A suggested default is fine to *offer when asking* — same-location-as-source for #2 (Rule 13), `framework-starter` 3.2.2/Java 21 for #3 (Rule 7) — but offering a default never replaces actually asking and capturing the answer. #4/#5 are for HANDOFF-C's smoke test — don't invent them, don't re-ask at HANDOFF. Also collected in this batch: reference OCI project, test-generation preference (Rule 11), CVS programme phase (1/2). *(Batch A, see `workflow-and-state.md` for the full detail)*
-2. Auto-detect the backend type by reading every `.msgflow`/`.esql` file against the detection table below. *(Batch B)*
+2. Auto-detect the backend type by reading every `.msgflow`/`.esql` file against the detection table below. *(Batch B)* **If the backend is none of the 5 trained types (SOAP, QL/CICS + Camel Bindy, RxClaim SBO, IBM MQ + COBOL Copybook, REST), or no trained reference repo exists for it, take the reference from `https://github.com/cvs-legacy-source-code/EIPMS_cvs-technical-edb-cs-frameworks` instead of guessing** (standing instruction, 2026-10-13). That repo is private — confirm you can actually read it (local clone or user-provided access) before relying on it, and if you can't, report a blocker rather than inventing framework APIs. Read the branch that matches the chosen framework version (not `master`, which is 4.0.0-SNAPSHOT). Tag the result single-source/unverified. Full procedure and module map: `references/framework-repo-fallback.md`.
 3. Check the toolchain. *(Batch C)*
 4. Print the pre-flight table and confirm before proceeding. *(Batch D)*
 
@@ -130,11 +131,11 @@ Follow `references/workflow-and-state.md` INTAKE in full:
 3. After the service layer compiles, run every applicable item from `references/gap-checklist.md` (BLOCKING + HIGH + the detected backend type's category-specific section). Auto-fix what's unambiguous; regenerate-and-recompile for anything requiring a judgment call; loop up to 3 times; report the rest as named GAPs. **[CHECKPOINT]**
 4. Generate test **class files** per the density/structure convention for the detected backend type: REST gets one focused `{Service}ServiceTest` class, no Cucumber (`rest-external-direct.md` §0c — the only category with its own test-density write-up so far). Every other category follows a fuller per-layer suite — use that category's package-layout section as the class list until a dedicated test-density note exists for it (see `workflow-and-state.md`'s Tests subsection).
    - **Content depends on the INTAKE answer (Rule 11):** if the user asked for full test cases, write real `@Test` methods with real assertions and mocked behavior covering the happy path, validation errors, and backend/generic-exception paths; otherwise every file is an empty skeleton — no `@Test` methods, assertions, or mocked behavior.
-   - `mvn -s <repo-root>/settings.xml test -q` must pass either way (0 tests run is only fine in structure-only mode). **[CHECKPOINT]**
+   - `mvn test -q` must pass either way (0 tests run is only fine in structure-only mode). **[CHECKPOINT]**
 
 ### Step 4 — HANDOFF: full build & hand-off
 
-1. Run `mvn -s <repo-root>/settings.xml clean verify`.
+1. Run `mvn clean verify`.
 2. **Delete `*-oci-parent/target/`** — the parent module is a pure aggregator pom with no jar of its own, so its `target/` is just empty build noise, not a deliverable; never leave it in the handed-off tree. **Leave `*-oci-web/target/` alone** — that one holds the actual built jar and is expected (`workflow-and-state.md` HANDOFF for the full rationale).
 3. **Run HANDOFF-A0 before HANDOFF-A** (`workflow-and-state.md`): check the literal baseline block in `references/templates/config-map-baseline.properties` byte-for-byte against the packaged `application.properties` AND every config-map independently — this catches the recurring real failure (RankedMatch, GetGrievanceSummary) where the block was missing from *both*, which a packaged-vs-config-map diff alone can't see. Copy that physical file's content, don't retype it from memory.
 4. **Run HANDOFF-A — reconcile runtime properties into every config-map** (`workflow-and-state.md` HANDOFF-A): diff the packaged `application.properties` key list against each of the ten `config/config-map/application.<env>-<cluster>.properties` files.
@@ -147,7 +148,7 @@ Follow `references/workflow-and-state.md` INTAKE in full:
    - If it fails on a *generated-code* problem (wrong mapping, wrong config key, wrong endpoint, wrong header), fix it, recompile, restart, and retry the same stored request — up to **3 attempts total**, the same bound used by the gap-checklist and compile-gate loops.
    - If it still fails after 3 attempts, or the cause clearly isn't something a regenerate can fix (backend unreachable, no matching test data, credentials not provisioned), **stop retrying** and report it as a **BLOCKING** gap with the actual-vs-expected diff from every attempt — never report HANDOFF as successful while this is unresolved.
 6. Re-run the full gap checklist on the final tree. Print residual GAPs with a remediation path (who to ask — QL team for buffer questions, infra team for queue/deployment questions, the service owner for any plaintext credential value still needing encryption).
-7. If this service was determined to require Akeyless, confirm the scaffolding was generated live (not disabled/scaffolded-and-off) and list the actual secret path as an action item if it wasn't yet confirmed by the team; if it was determined NOT to require Akeyless, say so explicitly rather than leaving it unaddressed (Rule 6).
+7. If this service has any credential at all, confirm the Akeyless scaffolding was generated live (not disabled/scaffolded-and-off, and not merely asked about) and list the actual secret path as an action item since it's never known at migration time; if the service genuinely has no credential to manage, say so explicitly rather than leaving it unaddressed (Rule 6).
 8. **Always list the deferred exception handler as a future action item** (Rule 10) — e.g. *"No exception handler was generated; add one after `iib-ms-testing` identifies what's actually needed"* — and, if the ESQL had an ID-token-check node, that Kong is expected to enforce it upstream and nothing was generated for it (Rule 9).
 9. Print a suggested commit message.
 
@@ -162,7 +163,7 @@ State at the top:
 
 Then present files in this order: `.github/` workflows → parent pom → web pom → Dockerfile → config-map properties + Helm chart → controller/API interface → service → connector → buffer builders/XML converters/request mappers → buffer parsers/response mappers → Bindy/JAXB models → error/validator classes → constants.
 
-**Action items section** — every item needing human confirmation: credential values, MQ queue names, QL/reference-data team confirmations, JWT/token pre-validation ownership (Kong gateway vs. in-service — note it, don't generate it, Rule 9), framework version if inferred rather than user-specified, the exact Akeyless secret path if the service needed one but the path wasn't yet confirmed by the team (Rule 6), **and the deferred exception handler, every migration, every backend type (Rule 10)**.
+**Action items section** — every item needing human confirmation: credential values, MQ queue names, QL/reference-data team confirmations, JWT/token pre-validation ownership (Kong gateway vs. in-service — note it, don't generate it, Rule 9), framework version if inferred rather than user-specified, the exact Akeyless secret path for every credential this service has (always a placeholder at migration time — Rule 6), **and the deferred exception handler, every migration, every backend type (Rule 10)**.
 
 ---
 
@@ -181,14 +182,15 @@ First action on any re-invocation: look for `<target>/.iib2spring/state.json` pe
 - [ ] Dockerfile at repo root matches the exact template in `structural-conventions.md` §3 (base image, all 4 LABELs, non-root user, JVM flags — not just the maintainer label)
 - [ ] No `RestTemplate` anywhere, including test-harness bypass paths, including QL/CICS
 - [ ] No `StringBuilder`/manual string concat for QL buffer field content, request **or** response side — Camel Bindy throughout
-- [ ] Credentials encrypted via the CVS endpoint by default, every CVS phase, no plaintext — **and if this service was determined to need Akeyless, the live scaffolding (not a disabled placeholder) is actually present** (Rule 6)
+- [ ] Whenever this service has any credential, live Akeyless scaffolding is present (not a disabled placeholder, and not something the migration merely asked the user about) — `application-local.properties` still carries the CVS-encrypt-endpoint ciphertext, since Akeyless has no sidecar locally; every deployed config-map carries the credential through Akeyless alone, never also as ciphertext (Rule 6)
 - [ ] Framework/Java version was **explicitly asked at INTAKE and the user's actual answer was captured** (Rule 7) — not silently defaulted to 3.2.2/21 without asking, and never inferred from sibling repos. Checked both in the toolchain (`java -version`) and in the parent pom's `<java.version>` property
 - [ ] HANDOFF-C's smoke test ran using the request/expected-response collected at INTAKE, passed (noting which attempt) or was reported as a named BLOCKING gap after 3 attempts — never silently skipped or silently passed
 - [ ] `EieHeader` used only via confirmed real accessors; `framework-eieusercontext` included only if the target flow's category/service genuinely needs to populate the context from an ID token (checked, not assumed); no JWT/JWKS validation anywhere
 - [ ] No Kong/gateway token-validator connector, service, exception, or config-map block generated for an ESQL ID-token-check node, even though the ESQL genuinely has one — Kong handles it upstream (Rule 9)
 - [ ] No custom `Exception` subclass and no `exception` package anywhere — not even a `@RestControllerAdvice` fallback handler; every error path calls `ErrorUtil.errorResponse(...)` directly (Rule 10)
 - [ ] Every generated JUnit test class is an empty skeleton — no `@Test` methods, assertions, or mocks; `mvn test -q` passes with 0 tests run (Rule 11)
-- [ ] `application-local.properties`'s internal-CVS-backend connector URI(s) point at `qa`/`qa2`, never `dev`/`prod`; external-vendor connectors use that vendor's own non-prod endpoint instead (Rule 12)
+- [ ] Every internal-CVS-backend connector URI, in every environment file (not just the local profile), uses the plain `<env>eippbm-oci.cvshealth.com` host — never an `az`/`ri` suffix (Rule 12)
+- [ ] `application-local.properties`'s internal-CVS-backend connector URI(s) point at the `qa`/`qa2` tier, never `dev`/`prod`; external-vendor connectors use that vendor's own non-prod endpoint instead (Rule 12)
 
 ### 7.2 Gap checklist (`references/gap-checklist.md`)
 
@@ -205,8 +207,10 @@ Run every BLOCKING + HIGH item, plus MEDIUM once deployment artifacts exist, plu
 - Any `exception` package or custom `Exception` subclass **[M21]**
 - `swagger/model/xml` nesting instead of top-level `model/xml` **[M22]**
 - `application-local.properties` pointing at `dev`/`prod` instead of `qa` **[M23]**
+- Any internal-CVS-backend connector URI, in any environment file, carrying an `az`/`ri` suffix instead of plain `pbm-oci` **[M23b]**
 - A leftover `target/` folder under the parent module at HANDOFF **[M24]**
 - HANDOFF-C's smoke test left at `"pending"` instead of `"passed"`/`"failed_blocking"` **[M25]**
+- A `NEW:<name>` (frameworks-repo fallback) run that doesn't cite the module, branch, and commit it actually read, or that uses `framework-adapter` **[M26]**
 
 ### 7.3 Structural-conventions checklist (`references/structural-conventions.md` §12)
 

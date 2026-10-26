@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
+from app.agents import model_digest
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.artefact import STRUCTURED_EFFORT, produce_many
 from app.services.specification import SpecificationService
@@ -107,7 +108,7 @@ class MigrationSpecificationAgent(BaseAgent):
         # attached here rather than asked for. Re-typing 95 clarifications
         # through a model is where most of the length went, and a transcription
         # a model can only get wrong.
-        base = {'semantic_model': model,
+        base = {'semantic_model': self._fit(model),
                 'framework_standards': json.loads(framework['standards'] or '{}') if framework else {},
                 'metadata': metadata,
                 'ace_version': str(context.param('ace_version', '12')),
@@ -136,6 +137,25 @@ class MigrationSpecificationAgent(BaseAgent):
                                   {'analysis_id': analysis['id'],
                                    'validation_status': saved['status']}),),
             metrics=metrics, reasoning=provenance)
+
+    #: Serialised size above which the semantic model is sent as a digest. The
+    #: payload limit is 180,000 characters and every section request also carries
+    #: the framework standards, the section's schema and the correction on a retry.
+    MODEL_BUDGET = 120_000
+
+    def _fit(self, model):
+        """The semantic model as the request carries it, digested only if it must be.
+
+        A real service came to 403,881 characters -- 124,087 of them 221
+        ambiguities, which execute() attaches to the document verbatim, so the
+        model never needs them. A model that fits is returned untouched; see
+        ``app.agents.model_digest``.
+        """
+        for level in range(model_digest.LEVELS):
+            if len(json.dumps(model)) <= self.MODEL_BUDGET:
+                return model
+            model = model_digest.shrink({'semantic_model': model}, level)['semantic_model']
+        return model
 
     def _clarification(self, a):
         """Backfill a model-authored ambiguity to the shape this document requires.

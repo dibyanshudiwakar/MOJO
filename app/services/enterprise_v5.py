@@ -121,24 +121,60 @@ class ACEParser:
  #: "don't default MQ straight to QL_CICS" caution. The SOAP check reuses
  #: _classify_node's WS*-node domain disambiguation rather than re-deriving
  #: the same signal from raw ESQL text a second time.
+ #: Name signals, matched on flow/subflow paths and MQ queue names only -- the
+ #: skill's table says "in subflow/queue names". Shared utility libraries are
+ #: left out on purpose: a ``Recap*`` helper in a common ``_LIB`` is on every
+ #: service's classpath and says nothing about this service's backend.
+ _RXCLAIM_NAME=re.compile(r'rxclaim|getidcarddetail|(?<![a-z])sbo(?![a-z])',re.I)
+ _RECAP_NAME=re.compile(r'recap|tandem',re.I)
+ _ROUTING_SOURCES=('.msgflow','.subflow','.esql')
+ @staticmethod
+ def _own(source):
+  """Whether ``source`` belongs to the service itself, not a shared ``*_LIB`` library.
+
+  Those libraries (``ESL_PBM_CommonFlowUtility_LIB``, ``FlowUtility_LIB``) carry
+  SOAP, MQ and ``Recap*`` helpers for every service that links them, so a signal
+  found there describes the platform, not this service's backend.
+  """
+  return not any(seg.upper().endswith('_LIB') for seg in str(source).replace(chr(92),'/').split('/'))
  def _detect_backend_type(self,m):
-  soap=next((i for i in m['interfaces'] if i['protocol']=='SOAP'),None)
+  """The backend(s) this service talks to, in the skill's priority order.
+
+  ``type`` is the primary one (first in the table) and ``backends`` lists every
+  one that was found: a service can route to RxClaim and RECAP side by side, and
+  generating for only one of them produced a service for the wrong backend.
+
+  SOAP needs routing evidence (a SOAP envelope on a flow/ESQL node). A ``.wsdl``
+  or ``.xsd`` is a contract the canonical model ships, not evidence this service
+  calls a SOAP backend -- counting it classified an RxClaim/RECAP service as SOAP.
+  """
+  found=[]
+  soap=next((i for i in m['interfaces'] if i['protocol']=='SOAP' and str(i.get('source','')).lower().endswith(self._ROUTING_SOURCES)
+             and self._own(i.get('source',''))),None)
   if soap:
-   return {'type':'SOAP','signal':'SOAP envelope on node %s (%s)'%(soap['node'],soap['source'])}
-  queues=[n['properties'].get('queueName') for flow in m['flows']+m['subflows'] for n in flow['nodes']
+   found.append(('SOAP','SOAP envelope on node %s (%s)'%(soap['node'],soap['source'])))
+  own=[f for f in m['flows']+m['subflows'] if self._own(f['path'])]
+  queues=[n['properties'].get('queueName') for flow in own for n in flow['nodes']
           if 'mqoutput' in n['type'].lower() and n['properties'].get('queueName')]
+  names=[f['path'] for f in own]+queues
   ql=next((q for q in queues if 'QL' in q.upper()),None)
-  tran_code=any(re.search(r'\bTRAN(?:SACTION)?[_ ]?CODE\b|\bTRAN\b',e.get('source','') or '',re.I) for e in m['esql'])
+  tran_code=any(re.search(r'TRAN(?:SACTION)?[_ ]?CODE|TRAN',e.get('source','') or '',re.I) for e in m['esql'])
   if ql and tran_code:
-   return {'type':'QL_CICS','signal':'MQ output queue %s with a QL transaction code in ESQL'%ql}
-  rxclaim=next((q for q in queues if 'RXCLAIM' in q.upper() or 'SBO' in q.upper()),None)
+   found.append(('QL_CICS','MQ output queue %s with a QL transaction code in ESQL'%ql))
+  rxclaim=next((n for n in names if self._RXCLAIM_NAME.search(n)),None)
   if rxclaim:
-   return {'type':'RXCLAIM_SBO','signal':'MQ output queue referencing RxClaim/SBO: %s'%rxclaim}
-  if queues:
-   return {'type':'MQ_COBOL','signal':'MQ output queue %s, no QL/RxClaim signal'%queues[0]}
-  if any(i['protocol']=='HTTP' for i in m['interfaces']):
-   return {'type':'REST_EXTERNAL_DIRECT','signal':'HTTP interface(s), no QL/RxClaim/SOAP routing'}
-  return {'type':'UNDETERMINED','signal':'no recognised backend-type signal found'}
+   found.append(('RXCLAIM_SBO','RxClaim/SBO in a subflow or queue name: %s'%rxclaim))
+  recap=next((n for n in names if self._RECAP_NAME.search(n)),None)
+  if recap:
+   found.append(('RECAP','RECAP/Tandem in a subflow or queue name: %s'%recap))
+  if queues and not any(t in ('QL_CICS','RXCLAIM_SBO','RECAP') for t,_ in found):
+   found.append(('MQ_COBOL','MQ output queue %s, no QL/RxClaim/RECAP signal'%queues[0]))
+  if not found and any(i['protocol']=='HTTP' for i in m['interfaces']):
+   found.append(('REST_EXTERNAL_DIRECT','HTTP interface(s), no QL/RxClaim/SOAP routing'))
+  if not found:
+   return {'type':'UNDETERMINED','signal':'no recognised backend-type signal found','backends':[]}
+  return {'type':found[0][0],'signal':found[0][1],'backends':[t for t,_ in found],
+          'signals':{t:sig for t,sig in found}}
  def _attrs(self,element):return {k.split('}')[-1]:v for k,v in element.attrib.items()}
  def _flow(self,m,rel,text,ext):
   root=ET.fromstring(text);nodes=[];connections=[]

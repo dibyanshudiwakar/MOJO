@@ -192,19 +192,19 @@ IIB msgflow queue names (e.g. `ESL.PBM.MVS.REQUEST`) are often NOT the same as t
 
 ---
 
-### 11. IIB credentials stored in .properties — MS encrypts by default, generates live Akeyless when a service actually needs it
+### 11. IIB credentials stored in .properties — MS always wires live Akeyless now, regardless of phase; the CVS-encrypt-endpoint pattern survives only in `application-local.properties`
 
-IIB `*.properties` files commit credentials in plaintext. **Default: every migration uses the CVS-encrypt-endpoint pattern, regardless of phase** (`mandatory-migration-rules.md` Rule 6) — encrypt the plaintext value via the CVS endpoint and put the returned ciphertext directly into the config-map property value.
-
-**Revised 2026-10-07 — Akeyless is no longer deferred when a service genuinely requires it.** If the specific service is determined to need Akeyless (checked against its own real sibling repo or confirmed with the team — not assumed from phase alone), generate the live scaffolding:
+IIB `*.properties` files commit credentials in plaintext. **Revised 2026-10-23 (Rule 6 v3) — stop determining "does this service need Akeyless" per-service, and stop asking.** Every new migration with an actual credential to protect (client-id/secret/API-key/cert) generates live Akeyless scaffolding by default — regardless of whether the service is labeled Phase 1 or Phase 2. Phase 1's real repos predate Akeyless as infrastructure, which is why they don't have it — that's history, not a convention to carry forward.
 
 ```yaml
-# Confirmed real, LIVE pattern (GetGrievancesAppeal, Phase 2) — generate this when required,
-# don't defer it as a future action item:
+# Confirmed real, LIVE pattern (GetGrievancesAppeal) — generate this by default now,
+# whenever the service has a credential, never deferred or asked about:
 spring.config.import=optional:/os/spring-boot-<service>/creds/application-akeyless.properties
 ```
 
-Not every Phase 2 service needs this — `RET-Pharmacy-Checkinimzprescriptions` is a confirmed real Phase 2, REST-to-vendor service with **zero** Akeyless wiring anywhere, using a plain classpath SSL cert instead. Check per-service; don't default by phase.
+**Confirmed real mechanics (`DMRClaimStatus`, live-verified 2026-10-23):** once Akeyless is wired in, the credential disappears from every *deployed* config-map entirely — not even as ciphertext. It survives only in `application-local.properties` (as CVS-encrypt-endpoint ciphertext, same pattern as before — Akeyless has no sidecar locally), via the exact same `curl .../encrypt/logdata` → ciphertext flow Rule 6 already documents. The only genuinely unknown piece is the literal Akeyless secret path — placeholder that (`<AKEYLESS_SECRET_PATH_TBD_BY_TEAM>`), flag it as an action item, and move on; never pause the migration to ask for it.
+
+The one real exception is a service with **zero** credentials anywhere — confirmed real on several QL/CICS and RxClaim SBO services that call an internal CVS gateway with no client-id/secret at all. `RET-Pharmacy-Checkinimzprescriptions`'s real repo (no Akeyless, plain classpath SSL cert) predates this rule's "always" default and isn't a template to copy for a new migration that does have a vendor credential.
 
 Never write actual plaintext credential values into the MS config-map files, in either phase.
 
