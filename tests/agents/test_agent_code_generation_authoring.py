@@ -365,3 +365,21 @@ def test_a_project_with_no_build_file_anywhere_still_fails(repo, job, tmp_path):
 def test_a_build_file_buried_deep_does_not_count(repo, job, tmp_path):
     """Modules sit directly under the root; a pom three levels down is not one."""
     assert _structure(repo, job, tmp_path, ['a/b/c/pom.xml']) == 'FAIL'
+
+
+def test_paths_that_repeat_the_root_are_not_nested_a_second_time(repo, job, params, gateway, dispatch):
+    """The model sometimes writes the root into every path as well as naming it: the project must not end up
+    at <root>/<root>/, where the gate (run on <root>) finds no pom.xml."""
+    layout = {'root': ROOT,
+              'files': [{'path': ROOT + '/' + p, 'purpose': why,
+                         'skill_reference': 'references/structural-conventions.md'} for p, why in WANTED],
+              'omitted': []}
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'code-generation', params, provider=_provider(layout=layout))
+    root = Path(outcome['outputs']['source_code'])
+    assert (root / 'cvs-v1-validatebridgesupply-oci-parent/pom.xml').is_file()
+    assert (root / 'Dockerfile').is_file()
+    assert not (root / ROOT).exists()
+    manifest = json.loads((root / 'generated-manifest.json').read_text())
+    assert all(not m['path'].startswith(ROOT) for m in manifest)
