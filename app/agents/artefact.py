@@ -44,6 +44,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from app.agents import model_digest
 from app.agents.reasoning import MODEL_GATEWAY, NOT_CONSULTED, ReasoningGateway
 from app.services import learning, precedents
 from app.services.feedback import redact
@@ -416,6 +417,20 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         payload = {**payload, '_lessons': [g['guidance'] for g in guidance], '_lessons_note': learning.NOTE}
     cleared = scrub(payload)
     serialised = json.dumps(cleared, sort_keys=True, default=str)
+    # Over the limit and nothing but context to cut: digest the semantic model and
+    # the plan's tasks a level at a time, stopping at the first that fits. A
+    # payload that already fits is never touched.
+    digested = None
+    if len(serialised) > MAX_PAYLOAD_CHARS:
+        original = len(serialised)
+        for level in range(model_digest.LEVELS):
+            candidate = scrub(model_digest.shrink(payload, level))
+            text = json.dumps(candidate, sort_keys=True, default=str)
+            cleared, serialised, digested = candidate, text, level
+            if len(text) <= MAX_PAYLOAD_CHARS:
+                warn('Payload for "%s" was %d chars; digested to %d (level %d) to fit the %d limit'
+                     % (prompt_name, original, len(text), level, MAX_PAYLOAD_CHARS))
+                break
     if len(serialised) > MAX_PAYLOAD_CHARS:
         # Terminal by construction: the payload does not get smaller by asking
         # again. The caller's job is to split it -- that is what produce_many is.
@@ -449,6 +464,8 @@ def produce(context, prompt_name, payload, *, schema_name=None, skill=None,
         answer, provenance = gateway.reason(context, prompt_name, request, skill=skill, effort=effort)
         provenance.update({'schema': schema_name, 'attempts': attempt, 'precedents': len(learned),
                            'lessons_used': [g['id'] for g in guidance]})
+        if digested is not None:
+            provenance['payload_digest_level'] = digested
         if corrections:
             provenance['corrections'] = list(corrections)
         if lowered:
