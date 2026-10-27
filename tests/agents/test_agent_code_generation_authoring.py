@@ -383,3 +383,57 @@ def test_paths_that_repeat_the_root_are_not_nested_a_second_time(repo, job, para
     assert not (root / ROOT).exists()
     manifest = json.loads((root / 'generated-manifest.json').read_text())
     assert all(not m['path'].startswith(ROOT) for m in manifest)
+
+
+SERVICE = 'cvs-v1-validatebridgesupply-oci-web/src/main/java/com/cvshealth/eip/microservices/service/BridgeService.java'
+PROPS = 'config/config-map/application.dev-pbmaz.properties'
+
+
+def _gap_provider(revise_works=True):
+    """A model that writes the circuit-breaker properties and a web pom using ${springdoc.version} it never
+    defines, and writes the breaker branch only when asked to revise the service class."""
+    def answer(payload):
+        if 'purpose' in payload:
+            path = payload['path']
+            if payload.get('current_content') is not None:
+                body = payload['current_content']
+                return {'path': path, 'content': body + ('// isCircuitBreakerError() -> 408\n' if revise_works else '')}
+            if path == PROPS:
+                return {'path': path, 'content': 'application.circuitbreaker.failure-rate=50\n'}
+            if path.endswith('-web/pom.xml'):
+                return {'path': path, 'content': '<project><dependencies><dependency><artifactId>springdoc'
+                        '</artifactId><version>${springdoc.version}</version></dependency></dependencies></project>\n'}
+            if path.endswith('-parent/pom.xml'):
+                return {'path': path, 'content': '<project><packaging>pom</packaging><properties>'
+                        '<java.version>21</java.version></properties></project>\n'}
+            return {'path': path, 'content': _content(path)}
+        return {'root': ROOT, 'omitted': [], 'files': [
+            {'path': p, 'purpose': why, 'skill_reference': 'references/structural-conventions.md'}
+            for p, why in WANTED + [(SERVICE, 'service'), (PROPS.replace('config/', 'config/'), 'props')]
+            if p != PROPS or True]}
+    return ArtefactProvider(answer)
+
+
+def _generate(job, params, gateway, dispatch, provider):
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    return dispatch(job['id'], 'code-generation', params, provider=provider)
+
+
+def test_a_property_the_pom_uses_but_never_defines_is_added_to_the_parent(repo, job, params, gateway, dispatch):
+    outcome = _generate(job, params, gateway, dispatch, _gap_provider())
+    root = Path(outcome['outputs']['source_code'])
+    parent = (root / 'cvs-v1-validatebridgesupply-oci-parent/pom.xml').read_text()
+    assert '<springdoc.version>' in parent
+
+
+def test_missing_circuit_breaker_branch_is_authored_during_generation(repo, job, params, gateway, dispatch):
+    outcome = _generate(job, params, gateway, dispatch, _gap_provider())
+    root = Path(outcome['outputs']['source_code'])
+    assert 'isCircuitBreakerError' in (root / SERVICE).read_text()
+
+
+def test_a_service_that_still_lacks_the_branch_does_not_fail_generation(repo, job, params, gateway, dispatch):
+    outcome = _generate(job, params, gateway, dispatch, _gap_provider(revise_works=False))
+    root = Path(outcome['outputs']['source_code'])
+    assert 'isCircuitBreakerError' not in (root / SERVICE).read_text()
