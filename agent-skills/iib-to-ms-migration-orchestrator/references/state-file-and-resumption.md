@@ -3,6 +3,15 @@
 # Migration Workflow — Stages, State File, Compile-Gate Loop, Resumption
 
 This is the operating procedure for the migration, adapted from a more mature sibling agent's stage-based, checkpoint-driven workflow. Follow this instead of a flat "generate everything then check" approach — it catches errors early (compile after every layer, not at the end) and survives interruption (state file).
+| `RECAP`/`Tandem` in subflow/queue names | **RECAP** | `framework-connector-recap` | not yet covered — flag as gap, ask before proceeding |
+| `Stratus` in subflow/queue names | **STRATUS** | `framework-connector-stratus` | not yet covered — flag as gap, ask before proceeding |
+| `DB2`/`JDBC` node | **DB2** | flag as GAP — no direct DB in MS, but check for `framework-connector-db` (routes SQL through REST — legitimate, confirmed in `fepclaimdetail`) | see `ibm-mq-cobol-copybook.md` §MQCOBOL-1 note |
+| IBM MQ with **no** QL TRAN pattern and **no** COBOL copybook fields | **MQ** (plain) | Camel JMS or Spring Integration — rare; confirm it isn't actually MQ_COBOL first | — |
+
+Don't default "MQ is involved" straight to QL_CICS — check for the actual QL TRAN code signal, and don't default it to MQ_COBOL either without checking for raw COBOL copybook field references with no DFDL/Bindy message set.
+
+---
+
 ## State File
 
 Every migration in progress is tracked at `<target>/<project-name>/.iib2spring/state.json`:
@@ -43,12 +52,3 @@ Every migration in progress is tracked at `<target>/<project-name>/.iib2spring/s
     "compile_passed": {},
     "gap_check_passed": false,
     "iterations": 0,
-    "last_checkpoint": "INTAKE-A"
-  }]
-}
-```
-
-**Resumption protocol** — first action on every re-invocation of a migration already in progress:
-1. Look for `<target>/.iib2spring/state.json`
-2. If found and any flow is `in_progress` or `pending` → announce "Resuming flow X at checkpoint Y" → jump there, don't restart from INTAKE
-3. If not found → start at INTAKE Batch A

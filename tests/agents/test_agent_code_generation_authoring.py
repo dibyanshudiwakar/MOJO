@@ -27,6 +27,7 @@ import pytest
 
 from app.agents.artefact import ArtefactUnavailable
 from app.agents.code_generation import CodeGenerationAgent
+from app.services.migration_lifecycle_v6 import _long
 from tests.agents.conftest import ArtefactProvider
 
 LAYOUT = CodeGenerationAgent.LAYOUT_PROMPT
@@ -437,3 +438,31 @@ def test_a_service_that_still_lacks_the_branch_does_not_fail_generation(repo, jo
     outcome = _generate(job, params, gateway, dispatch, _gap_provider(revise_works=False))
     root = Path(outcome['outputs']['source_code'])
     assert 'isCircuitBreakerError' not in (root / SERVICE).read_text()
+
+
+def test_a_class_the_project_imports_and_never_wrote_is_written(repo, job, params, gateway, dispatch):
+    """The model imported its own request model and the layout left it out: the build could not compile."""
+    model_pkg = 'cvs-v1-validatebridgesupply-oci-web/src/main/java/com/cvshealth/eip/microservices/swagger/model/request/'
+    layout = {'root': ROOT, 'omitted': [], 'files': [
+        {'path': p, 'purpose': why, 'skill_reference': 'references/structural-conventions.md'}
+        for p, why in WANTED + [(model_pkg + 'BeneficiaryKeyRequest.java', 'existing model')]]}
+    controller = WANTED[3][0]
+
+    def content(path):
+        if path.endswith('BeneficiaryKeyRequest.java'):
+            return 'package com.cvshealth.eip.microservices.swagger.model.request;\npublic class BeneficiaryKeyRequest {}\n'
+        if path == controller:
+            return ('package com.cvshealth.eip.microservices.controller;\n'
+                    'import com.cvshealth.eip.microservices.swagger.model.request.BridgeRequest;\n'
+                    'public class ValidateBridgeSupplyController {}\n')
+        return _content(path)
+
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    outcome = dispatch(job['id'], 'code-generation', params,
+                       provider=_provider(layout=layout, content=content))
+    root = Path(outcome['outputs']['source_code'])
+    written = root / model_pkg / 'BridgeRequest.java'
+    # The path is past Windows' 260-character limit, so it is read through the same prefix the writer uses.
+    assert _long(written).is_file(), 'the imported class is written in the package the project declares'
+    assert _long(written).read_text().startswith('package ')

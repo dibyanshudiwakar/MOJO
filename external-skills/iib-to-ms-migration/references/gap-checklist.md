@@ -184,6 +184,13 @@ This checklist absorbs both the original 21-item list from the sibling migration
 - **[MQ2]** No Bindy anywhere: grep `model/`/`util/` for `@FixedLengthRecord`/`BindyFixedLengthDataFormat` → must **not** appear. This backend type is manual EBCDIC offset writes, not annotated records.
 - **[MQ3]** Byte offsets verified against the actual COBOL copybook, not guessed — check the request/response buffer builder's section-length comments against the `.cbl`/`.cpy` source directly.
 
+- **[M27]** **[Rule 14]** **`settings.xml` is at the repo root, byte-identical to `references/templates/maven-settings.xml`.** Mechanical check:
+  ```bash
+  [ -f settings.xml ] || echo "GAP: settings.xml missing at the repo root"
+  cmp -s settings.xml "<skill-dir>/references/templates/maven-settings.xml" || echo "GAP: settings.xml differs from the template"
+  ```
+  Any hit is a GAP — copy the template to the repo root. Every Maven command for the repository must also pass `-s <repo-root>/settings.xml` (`mandatory-migration-rules.md` Rule 14); the internal artifacts resolve nowhere else.
+
 ---
 
 ## Applying this checklist

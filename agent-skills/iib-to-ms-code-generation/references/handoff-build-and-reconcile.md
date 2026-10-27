@@ -1,5 +1,14 @@
 <!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- references/workflow-and-state.md lines 181–240, 259–266. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
 
+
+Either way, state which mode was used at the top of the HANDOFF output, and if structure-only was chosen, note in the action-items section that real test-case content is deferred — don't leave the files silently empty without saying why.
+
+`mvn -s <repo-root>/settings.xml test -q`. Fix genuine compile/syntax failures before the checkpoint; if full tests were generated, also fix any failing assertion before the checkpoint — never present a checkpoint with a real test failing.
+
+**[CHECKPOINT]** "Tests: {N} files created ({mode}), {M} passing / 0 failing. Approve?"
+
+---
+
 ## HANDOFF — full build, config reconcile, gap re-check, hand-off
 
 `mvn -s <repo-root>/settings.xml clean verify` (Rule 14: `settings.xml` is at the repo root and every build passes it).
@@ -51,20 +60,11 @@ Run this **after HANDOFF-A0 is clean**. A deployed pod loads its config *only* f
 
 ```bash
 keys() { grep -oE '^[a-zA-Z][a-zA-Z0-9._-]*=' "$1" | sed 's/=$//' | sort -u; }
-keys <web-module>/src/main/resources/application.properties > /tmp/runtime.keys
-for f in config/config-map/application.*.properties; do
-  echo "== $f"; keys "$f" > /tmp/cm.keys; comm -23 /tmp/runtime.keys /tmp/cm.keys
-done
-```
+5. **If it passes:** record `smoke_test.status = "passed"`, note which attempt number succeeded, stop the service, move to HANDOFF-B.
+6. **If it fails:**
+   - Diagnose from the actual response and application logs. Is this a *generated-code* problem — wrong field mapping, wrong endpoint path, missing/wrong config key, wrong header, wrong error-handling branch? (As opposed to something no regeneration can fix — backend unreachable, no test data for that specific input, credentials not yet provisioned.)
+   - If it's a code problem: fix it, recompile, restart the service, retry the **same stored** request/expected-response pair. Append the attempt (what failed, what was changed) to `state.json`'s `smoke_test.attempts`.
+   - **Loop up to 3 attempts total** — the same bound used everywhere else in this skill (compile-gate loop, gap-checklist loop). Don't retry indefinitely.
+   - If it still fails after 3 attempts, or the failure is clearly not something a regenerate can fix: **stop retrying**, set `smoke_test.status = "failed_blocking"`, and report it as a **BLOCKING** gap in HANDOFF-B with the actual-vs-expected diff from every attempt and a remediation path. Never report HANDOFF as successful while this is unresolved — surface it plainly, don't bury it.
 
-Every key printed must be either copied into that config-map or deliberately classified as local-only. `management.endpoints.web.exposure.include` **must** be copied (otherwise `info`/`metrics` return 404 in every environment — live-proven); `spring.profiles.active=local` must **never** be copied. Full key-by-key classification table and the live-test evidence: `gap-checklist.md` **[M15]**.
-
-Re-run the loop after fixing until it prints nothing but consciously-excluded keys. Don't spot-check only `dev` — the whole point is per-file drift.
-### HANDOFF-B — On success
-
-- Re-run every applicable gap-checklist item on the final tree
-- Print any residual open items as named GAPs with a remediation path (who to ask, what's missing)
-- Print a suggested commit message
-- **STOP** — never `git add`/`git commit`/`git push` without being explicitly asked
-
-Final summary: backend type, flows converted, files written, iterations taken, open-GAP count.
+**[CHECKPOINT]** "Smoke test: {passed on attempt N / failed after 3 attempts — see GAP}. Continuing to final gap re-check."

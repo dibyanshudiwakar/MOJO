@@ -126,6 +126,11 @@ This checklist absorbs both the original 21-item list from the sibling migration
   grep -n "\.uri=https://dev\|\.uri=https://prod" <web-module>/src/main/resources/application-local.properties
   ```
   Any hit is a GAP — swap the hostname prefix to `qa` (or `qa2`, matching whichever QA tier the service's own real sibling or IIB non-prod properties file uses). Does not apply to an external-vendor connector URI (MedForce/Precisely/Anthem/IngenioRx/etc.) — those have no CVS `qa` hostname and should instead match the vendor's own non-prod/staging endpoint from the IIB source.
+- **[M23b]** **[Rule 12, host-family correction 2026-10-23]** **No internal-CVS-backend connector URI, in ANY environment file (including every config-map, not just `application-local.properties`), ever carries an `az`/`ri` suffix — always plain `pbm-oci`.** Mechanical check, run across every environment file at once:
+  ```bash
+  grep -rn "\.uri=https://[a-z0-9]*eippbm\(az\|ri\)-oci" <web-module>/src/main/resources/ <service-repo-root>/config/config-map/
+  ```
+  Any hit is a GAP for a new migration — strip the `az`/`ri` segment so the host reads `<env>eippbm-oci.cvshealth.com`. Applies to `ql`, `rxclaim`, `qlhc`, `ecshc`, and `refdata` alike — they're one shared host family, differentiated by path, not by host. Does not apply to the config-map **filename's** `<cluster>` suffix (`application.prod-pbmaz.properties` is still named that way — see `structural-conventions.md` §5) or to external-vendor connector hosts.
 - **[M24]** **No `target/` folder left under the parent module after HANDOFF.** Mechanical check:
   ```bash
   [ -d <service>-oci-parent/target ] && echo "GAP: parent target/ not cleaned up"
@@ -137,7 +142,13 @@ This checklist absorbs both the original 21-item list from the sibling migration
   jq '.smoke_test.status' <target>/.iib2spring/state.json   # must be "passed" or "failed_blocking", never "pending" at HANDOFF-B
   ```
   `"pending"` at the point HANDOFF-B runs is a GAP — it means HANDOFF-C was skipped rather than run. `"failed_blocking"` is not itself a GAP to fix mechanically (it's already a reported BLOCKING item with its own remediation path from HANDOFF-C) — this check only catches the skip, not the failure itself.
-- **[M13]** **Akeyless scaffolding is either genuinely required and live, or genuinely absent — never a half-done middle state.** Revised 2026-10-07 (Rule 6 reversal): first confirm whether this service was actually determined to require Akeyless (checked against a real sibling repo or explicit user/team confirmation — never assumed from phase/backend type alone). If **not** required: no `AKEYLESS_*` values keys, no `akeyless/*` `Deployment.yaml` annotations, no `spring.config.import=...application-akeyless.properties...` — same as before. If **required**: the scaffolding must actually be live (`AKEYLESS_ENABLED: true`, annotations populated, `spring.config.import` present) using Form 1 (creds-only) or Form 2 (creds+certs) from `mandatory-migration-rules.md` Rule 6 — never the half-done `GetGrievanceByCriterias` shape (keys present, `AKEYLESS_ENABLED: false`, empty annotations block). Mechanical check:
+- **[M26]** **A `NEW:<name>` backend (frameworks-repo fallback) is labelled and traceable.** If `state.json`'s `backend_type` starts with `NEW:`, the HANDOFF action items must name the framework module used, the branch and commit read, and state the result is single-source/unverified. Mechanical check:
+  ```bash
+  jq -r '.backend_type' <target>/.iib2spring/state.json | grep -q '^NEW:' && \
+    git -C <frameworks-repo> rev-parse origin/<branch>   # the commit to cite; empty/failed = the repo was never actually read
+  ```
+  A `NEW:` run with no cited module/branch/commit is a GAP — it means the fallback was invoked in name only. Also a GAP: `framework-adapter` used as the backend module (`references/framework-repo-fallback.md` §4).
+- **[M13]** **Every new migration with a real credential gets live Akeyless by default — never a half-done middle state, and never skipped by asking "is it needed."** Revised 2026-10-23 (Rule 6 v3 — supersedes the 2026-10-07 per-service-determination version): the only check left is whether this service has an actual credential to protect at all (client-id/secret/API-key/cert — confirmed from the IIB source or a real sibling repo, never by asking the user). If it genuinely has **none**: no `AKEYLESS_*` values keys, no `akeyless/*` `Deployment.yaml` annotations, no `spring.config.import=...application-akeyless.properties...` — there's nothing to wire. If it has **any** credential: the scaffolding must be live (`AKEYLESS_ENABLED: true`, annotations populated, `spring.config.import` present) using Form 1 (creds-only) or Form 2 (creds+certs) from `mandatory-migration-rules.md` Rule 6 — never the half-done `GetGrievanceByCriterias` shape (keys present, `AKEYLESS_ENABLED: false`, empty annotations block), and never deferred as a "confirm with the team first" question. Only the literal secret path value is a placeholder (Rule 6) — everything else is generated immediately. Mechanical check:
   ```bash
   grep -q "AKEYLESS_ENABLED" config/deploy-config/values.*.yaml && \
     grep -L "AKEYLESS_ENABLED: true" config/deploy-config/values.*.yaml
@@ -173,7 +184,7 @@ This checklist absorbs both the original 21-item list from the sibling migration
 - **[MQ2]** No Bindy anywhere: grep `model/`/`util/` for `@FixedLengthRecord`/`BindyFixedLengthDataFormat` → must **not** appear. This backend type is manual EBCDIC offset writes, not annotated records.
 - **[MQ3]** Byte offsets verified against the actual COBOL copybook, not guessed — check the request/response buffer builder's section-length comments against the `.cbl`/`.cpy` source directly.
 
-- **[M26]** **[Rule 14]** **`settings.xml` is at the repo root, byte-identical to `references/templates/maven-settings.xml`.** Mechanical check:
+- **[M27]** **[Rule 14]** **`settings.xml` is at the repo root, byte-identical to `references/templates/maven-settings.xml`.** Mechanical check:
   ```bash
   [ -f settings.xml ] || echo "GAP: settings.xml missing at the repo root"
   cmp -s settings.xml "<skill-dir>/references/templates/maven-settings.xml" || echo "GAP: settings.xml differs from the template"

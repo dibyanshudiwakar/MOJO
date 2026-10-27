@@ -245,7 +245,8 @@ Java DTO: `ErrorStatus(String httpCode, String httpMessage, String moreInformati
 # RxClaim SBO connector (from IIB RXCLAIM queue config)
 application.http.enabled=true
 application.http.restclient.rxclaim.name=rxclaim
-application.http.restclient.rxclaim.uri=https://<env>eippbmaz-oci.cvshealth.com/rxclaim/request/v1
+application.http.restclient.rxclaim.uri=https://<env>eippbm-oci.cvshealth.com/rxclaim/request/v1
+# ^ plain "pbm-oci" host, never "pbmaz"/"pbmri" — standing instruction, 2026-10-23 (see Rule 12)
 application.http.restclient.rxclaim.connect-timeout=10000
 application.http.restclient.rxclaim.request-timeout=<IIB timeoutForClient * 1000>
 application.http.restclient.rxclaim.socket-timeout=<IIB timeoutForClient * 1000>

@@ -19,7 +19,7 @@ from app.services import skill_gate
 from app.services.skill_gate import Project, keys
 
 #: Check names (as ``skill_gate.run`` reports them) this module can repair.
-REPAIRABLE = ('SKILL_A0', 'SKILL_A', 'SKILL_M5_M16', 'SKILL_M23', 'SKILL_M24', 'SKILL_M1_M2', 'SKILL_M26')
+REPAIRABLE = ('SKILL_A0', 'SKILL_A', 'SKILL_M5_M16', 'SKILL_M23', 'SKILL_M24', 'SKILL_M1_M2', 'SKILL_M27')
 
 _TIERS = ('dev', 'qa', 'stress', 'uat', 'prod')
 
@@ -141,10 +141,10 @@ def fix_parent_target(p):
 
 
 def fix_settings_xml(p):
-    """[M26] Write the skill's ``settings.xml`` at the repo root."""
+    """[M27] Write the skill's ``settings.xml`` at the repo root."""
     from app.services import maven_settings
     path = maven_settings.write(p.root)
-    return ([{'path': str(path), 'check': 'SKILL_M26', 'action': 'wrote settings.xml from the skill template'}]
+    return ([{'path': str(path), 'check': 'SKILL_M27', 'action': 'wrote settings.xml from the skill template'}]
             if path else [])
 
 
@@ -170,7 +170,7 @@ def fix_bundled_config_maps(p):
 _STEPS = (('SKILL_M1_M2', fix_bundled_config_maps), ('SKILL_M5_M16', fix_mvc_key),
           ('SKILL_A0', fix_baseline), ('SKILL_A', fix_runtime_keys),
           ('SKILL_M23', fix_local_targets), ('SKILL_M24', fix_parent_target),
-          ('SKILL_M26', fix_settings_xml))
+          ('SKILL_M27', fix_settings_xml))
 
 
 def repair(root, open_checks):

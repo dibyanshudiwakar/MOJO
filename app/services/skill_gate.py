@@ -441,8 +441,8 @@ def m24_no_parent_target(p):
     return ['%s exists' % p.rel(d / 'target') for d in p.parent_modules if (d / 'target').exists()]
 
 
-def m26_settings_xml(p):
-    """[M26][Rule 14] ``settings.xml`` at the repo root, identical to the skill's template."""
+def m27_settings_xml(p):
+    """[M27][Rule 14] ``settings.xml`` at the repo root, identical to the skill's template."""
     from app.services import maven_settings
     path = p.root / maven_settings.NAME
     if not path.is_file():
@@ -499,7 +499,7 @@ CHECKS = [
      'Swap the hostname prefix to qa (or qa2).'),
     ('M24', MEDIUM, 'gap-checklist.md [M24]', None, m24_no_parent_target,
      'rm -rf <service>-oci-parent/target (not the web module\'s).'),
-    ('M26', MEDIUM, 'gap-checklist.md [M26]; Rule 14', None, m26_settings_xml,
+    ('M27', MEDIUM, 'gap-checklist.md [M27]; Rule 14', None, m27_settings_xml,
      'Copy references/templates/maven-settings.xml to the repo root as settings.xml.'),
 ]
 

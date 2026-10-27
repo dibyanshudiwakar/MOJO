@@ -32,7 +32,7 @@ from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, ArtefactUnavai
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
-from app.services import failure_reports, maven_settings, pom_properties
+from app.services import contract_reconcile, failure_reports, import_grounding, maven_settings, pom_properties
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -158,9 +158,19 @@ class CodeGenerationAgent(BaseAgent):
         actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
         files, pom_actions = pom_properties.complete(files)
         actions += pom_actions
+        files, import_actions = import_grounding.ground(files, import_grounding.m2_root())
+        actions += import_actions
+        files, class_actions = self._complete_missing_classes(context, files, tasks, model, standards, skill)
+        actions += class_actions
         files, breaker_actions = self._complete_circuit_breaker(
             context, files, tasks, model, standards, skill)
         actions += breaker_actions
+        # Last, so it sees the files as they will be written, including anything revised above.
+        files, contract_actions = contract_reconcile.reconcile(
+            context, files, import_grounding.m2_root(), produce_many, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
+            {'service_name': context.param('service_name'), 'package_name': context.param('package_name'),
+             'tasks': tasks, 'semantic_model': model, 'framework_standards': standards})
+        actions += contract_actions
         settings = maven_settings.template()
         if settings is not None:
             files.append((maven_settings.NAME, settings))
@@ -217,6 +227,41 @@ class CodeGenerationAgent(BaseAgent):
                            'isCircuitBreakerError() branch (skill gap M18); add it or remove the properties.']
         return ([(p, revised.get(p, c)) for p, c in files],
                 ['added the isCircuitBreakerError() branch to %s (skill gap M18)' % ', '.join(sorted(revised))])
+
+    def _complete_missing_classes(self, context, files, tasks, model, standards, skill):
+        """Write each project class the generated code imports and nothing defines.
+
+        The model imports its own request model and never writes it (the layout left it out), so the build
+        fails on "cannot find symbol" for a file that is otherwise complete. Only classes in a package the
+        project already declares are written; an import of any other package is left for the gate to report,
+        because writing it would invent a framework class. The importing file is shown to the model, so the
+        new class carries the members it is used for. A failed authoring is reported, not raised.
+        """
+        needed = import_grounding.missing(files, import_grounding.m2_root())
+        if not needed:
+            return files, []
+        by_path = dict(files)
+        requests, seen = [], set()
+        for consumer, fqn in needed:
+            if fqn in seen:
+                continue
+            seen.add(fqn)
+            module = consumer.replace(chr(92), '/').split('/src/main/java/')[0]
+            target = module + '/src/main/java/' + fqn.replace('.', '/') + '.java'
+            requests.append((target, {'path': target,
+                                      'purpose': 'A class the generated code imports and nothing defines: ' + fqn,
+                                      'consumer_source': by_path.get(consumer, ''),
+                                      'consumer_path': consumer,
+                                      'service_name': context.param('service_name'),
+                                      'package_name': context.param('package_name'),
+                                      'tasks': tasks, 'semantic_model': model, 'framework_standards': standards}))
+        try:
+            authored, _prov = produce_many(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
+        except ArtefactUnavailable as exc:
+            return files, ['could not write %d class(es) the project imports (%s); the build will fail on them.'
+                           % (len(requests), exc)]
+        added = [(path, answer['content']) for path, answer in authored.items() if answer.get('content')]
+        return files + added, ['wrote %s, which the project imports and did not define' % path for path, _ in added]
 
     def _revise(self, context, targets, tasks, model, standards, skill):
         return produce_many(

@@ -21,6 +21,14 @@ Persist #4 and #5 in `state.json` (`smoke_test.request`/`smoke_test.expected_res
 ### Batch B — Auto-detect backend type
 Read all `.msgflow` and `.esql` files fully, then apply the Backend Type Detection table (see below). Record the result. If ambiguous, ask rather than guess.
 
+**Fallback for an unrecognized backend (standing instruction from the user, 2026-10-13).** The 5 backend types this skill is trained on are: **SOAP, QL/CICS + Camel Bindy, RxClaim SBO (XML/JAXB), IBM MQ + COBOL Copybook, REST**. If detection finds a backend that matches none of these, **or** matches one but no trained reference repo exists for it in the workspace, do not guess a pattern from the closest-looking type. Instead take the reference from the org's frameworks repo, `https://github.com/cvs-legacy-source-code/EIPMS_cvs-technical-edb-cs-frameworks`, and migrate against the connector/framework module it provides for that backend.
+
+- **Full procedure, module map, and version-branch rules: `references/framework-repo-fallback.md`** — read it before using the fallback. Key points: the repo is private (check for a local clone, ask the user if none, stop with a blocker if unreadable — never invent framework APIs); read the branch matching the chosen framework version (`origin/3.2.x`, **not** `master`, which is 4.0.0-SNAPSHOT with a breaking-change commit) via `git show`/`git grep` without checking out; and `framework-adapter` is **not** a migration target (it fronts a still-running IIB).
+- Read the matching framework module's source for the real classes, annotations, and property keys, and cite the module, branch, and commit in the action-items list.
+- Tag everything generated this way as **single-source / unverified** (evidence-hierarchy tier 3), same as `soap-backend.md` and `ibm-mq-cobol-copybook.md` are tagged, and say so in the HANDOFF output.
+- Record in `state.json` under `backend_type` as `NEW:<short-name>` so a resume knows this run used the fallback.
+- All mandatory rules and HANDOFF-C's smoke test still apply unchanged.
+
 ### Batch C — Toolchain check
 ```bash
 java -version 2>&1 | head -1   # must contain "21"
@@ -30,11 +38,3 @@ mvn -v 2>&1 | head -1          # must contain "3.8" or higher
 ### Batch D — Pre-flight table
 Print before proceeding:
 ```
-[✓/✗] IIB source readable, N flows found
-[✓/✗] Backend type detected: {SOAP|QL_CICS|RXCLAIM_SBO|MQ_COBOL|REST}
-[✓/✗] All flows have msgflow + esql
-[✓/✗] Target dir writable
-[✓/✗] JDK 21, Maven 3.8+
-[✓/✗] Reference OCI repo found (pom cross-check)
-```
-Confirm with the user before proceeding: "Proceed with {N} flow(s) as {backend type} service?"

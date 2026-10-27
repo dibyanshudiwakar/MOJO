@@ -276,6 +276,8 @@ Each one carries the same key set (circuit breaker, `application.http.restclient
 > Do not treat the `management.endpoints.web.exposure.include` clause above as optional boilerplate — **[live-tested 2026-09-29]** a config-map missing it served `health`→200 but `info`→404 and `metrics`→404, because Spring Boot's default web exposure is `health` alone; adding just that key restored 200/200/200. Use `health,info,metrics` when the service's actuator is expected to serve metrics (what the generated README's Observability section claims), and pair it with `management.endpoints.web.base-path=${CONTEXT_ROOT:<default>}/actuator`.
 > This clause previously existed *only* as passive prose here, and was consequently skipped during generation on `cumulativeCopaySummaries` — the same way §1's repo-root wrapper convention was skipped on `ValidateBridgeSupply`. It is now backed by an active step (`workflow-and-state.md` HANDOFF-A) and a mechanical check (`gap-checklist.md` **[M15]**). Run those; don't rely on remembering this paragraph.
 
+> 🛑 **Host convention (standing instruction, 2026-10-23): every internal-CVS-backend connector below shares one host family, `<env>eippbm-oci.cvshealth.com` — plain `pbm-oci`, never `pbmaz`/`pbmri`, in every environment including `prod`.** The `az`/`ri` suffixes only ever belong in the config-map **filename's** `<cluster>` segment (`application.prod-pbmaz.properties` / `application.prod-pbmri.properties`, naming the two physical prod data centers / the Helm `CLUSTER:` value, §3) — never in the URI value inside the file. Real repos are inconsistent here (several phase-1/early-phase-2 services leaked `pbmaz` into the URI itself) — that's the pre-correction convention, not a pattern to match. See `mandatory-migration-rules.md` Rule 12 for the full rule, including the QA-only exception for `application-local.properties`.
+
 ```properties
 #QL CONNECTOR
 application.http.restclient.ql.name=ql
@@ -287,6 +289,37 @@ application.http.restclient.ql.max-total-connections=50
 application.http.restclient.ql.default-max-per-route=20
 application.http.restclient.ql.default-keep-alive-time-millis=20000
 application.http.restclient.ql.test-harness-host=http://esl-wiremock.corp.cvscaremark.com:9000/<full path>
+
+#RXCLAIM SBO CONNECTOR (only if this service talks to the RxClaim SBO gateway — see rxclaim-sbo-xml-jaxb.md)
+application.http.restclient.rxclaim.name=rxclaim
+application.http.restclient.rxclaim.uri=https://<env>eippbm-oci.cvshealth.com/rxclaim/request/v1
+application.http.restclient.rxclaim.connect-timeout=10000
+application.http.restclient.rxclaim.request-timeout=55000
+application.http.restclient.rxclaim.socket-timeout=55000
+application.http.restclient.rxclaim.max-total-connections=50
+application.http.restclient.rxclaim.default-max-per-route=25
+application.http.restclient.rxclaim.default-keep-alive-time-millis=20000
+application.http.restclient.rxclaim.test-harness-host=https://esl-wiremock.corp.cvscaremark.com:9080
+
+#QL-DB2 PROXY CONNECTOR (only if this service does a direct DB2 lookup the IIB side did via ODBC — see ql-cics-camel-bindy.md §6a)
+application.http.restclient.qlhc.name=qlhc
+application.http.restclient.qlhc.uri=https://<env>eippbm-oci.cvshealth.com/qldb/execute/query/v1
+application.http.restclient.qlhc.connect-timeout=10000
+application.http.restclient.qlhc.request-timeout=10000
+application.http.restclient.qlhc.socket-timeout=30000
+application.http.restclient.qlhc.max-total-connections=50
+application.http.restclient.qlhc.default-max-per-route=25
+application.http.restclient.qlhc.default-keep-alive-time-millis=20000
+
+#ECS-DB2 PROXY CONNECTOR (only if this service does a direct ECS DB2 lookup — same family as qlhc, different path)
+application.http.restclient.ecshc.name=ecshc
+application.http.restclient.ecshc.uri=https://<env>eippbm-oci.cvshealth.com/ecsdb/executeQuery
+application.http.restclient.ecshc.connect-timeout=10000
+application.http.restclient.ecshc.request-timeout=10000
+application.http.restclient.ecshc.socket-timeout=30000
+application.http.restclient.ecshc.max-total-connections=50
+application.http.restclient.ecshc.default-max-per-route=25
+application.http.restclient.ecshc.default-keep-alive-time-millis=20000
 
 #REFDATA CONNECTOR (only if this service does a reference-data lookup — see §8)
 application.http.restclient.refdata.name=refdata
@@ -608,7 +641,7 @@ If a different service's IIB source resolves `applicationName` similarly (from `
 
 ⚠️ **The values-key schema is flat and SCREAMING_SNAKE_CASE, not camelCase/nested.** A chart built with `appName`/`replicaCount`/`image.repository`/`resources.limits.cpu` (a plausible-looking, generic Helm convention) does **not** match this org's real templates, which reference `.Values.APP_NAME`/`.Values.PODS`/`.Values.CPU_LIMIT`/etc. directly. The two schemas are incompatible — deploying a chart built on the wrong one renders with missing/null values almost everywhere. Use the exact key names below. Confirmed identical across both backend types checked so far: `Chart.yaml`'s content and the core values keys below.
 
-🔁 **Akeyless/SSL-cert-bundle scaffolding — generate it live when this specific service requires it (revised 2026-10-07, Rule 6).** This supersedes the earlier never-generate version of this note. `rankedMatch`'s real repo has live, enabled Akeyless wiring (creds-only form) — when a service is determined to genuinely need it (checked against its own real sibling repo or confirmed with the team, never assumed from phase/backend type alone), generate the matching real form from `mandatory-migration-rules.md` Rule 6 (Form 1 creds-only, or Form 2 creds+certs if the vendor backend needs a private TLS cert) — fully live (`AKEYLESS_ENABLED: true`), never a disabled placeholder. If the service does **not** require it, omit the keys entirely rather than setting them `false`/empty. The examples below show the real repos' baseline shape without Akeyless keys included inline — add the matching Rule 6 form on top when required.
+🔁 **Akeyless/SSL-cert-bundle scaffolding — generate it live by default now, whenever the service has a real credential (revised 2026-10-23, Rule 6 v3).** This supersedes the 2026-10-07 per-service-"is it required"-determination note, which itself superseded the original never-generate version. `rankedMatch`'s real repo has live, enabled Akeyless wiring (creds-only form) — whenever a service has an actual client-id/secret/API-key/cert to protect, generate the matching real form from `mandatory-migration-rules.md` Rule 6 (Form 1 creds-only, or Form 2 creds+certs if the vendor backend needs a private TLS cert) — fully live (`AKEYLESS_ENABLED: true`), never a disabled placeholder, and never gated on asking the user. Only skip the keys entirely when the service genuinely has **no credential at all** (confirmed from the IIB source / a real sibling repo — not assumed from phase). Don't know the exact secret path yet? That's expected — placeholder it (Rule 6) rather than waiting. The examples below show the real repos' baseline shape without Akeyless keys included inline — add the matching Rule 6 form on top whenever a credential exists.
 
 ### Chart.yaml — confirmed identical across both real repos checked
 ```yaml
@@ -621,7 +654,7 @@ Minimal — no `description`, `type`, or `appVersion` fields, and `apiVersion: v
 ### Template filenames — capitalized is the confirmed dominant convention
 **Corrected 2026-09-30** (prior note said "50/50, not settled" based on only 2 data points): a direct survey of 12 real training repos across all 4 backend types confirmed **all 12 use capitalized `Deployment.yaml`/`Service.yaml`/`Route.yaml`/`Secret.yaml`**. `RankedMatch`'s real repo (a Testing repo, not a Training repo) uses lowercase `deployment.yaml`/`service.yaml` — it is the single confirmed exception. **Default to capitalized**; use lowercase only if a same-service sibling repo demonstrably uses it. Either casing is safe for Helm itself (template discovery is case-insensitive on Windows) — this is purely a convention point.
 
-### values.\<env\>.yaml — confirmed real key set (add Akeyless keys from Rule 6 on top, only when required — see above)
+### values.\<env\>.yaml — confirmed real key set (add Akeyless keys from Rule 6 on top, by default whenever a credential exists — see above)
 ```yaml
 ENV: dev                                    # short env tag, used in the image tag and the configmap-vol key
 REPO_NAME: cvs-v1-<service>-oci
@@ -667,8 +700,8 @@ CLUSTER: pbmaz                               # matches the config-map filename s
 ```
 The `PATH`/`SERVICE_TYPE`/`Protocol`/`Revision_History`/`ENV_VAR`/`type`/empty-rollout-placeholder keys were missing from an earlier version of this section (it was written from only the RankedMatch fix, then a values file reconstructed from memory for GetGrievanceSummary dropped them) — restored after directly diffing against both real repos again. Do not drop these keys again just because they look like inert boilerplate; they're part of the confirmed real schema.
 
-### deployment.yaml — confirmed real template shape (add the Akeyless annotations block from Rule 6 on top, only when required)
-Beyond the basics (image, ports, resources): `strategy: RollingUpdate` (`maxUnavailable: 25%`, `maxSurge: 0%`); two volumes — an empty `var-www-html-vol` and a `configmap-vol` that remaps `application.{{ .Values.ENV }}-{{ .Values.CLUSTER }}.properties` to `application.properties` via `items`; readiness/liveness probes built from `CONTEXT_ROOT` + `HEALTH_CHECK_PATH` (not a hardcoded `/actuator/health`) with full timeout/threshold tuning from the values above; an env var block that includes a `secretKeyRef` pull from the Secret (`ENV_VAR_FROM_SECRET_TEXT` ← `SECRET_TEXT`) — the Secret is actually consumed, not just declared; image built as `quay-registry.aetna.com/cvs-pss/{{ .Values.REPO_NAME }}:{{ .Values.ENV }}` (tag = env name, not a separate `image.tag` value); pod-level `restartPolicy`/`dnsPolicy`/`terminationGracePeriodSeconds`/`schedulerName` all set explicitly. If this service requires Akeyless (per Rule 6), add the pod-template `annotations:` block for `akeyless/enabled`/`akeyless/inject_file_creds`(`/inject_file_certs`) live — don't just recognize it in a sibling repo and skip generating it.
+### deployment.yaml — confirmed real template shape (add the Akeyless annotations block from Rule 6 on top, by default whenever this service has a credential)
+Beyond the basics (image, ports, resources): `strategy: RollingUpdate` (`maxUnavailable: 25%`, `maxSurge: 0%`); two volumes — an empty `var-www-html-vol` and a `configmap-vol` that remaps `application.{{ .Values.ENV }}-{{ .Values.CLUSTER }}.properties` to `application.properties` via `items`; readiness/liveness probes built from `CONTEXT_ROOT` + `HEALTH_CHECK_PATH` (not a hardcoded `/actuator/health`) with full timeout/threshold tuning from the values above; an env var block that includes a `secretKeyRef` pull from the Secret (`ENV_VAR_FROM_SECRET_TEXT` ← `SECRET_TEXT`) — the Secret is actually consumed, not just declared; image built as `quay-registry.aetna.com/cvs-pss/{{ .Values.REPO_NAME }}:{{ .Values.ENV }}` (tag = env name, not a separate `image.tag` value); pod-level `restartPolicy`/`dnsPolicy`/`terminationGracePeriodSeconds`/`schedulerName` all set explicitly. Whenever this service has any credential to protect (per Rule 6, now the default, not a per-service question), add the pod-template `annotations:` block for `akeyless/enabled`/`akeyless/inject_file_creds`(`/inject_file_certs`) live — don't just recognize it in a sibling repo and skip generating it, and don't wait on the real secret path to exist first (placeholder it).
 
 ### Route.yaml — two Routes, not one
 A primary Route (`host: {{ .Values.SITE_URL }}`, `path: {{ .Values.CONTEXT_ROOT }}`, an `haproxy.router.openshift.io/disable_cookies` annotation, `wildcardPolicy: None`) **and** a second `{{ .Values.APP_NAME }}-gtm` Route pointing at `{{ .Values.ROUTEAETNET_URL }}` (the internal/AETNET-network hostname) — both routing to the same Service. `apiVersion: v1`, not the more OpenShift-specific `route.openshift.io/v1`.

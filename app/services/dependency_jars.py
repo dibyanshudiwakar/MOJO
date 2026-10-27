@@ -173,3 +173,38 @@ def project_classes(pom_texts, m2_root, max_depth=3):
     for pom_text in pom_texts:
         visit(pom_text, pooled_props, None, 0)
     return merged
+
+
+def project_jars(pom_texts, m2_root, max_depth=3):
+    """Every jar the generated project's poms resolve to locally, transitively, as paths.
+
+    The same walk as ``project_classes``, for a caller that needs to know *which* jar holds a class
+    (to read its real method signatures) rather than only the names it contains.
+    """
+    pom_texts = list(pom_texts)
+    pooled_props = {}
+    for pom_text in pom_texts:
+        pooled_props.update(_properties(pom_text))
+    jars, seen = [], set()
+
+    def visit(pom_text, props, inherited_version, depth):
+        for dep in dependencies(pom_text, props=props):
+            version = dep['version'] or inherited_version
+            if not version:
+                continue
+            key = (dep['group_id'], dep['artifact_id'], version)
+            if key in seen:
+                continue
+            seen.add(key)
+            path = jar_path(m2_root, *key)
+            if path.is_file():
+                jars.append(path)
+            if depth >= max_depth:
+                continue
+            sub_pom = pom_path(m2_root, *key)
+            if sub_pom.is_file():
+                visit(sub_pom.read_text(errors='ignore'), {}, version, depth + 1)
+
+    for pom_text in pom_texts:
+        visit(pom_text, pooled_props, None, 0)
+    return jars

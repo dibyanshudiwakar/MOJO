@@ -1,5 +1,6 @@
 <!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- SKILL.md lines 135–165. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
 
+
 ### Step 4 — HANDOFF: full build & hand-off
 
 1. Run `mvn -s <repo-root>/settings.xml clean verify`.
@@ -15,7 +16,7 @@
    - If it fails on a *generated-code* problem (wrong mapping, wrong config key, wrong endpoint, wrong header), fix it, recompile, restart, and retry the same stored request — up to **3 attempts total**, the same bound used by the gap-checklist and compile-gate loops.
    - If it still fails after 3 attempts, or the cause clearly isn't something a regenerate can fix (backend unreachable, no matching test data, credentials not provisioned), **stop retrying** and report it as a **BLOCKING** gap with the actual-vs-expected diff from every attempt — never report HANDOFF as successful while this is unresolved.
 6. Re-run the full gap checklist on the final tree. Print residual GAPs with a remediation path (who to ask — QL team for buffer questions, infra team for queue/deployment questions, the service owner for any plaintext credential value still needing encryption).
-7. If this service was determined to require Akeyless, confirm the scaffolding was generated live (not disabled/scaffolded-and-off) and list the actual secret path as an action item if it wasn't yet confirmed by the team; if it was determined NOT to require Akeyless, say so explicitly rather than leaving it unaddressed (Rule 6).
+7. If this service has any credential at all, confirm the Akeyless scaffolding was generated live (not disabled/scaffolded-and-off, and not merely asked about) and list the actual secret path as an action item since it's never known at migration time; if the service genuinely has no credential to manage, say so explicitly rather than leaving it unaddressed (Rule 6).
 8. **Always list the deferred exception handler as a future action item** (Rule 10) — e.g. *"No exception handler was generated; add one after `iib-ms-testing` identifies what's actually needed"* — and, if the ESQL had an ID-token-check node, that Kong is expected to enforce it upstream and nothing was generated for it (Rule 9).
 9. Print a suggested commit message.
 
@@ -29,5 +30,3 @@ State at the top:
 - **Backend type:** determined in INTAKE
 
 Then present files in this order: `.github/` workflows → parent pom → web pom → Dockerfile → config-map properties + Helm chart → controller/API interface → service → connector → buffer builders/XML converters/request mappers → buffer parsers/response mappers → Bindy/JAXB models → error/validator classes → constants.
-
-**Action items section** — every item needing human confirmation: credential values, MQ queue names, QL/reference-data team confirmations, JWT/token pre-validation ownership (Kong gateway vs. in-service — note it, don't generate it, Rule 9), framework version if inferred rather than user-specified, the exact Akeyless secret path if the service needed one but the path wasn't yet confirmed by the team (Rule 6), **and the deferred exception handler, every migration, every backend type (Rule 10)**.
