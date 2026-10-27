@@ -99,6 +99,9 @@ PARAM_SOURCES = {
 # dependency graph (agent-to-agent only) has no way to express that.
 # code-generation also waits for the framework clone: when a framework repository was supplied the
 # quality gate builds it before the project, so it has to be on disk by then.
+#: Agents that take the framework baseline as input. They wait for it when it runs. Planning needs it too, but
+#: reaches it through migration-specification, which it already depends on.
+FRAMEWORK_READERS = ('migration-specification',)
 REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-baseline': 'FRAMEWORK',
                   'code-generation': 'FRAMEWORK'}
 
@@ -487,11 +490,19 @@ class PipelineService:
                 dest = workspace_dir.rstrip('/') + '/' + role.lower()
                 add('CLONE', 'CLONE:' + role, params={'repo_url': r['repo_url'], 'branch': r['branch'], 'dest': dest, 'role': role})
 
-        for agent_id in plan['runnable']:
+        # The framework baseline runs straight after the intake it follows, not after planning: it reads the
+        # framework clone, and the agents that read its baseline wait for it (FRAMEWORK_READERS).
+        order = list(plan['runnable'])
+        if 'framework-baseline' in order:
+            order.remove('framework-baseline')
+            order.insert(order.index('repository-intake') + 1 if 'repository-intake' in order else 0, 'framework-baseline')
+        for agent_id in order:
             deps = [step_id_by_key['AGENT:' + d] for d in catalogue[agent_id]['dependencies'] if 'AGENT:' + d in step_id_by_key]
             repo_role = REPO_CONSUMERS.get(agent_id)
             if repo_role and 'CLONE:' + repo_role in step_id_by_key:
                 deps.append(step_id_by_key['CLONE:' + repo_role])
+            if agent_id in FRAMEWORK_READERS and 'AGENT:framework-baseline' in step_id_by_key:
+                deps.append(step_id_by_key['AGENT:framework-baseline'])
             params = self._seed_params(agent_id, by_role, workspace_dir, service_name, package_name)
             add('AGENT', 'AGENT:' + agent_id, agent_id=agent_id, depends_on=deps, params=params)
 
