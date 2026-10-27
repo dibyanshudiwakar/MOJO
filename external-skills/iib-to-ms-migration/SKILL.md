@@ -131,11 +131,11 @@ Follow `references/workflow-and-state.md` INTAKE in full:
 3. After the service layer compiles, run every applicable item from `references/gap-checklist.md` (BLOCKING + HIGH + the detected backend type's category-specific section). Auto-fix what's unambiguous; regenerate-and-recompile for anything requiring a judgment call; loop up to 3 times; report the rest as named GAPs. **[CHECKPOINT]**
 4. Generate test **class files** per the density/structure convention for the detected backend type: REST gets one focused `{Service}ServiceTest` class, no Cucumber (`rest-external-direct.md` §0c — the only category with its own test-density write-up so far). Every other category follows a fuller per-layer suite — use that category's package-layout section as the class list until a dedicated test-density note exists for it (see `workflow-and-state.md`'s Tests subsection).
    - **Content depends on the INTAKE answer (Rule 11):** if the user asked for full test cases, write real `@Test` methods with real assertions and mocked behavior covering the happy path, validation errors, and backend/generic-exception paths; otherwise every file is an empty skeleton — no `@Test` methods, assertions, or mocked behavior.
-   - `mvn test -q` must pass either way (0 tests run is only fine in structure-only mode). **[CHECKPOINT]**
+   - `mvn -s <repo-root>/settings.xml test -q` must pass either way (0 tests run is only fine in structure-only mode). **[CHECKPOINT]**
 
 ### Step 4 — HANDOFF: full build & hand-off
 
-1. Run `mvn clean verify`.
+1. Run `mvn -s <repo-root>/settings.xml clean verify`.
 2. **Delete `*-oci-parent/target/`** — the parent module is a pure aggregator pom with no jar of its own, so its `target/` is just empty build noise, not a deliverable; never leave it in the handed-off tree. **Leave `*-oci-web/target/` alone** — that one holds the actual built jar and is expected (`workflow-and-state.md` HANDOFF for the full rationale).
 3. **Run HANDOFF-A0 before HANDOFF-A** (`workflow-and-state.md`): check the literal baseline block in `references/templates/config-map-baseline.properties` byte-for-byte against the packaged `application.properties` AND every config-map independently — this catches the recurring real failure (RankedMatch, GetGrievanceSummary) where the block was missing from *both*, which a packaged-vs-config-map diff alone can't see. Copy that physical file's content, don't retype it from memory.
 4. **Run HANDOFF-A — reconcile runtime properties into every config-map** (`workflow-and-state.md` HANDOFF-A): diff the packaged `application.properties` key list against each of the ten `config/config-map/application.<env>-<cluster>.properties` files.

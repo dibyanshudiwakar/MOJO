@@ -64,23 +64,23 @@ def _status(root):
 
 
 def test_a_project_with_the_settings_passes_the_check(project):
-    assert _status(project)['SKILL_M26'] == 'PASS'
+    assert _status(project)['SKILL_M27'] == 'PASS'
 
 
 def test_a_missing_settings_file_is_a_gap_and_is_repaired(project):
     (project / 'settings.xml').unlink()
-    assert _status(project)['SKILL_M26'] == 'GAP'
-    fixes = skill_repair.repair(project, ['SKILL_M26'])
-    assert fixes and fixes[0]['check'] == 'SKILL_M26'
-    assert _status(project)['SKILL_M26'] == 'PASS'
+    assert _status(project)['SKILL_M27'] == 'GAP'
+    fixes = skill_repair.repair(project, ['SKILL_M27'])
+    assert fixes and fixes[0]['check'] == 'SKILL_M27'
+    assert _status(project)['SKILL_M27'] == 'PASS'
     assert (project / 'settings.xml').read_text(encoding='utf-8') == maven_settings.template()
 
 
 def test_a_settings_file_that_differs_from_the_template_is_a_gap(project):
     (project / 'settings.xml').write_text('<settings/>', encoding='utf-8')
-    assert _status(project)['SKILL_M26'] == 'GAP'
-    skill_repair.repair(project, ['SKILL_M26'])
-    assert _status(project)['SKILL_M26'] == 'PASS'
+    assert _status(project)['SKILL_M27'] == 'GAP'
+    skill_repair.repair(project, ['SKILL_M27'])
+    assert _status(project)['SKILL_M27'] == 'PASS'
 
 
 # -- a supplied framework repository is built first ---------------------------------------------------------

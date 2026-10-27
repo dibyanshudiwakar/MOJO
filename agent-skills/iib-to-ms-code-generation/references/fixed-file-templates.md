@@ -476,7 +476,7 @@ Note this family's probes have **no `scheme: HTTP`, no success/failureThreshold*
 ### REST's own skeleton (all 3 REST training repos, structurally RICH-like but not identical to either QL/CICS family)
 Same `Deployment.yaml` shape as RICH above (`SPRING_CONFIG_LOCATION` mount pattern, same values keys), but:
 - `annotations:` under the pod template metadata is present-but-empty in 2 of 3 (`annotations:` immediately followed by `creationTimestamp: null` — a malformed/copy-paste artifact, not valid nested YAML, harmless to Helm but don't replicate the malformation)
-- `GetGrievancesAppeal` is the one exception with a **populated** annotations block — real, live Akeyless wiring (`akeyless/enabled`, `akeyless/inject_file_creds`). Per Rule 6 (revised 2026-10-07), this is now the template to actually generate when a service is determined to require Akeyless — not something to merely recognize and skip.
+- `GetGrievancesAppeal` is the one exception with a **populated** annotations block — real, live Akeyless wiring (`akeyless/enabled`, `akeyless/inject_file_creds`). Per Rule 6 (revised 2026-10-23, v3), this is now the template to generate **by default whenever the service has a credential** — not something gated on a per-service determination or a question to the user.
 - `selector.matchLabels` sometimes has only `app` (missing `deployment`) — inconsistent across the 3, not meaningful; include both.
 
 ---

@@ -134,7 +134,7 @@ Every migration in progress is tracked at `<target>/<project-name>/.iib2spring/s
 
 Then create the two-module structure (`*-parent`, `*-web`) plus: parent pom, web pom, base `application.properties`, Dockerfile (repo root — see `structural-conventions.md` §3), `logback-spring.xml` (SOAP/QL_CICS/RXCLAIM_SBO/MQ_COBOL only — see `common-patterns-and-gotchas.md` for the REST exception), `.github/` workflows (see `structural-conventions.md` §2), `state.json`.
 
-Then `mvn compile -q`. Must pass before proceeding.
+Then `mvn -s <repo-root>/settings.xml compile -q`. Must pass before proceeding.
 
 **[CHECKPOINT]** "Scaffold compiles. Proceed?"
 
@@ -149,7 +149,7 @@ For each flow with `status == "pending"`, generate layer by layer **in the order
 ```
 attempt = 0
 while attempt < 3:
-  mvn compile -q 2>&1 | tee .iib2spring/last_compile.log
+  mvn -s <repo-root>/settings.xml compile -q 2>&1 | tee .iib2spring/last_compile.log
   exit 0 → return success
   parse first 5 errors:
     "cannot find symbol" on a framework class/method → check whether that framework class actually
@@ -181,7 +181,7 @@ Run every item relevant to the detected backend type from `references/gap-checkl
 
 Either way, state which mode was used at the top of the HANDOFF output, and if structure-only was chosen, note in the action-items section that real test-case content is deferred — don't leave the files silently empty without saying why.
 
-`mvn test -q`. Fix genuine compile/syntax failures before the checkpoint; if full tests were generated, also fix any failing assertion before the checkpoint — never present a checkpoint with a real test failing.
+`mvn -s <repo-root>/settings.xml test -q`. Fix genuine compile/syntax failures before the checkpoint; if full tests were generated, also fix any failing assertion before the checkpoint — never present a checkpoint with a real test failing.
 
 **[CHECKPOINT]** "Tests: {N} files created ({mode}), {M} passing / 0 failing. Approve?"
 
@@ -189,7 +189,7 @@ Either way, state which mode was used at the top of the HANDOFF output, and if s
 
 ## HANDOFF — full build, config reconcile, gap re-check, hand-off
 
-`mvn clean verify`.
+`mvn -s <repo-root>/settings.xml clean verify` (Rule 14: `settings.xml` is at the repo root and every build passes it).
 
 > ⚠️ **Two alarming-but-benign log outputs — neither is a build failure. Do NOT "fix" either one.** **[live-tested on `cumulativeCopaySummaries`, framework 3.2.2: `mvn clean verify` exit code `0`, `BUILD SUCCESS`, `Tests run: 52, Failures: 0, Errors: 0`.]**
 > 1. **`cucumber-reporting:5.7.4:generate` prints a full `ValidationException: No JSON report file was found!` stack trace** for any service with no Cucumber tests. The plugin is bound by the `framework-starter` parent pom (not by generated code), logs this at `WARNING` via its own `generateErrorPage` handler, and **continues** — the build still succeeds. Cross-repo check: **0 surveyed workspace repos** add a skip/`<configuration>` block for it (the only `cucumber` mention found anywhere is an unrelated `<cucumber.version>` property in `fepclaimdetail`), so adding one would deviate from every real repo and violate Rule 2. Leave it; mention it in hand-off prose only if the user asks about the stack trace.
@@ -197,7 +197,7 @@ Either way, state which mode was used at the top of the HANDOFF output, and if s
 >
 > 🛑 **Read the exit code, not the log text — and on Windows, get the exit code correctly.** Both outputs above look like failures and neither is. Worse, in **Windows PowerShell 5.1**, piping a native command's output with `2>&1` into the PS pipeline (`mvn ... 2>&1 | Select-String ...`) wraps each stderr line in a `NativeCommandError` and makes the tool report **exit 255 even when Maven returned 0** — this skill's own run was misled by it twice in a row and briefly recorded a non-existent build failure. Redirect to a file and read `$LASTEXITCODE` instead:
 > ```powershell
-> mvn -f <parent>/pom.xml clean verify --offline > "$env:TEMP\verify.log"
+> mvn -s <repo-root>/settings.xml -f <parent>/pom.xml clean verify --offline > "$env:TEMP\verify.log"
 > $code = $LASTEXITCODE          # trustworthy; 0 = success
 > Get-Content "$env:TEMP\verify.log" | Select-String "BUILD SUCCESS|BUILD FAILURE|Tests run:"
 > ```

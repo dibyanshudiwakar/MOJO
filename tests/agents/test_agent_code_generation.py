@@ -90,7 +90,7 @@ def test_generation_writes_the_skills_settings_xml_at_the_repo_root(repo, job, p
     names = [c['name'] for c in repo.one('select payload from quality_runs where job_id=?', (job['id'],)) and
              json.loads(repo.one('select payload from quality_runs where job_id=?', (job['id'],))['payload'])['checks']
              if c['status'] != 'PASS']
-    assert 'SKILL_M26' not in names
+    assert 'SKILL_M27' not in names
 
 
 def test_a_failed_quality_gate_leaves_an_html_report(repo, job, planned, tmp_path, monkeypatch):
