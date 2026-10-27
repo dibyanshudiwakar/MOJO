@@ -264,10 +264,10 @@ def test_a_provider_failure_waits_before_the_next_attempt(monkeypatch):
     """
     monkeypatch.delenv('MOJO_RETRY_BACKOFF_SECONDS', raising=False)
     assert artefact.backoff(1) == 0.0, 'the first attempt never waits'
-    assert artefact.backoff(2) == 1.0
-    assert artefact.backoff(3) == 3.0
+    assert artefact.backoff(2) == 5.0
+    assert artefact.backoff(3) == 15.0
     # Past the end of the table the last delay repeats rather than resetting.
-    assert artefact.backoff(9) == 3.0
+    assert artefact.backoff(9) == 15.0
 
 
 def test_the_backoff_is_configurable_and_survives_a_bad_value(monkeypatch):

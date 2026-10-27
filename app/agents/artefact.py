@@ -112,7 +112,9 @@ def _is_auth_failure(reason):
 #:
 #: ``MOJO_RETRY_BACKOFF_SECONDS`` overrides it as a comma-separated list; the
 #: test suite sets it to zeros so the retry paths stay fast to exercise.
-BACKOFF_SECONDS = (1.0, 3.0)
+# Between attempts. A gateway outage that outlasts a second or two used to fail a whole step in about four
+# seconds, with every parallel file request giving up together; these waits let a brief outage pass.
+BACKOFF_SECONDS = (5.0, 15.0)
 
 
 def backoff(attempt):

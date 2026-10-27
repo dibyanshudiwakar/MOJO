@@ -28,11 +28,11 @@ does not hold.
 """
 import json
 from pathlib import Path
-from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, produce, produce_many
+from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, ArtefactUnavailable, produce, produce_many
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
-from app.services import failure_reports, maven_settings
+from app.services import failure_reports, maven_settings, pom_properties
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -156,6 +156,11 @@ class CodeGenerationAgent(BaseAgent):
         # blank response discarded every other file the model had authored.
         files = [(path, answer['content']) for path, answer in authored.items()]
         actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
+        files, pom_actions = pom_properties.complete(files)
+        actions += pom_actions
+        files, breaker_actions = self._complete_circuit_breaker(
+            context, files, tasks, model, standards, skill)
+        actions += breaker_actions
         settings = maven_settings.template()
         if settings is not None:
             files.append((maven_settings.NAME, settings))
@@ -168,6 +173,62 @@ class CodeGenerationAgent(BaseAgent):
         file_provenance['layout_root'] = layout.get('root') or ''
         file_provenance['file_count'] = len(files)
         return recorded, file_provenance
+
+    #: [M18] circuit-breaker properties are dead config without a Java branch that reads the open breaker.
+    BREAKER_PROPERTY = 'application.circuitbreaker.'
+    BREAKER_BRANCH = 'isCircuitBreakerError'
+    BREAKER_CHANGE = (
+        'Configuration in this project sets application.circuitbreaker.* properties, so this class must '
+        'handle an open circuit breaker: add an isCircuitBreakerError() branch in the catch block around the '
+        'backend call that returns the timeout (408) response, exactly as rest-external-direct.md '
+        '"Circuit breaker - the Java-side consumption pattern" and common-patterns-and-gotchas.md section 2 '
+        'show. Keep everything else in the file unchanged.')
+
+    def _complete_circuit_breaker(self, context, files, tasks, model, standards, skill):
+        """Author the missing ``isCircuitBreakerError()`` branch, once, when the properties need it.
+
+        The model writes the config-map properties and the service class in separate calls, and often
+        carries the breaker properties without the Java side. The gate reports that as skill gap M18.
+        Catching it here means the project leaves generation without the gap, not with a note for the
+        feedback agent. One re-authoring of the service class; whatever it returns is then re-checked,
+        and a gap that survives is left for the gate to report as it always was.
+        """
+        def configured():
+            return any(self.BREAKER_PROPERTY in c for p, c in files
+                       if p.endswith(('.properties', '.yml', '.yaml')))
+
+        def handled():
+            return any(self.BREAKER_BRANCH in c for p, c in files if p.endswith('.java'))
+
+        if not configured() or handled():
+            return files, []
+        targets = [(p, c) for p, c in files
+                   if p.endswith('Service.java') and 'src/main/java/' in p.replace(chr(92), '/')]
+        if not targets:
+            return files, []
+        try:
+            authored, _prov = self._revise(context, targets, tasks, model, standards, skill)
+        except ArtefactUnavailable as exc:
+            # Optional polish on a project that is otherwise complete: it must not fail the agent.
+            return files, ['could not add the isCircuitBreakerError() branch (%s); skill gap M18 stays open.' % exc]
+        revised = {p: a['content'] for p, a in authored.items() if self.BREAKER_BRANCH in a.get('content', '')}
+        if not revised:
+            return files, ['circuit-breaker properties are configured but the service class was not given an '
+                           'isCircuitBreakerError() branch (skill gap M18); add it or remove the properties.']
+        return ([(p, revised.get(p, c)) for p, c in files],
+                ['added the isCircuitBreakerError() branch to %s (skill gap M18)' % ', '.join(sorted(revised))])
+
+    def _revise(self, context, targets, tasks, model, standards, skill):
+        return produce_many(
+            context, self.FILE_PROMPT,
+            [(p, {'path': p, 'purpose': 'Revision of this class: ' + self.BREAKER_CHANGE,
+                  'current_content': c, 'required_change': self.BREAKER_CHANGE,
+                  'skill_reference': 'references/gap-checklist.md [M18]',
+                  'service_name': context.param('service_name'),
+                  'package_name': context.param('package_name'),
+                  'tasks': tasks, 'semantic_model': model, 'framework_standards': standards})
+             for p, c in targets],
+            skill=skill, effort=AUTHORING_EFFORT)
 
     def execute(self, context):
         service = MappingAndPlanningService(self.repo)
