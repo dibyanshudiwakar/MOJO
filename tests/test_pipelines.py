@@ -473,3 +473,21 @@ def test_a_run_left_unfinished_stops_counting_once_its_step_has_finished(env):
     assert pipelines.agent_runtime_ms(pipelines.detail('pu')) == 20000
     # And it stays put: the answer does not depend on when it is asked.
     assert pipelines.agent_runtime_ms(pipelines.detail('pu')) == 20000
+
+
+def test_framework_baseline_runs_straight_after_intake_and_before_the_agents_that_read_it(env):
+    """With the framework repo passed, the baseline is not run after planning: it comes right after the intake
+    and the analysis and planning wait for it."""
+    _, job, pipelines, _ = env
+    repos = {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True},
+             'FRAMEWORK': {'repo_url': 'https://github.com/org/fw.git', 'branch': 'main', 'enabled': True}}
+    p = pipelines.create(job['id'], 'workspace/orders', repos,
+                         ['repository-intake', 'framework-baseline', 'ace-analysis', 'migration-specification', 'planning'],
+                         'tester@example.com')
+    agents = [s['agent_id'] for s in p['steps'] if s['kind'] == 'AGENT' and s['status'] != 'SKIPPED']
+    assert agents.index('framework-baseline') == agents.index('repository-intake') + 1
+    baseline = find_agent_step(p['steps'], 'framework-baseline')
+    fw_clone = find_clone_step(p['steps'], 'FRAMEWORK')
+    assert fw_clone['id'] in json.loads(baseline['depends_on'])
+    spec = find_agent_step(p['steps'], 'migration-specification')
+    assert baseline['id'] in json.loads(spec['depends_on'])
