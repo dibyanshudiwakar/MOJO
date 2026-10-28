@@ -1416,13 +1416,19 @@ class PipelineService:
         # so that _approved() in migration_lifecycle_v6.py can find the artifact hashes.
         # Gate-specific artifact kinds that must be present in bindings for approval to count.
         _GATE_ARTIFACT_KINDS = {
+            'G1': ('FRAMEWORK_TEMPLATE',),
             'G2': ('ACE_ANALYSIS', 'MIGRATION_SPECIFICATION'),
         }
-        artifact_rows = self.repo.rows(
-            "select id, content_hash from evidence where job_id=? and kind in ('ACE_ANALYSIS','MIGRATION_SPECIFICATION')",
-            (job_id,),
-        )
-        bindings = {row['id']: row['content_hash'] for row in artifact_rows}
+        kinds = _GATE_ARTIFACT_KINDS.get(gate, ())
+        if kinds:
+            marks = ','.join('?' * len(kinds))
+            artifact_rows = self.repo.rows(
+                f"select id, content_hash from evidence where job_id=? and immutable=1 and kind in ({marks})",
+                (job_id, *kinds),
+            )
+            bindings = {row['id']: row['content_hash'] for row in artifact_rows}
+        else:
+            bindings = {}
         # Always include the gate_block sentinel so the evidence table stays consistent.
         eid = self._ensure_evidence(job_id, gate, content_hash)
         bindings[eid] = content_hash

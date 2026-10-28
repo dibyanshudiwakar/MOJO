@@ -117,7 +117,7 @@ def save_snapshot(root, snapshot_id, snapshot):
     Returns the directory, which is the remediation's rollback pointer.
     """
     base = Path(root).resolve()
-    out = base.parent / (base.name + '.remediation-rollback') / snapshot_id
+    out = base.parent / (base.name + '_rb') / snapshot_id[:8]
     for path, text in snapshot.items():
         target = out / Path(path).resolve().relative_to(base)
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -61,7 +61,7 @@ CHECKS = {
     'parity': {
         'prompt': PARITY_PROMPT, 'skill_file': PARITY_SKILL_FILE, 'action': 'parity_check',
         'report_type': 'PARITY_ANALYSIS', 'summary': _parity_summary,
-        'iib_ext': frozenset(IntakeService.EXT), 'ms_ok': lambda path: True,
+        'iib_ext': frozenset(IntakeService.EXT) | frozenset({'.msgmap'}), 'ms_ok': lambda path: True,
         'no_ms_reason': 'no_generated_artifacts'},
     'hardcoding': {
         'prompt': HARDCODING_PROMPT, 'skill_file': HARDCODING_SKILL_FILE, 'action': 'hardcoding_check',

@@ -121,3 +121,109 @@ def test_a_static_call_on_a_framework_class_is_checked():
     bad = PKG + 'public class S { void run() { Util.fail("500"); } }\n'
     assert C.problems(good, maps) == []
     assert any('Util.fail' in p for p in C.problems(bad, maps))
+
+
+# -- a stub that never calls the field it was wired with --------------------------------------------------
+#
+# problems() only flags a claim the real types refute; a controller that simply never calls its
+# injected service makes no such claim, so it was never flagged, however wrong the outcome.
+
+def test_a_stub_that_never_calls_its_wired_field_is_flagged():
+    text = PKG + ('public class Controller {\n  private final Connector connector;\n'
+                  '  String run(String a) {\n    throw new UnsupportedOperationException("not done");\n  }\n}\n')
+    found = C._stub_problems(text, MAP)
+    assert any('run' in p and 'connector' in p for p in found)
+
+
+def test_a_stub_with_no_wired_field_is_not_flagged():
+    text = PKG + 'public class Controller {\n  String run(String a) {\n    throw new UnsupportedOperationException("not done");\n  }\n}\n'
+    assert C._stub_problems(text, MAP) == []
+
+
+def test_a_stub_is_not_flagged_when_the_field_is_used_elsewhere_in_the_file():
+    text = PKG + ('public class Controller {\n  private final Connector connector;\n'
+                  '  void other() { connector.send("a", "b"); }\n'
+                  '  String run(String a) {\n    throw new UnsupportedOperationException("not done");\n  }\n}\n')
+    assert C._stub_problems(text, MAP) == []
+
+
+def test_a_non_stub_body_is_not_flagged_even_with_an_unused_field():
+    text = PKG + ('public class Controller {\n  private final Connector connector;\n'
+                  '  String run(String a) {\n    return "ok";\n  }\n}\n')
+    assert C._stub_problems(text, MAP) == []
+
+
+def test_a_stub_that_gains_a_real_call_is_kept(monkeypatch):
+    bad = PKG + ('public class Controller {\n  private final Connector connector;\n'
+                 '  String run(String a) {\n    throw new UnsupportedOperationException("not done");\n  }\n}\n')
+    good = bad.replace('throw new UnsupportedOperationException("not done");', 'return connector.send(a, "x");')
+    monkeypatch.setattr(C, 'contracts', lambda files, m2: MAP)
+
+    def produce(context, prompt, items, skill=None, effort=None):
+        return {path: {'content': good} for path, _payload in items}, {}
+
+    files, actions = C.reconcile(None, [('Controller.java', bad)], '/m2', produce, 'p', None, None, {})
+    assert files == [('Controller.java', good)]
+    assert any('revised Controller.java' in a for a in actions)
+
+
+def test_a_stub_that_stays_a_stub_is_discarded(monkeypatch):
+    bad = PKG + ('public class Controller {\n  private final Connector connector;\n'
+                 '  String run(String a) {\n    throw new UnsupportedOperationException("not done");\n  }\n}\n')
+    monkeypatch.setattr(C, 'contracts', lambda files, m2: MAP)
+
+    def produce(context, prompt, items, skill=None, effort=None):
+        return {path: {'content': bad + '\n// no change\n'} for path, _ in items}, {}
+
+    files, actions = C.reconcile(None, [('Controller.java', bad)], '/m2', produce, 'p', None, None, {})
+    assert files == [('Controller.java', bad)]
+    assert any('still disagrees' in a for a in actions)
+
+
+# -- the same constant value, declared independently in more than one file --------------------------------
+#
+# Each declaration is self-consistent -- the file compiles and does what it says -- so problems()
+# has nothing to refute. The duplication is only visible across files.
+
+def test_two_files_declaring_the_same_constant_value_are_flagged():
+    a = PKG + 'public class A {\n  private static final String MODE = "P";\n}\n'
+    b = PKG + 'public class B {\n  private static final String TEST_MODE = "P";\n}\n'
+    dup = C.duplicate_constants([('A.java', a), ('B.java', b)])
+    assert list(dup) == ['B.java'], 'A sorts first and neither looks like a shared-constants class'
+    assert 'A.MODE' in dup['B.java'][0]
+
+
+def test_a_file_that_looks_like_a_shared_constants_class_is_preferred_as_canonical():
+    shared = PKG + 'public class Constants {\n  public static final String MODE = "P";\n}\n'
+    other = PKG + 'public class Service {\n  private static final String TEST_MODE = "P";\n}\n'
+    dup = C.duplicate_constants([('constant/Constants.java', shared), ('Service.java', other)])
+    assert list(dup) == ['Service.java']
+    assert 'Constants.MODE' in dup['Service.java'][0]
+
+
+def test_distinct_constant_values_are_not_flagged():
+    a = PKG + 'public class A {\n  private static final String MODE = "P";\n}\n'
+    b = PKG + 'public class B {\n  private static final String OTHER = "Q";\n}\n'
+    assert C.duplicate_constants([('A.java', a), ('B.java', b)]) == {}
+
+
+def test_a_value_declared_once_is_not_flagged():
+    a = PKG + 'public class A {\n  private static final String MODE = "P";\n}\n'
+    assert C.duplicate_constants([('A.java', a)]) == {}
+
+
+def test_a_duplicate_constant_removed_in_favor_of_the_shared_one_is_kept(monkeypatch):
+    shared = PKG + 'public class Constants {\n  public static final String MODE = "P";\n}\n'
+    bad = PKG + 'public class Service {\n  private static final String TEST_MODE = "P";\n}\n'
+    good = PKG + 'public class Service {\n  // now references Constants.MODE instead\n}\n'
+    monkeypatch.setattr(C, 'contracts', lambda files, m2: {})
+
+    def produce(context, prompt, items, skill=None, effort=None):
+        return {path: {'content': good} for path, _payload in items}, {}
+
+    files, actions = C.reconcile(
+        None, [('constant/Constants.java', shared), ('Service.java', bad)], '/m2', produce, 'p', None, None, {})
+    by_path = dict(files)
+    assert by_path['Service.java'] == good
+    assert by_path['constant/Constants.java'] == shared, 'the canonical declaration is left alone'
+    assert any('revised Service.java' in a for a in actions)
