@@ -169,6 +169,6 @@ class FactoryService:
     try:
      self.transition(r.job_id,target,identity,{'source':'auto_advance_after_approval','approval_id':aid})
      break
-    except Exception:
-     pass
+    except Exception as _exc:
+     import sys;sys.stderr.write('auto_advance failed job=%s target=%s err=%s\n'%(r.job_id,target,_exc));sys.stderr.flush()
   return result

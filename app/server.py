@@ -1013,9 +1013,9 @@ class H(BaseHTTPRequestHandler):
                 with repo.connect() as c: c.execute("update approval_packages set status='APPROVED' where id=?",(m.group(1),))
                 ledger.append(pkg['job_id'],pr.identity,'APPROVAL_PACKAGE_SIGNED',{'package_id':m.group(1),'gate':pkg['gate'],'decision':decision})
                 try: pipelines.resume_gate_step(pkg['job_id'],workflow,pkg['gate'])
-                except Exception: pass
+                except Exception as _exc: sys.stderr.write('resume_gate_step failed job=%s gate=%s err=%s\n'%(pkg['job_id'],pkg['gate'],_exc));sys.stderr.flush()
                 try: pipelines.resume_after_clarification(pkg['job_id'])
-                except Exception: pass
+                except Exception as _exc: sys.stderr.write('resume_after_clarification failed job=%s err=%s\n'%(pkg['job_id'],_exc));sys.stderr.flush()
                 return self.sendj(200,result)
             m=re.fullmatch(r'/api/admin/jobs/([a-f0-9-]+)/retrigger-lifecycle',p)
             if m:

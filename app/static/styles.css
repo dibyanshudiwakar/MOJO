@@ -1319,10 +1319,10 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 
 /* ── Planning output: drawer summary ─────────────────────────────────────── */
 .plan-stats-row{display:flex;gap:8px;margin:4px 0 12px}
-.plan-stat-chip{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 6px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);gap:2px;min-width:0}
+.plan-stat-chip{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 6px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);gap:2px;min-width:0}
 .plan-stat-chip.plan-stat-ok{background:var(--success-bg);border-color:transparent}
 .plan-stat-chip.plan-stat-warn{background:var(--warning-bg);border-color:transparent}
-.plan-stat-n{font-size:22px;font-weight:700;line-height:1;color:var(--text)}
+.plan-stat-n{font-size:22px;font-weight:700;line-height:1;color:var(--text);text-align:center}
 .plan-stat-chip.plan-stat-ok .plan-stat-n{color:var(--success-text)}
 .plan-stat-chip.plan-stat-warn .plan-stat-n{color:var(--warning-text)}
 .plan-stat-l{font-size:10px;color:var(--text-2);text-align:center;line-height:1.3}
