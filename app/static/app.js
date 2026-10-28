@@ -2304,6 +2304,9 @@ function renderPlanModalTab(art,tab){
  if(tab==='raw')return renderPlanRawTab();
  return ''}
 function wirePlanModalTab(art,tab){
+ if(tab==='tasks'){
+  const tbl=document.querySelector('#pmBody .plan-tbl');
+  if(tbl){tbl.style.tableLayout='fixed';const cols=tbl.querySelectorAll('col');const w=['85px','320px','','80px','110px','110px'];cols.forEach((c,i)=>{if(w[i])c.style.width=w[i]})}}
  if(tab==='tasks'||tab==='mappings'){
   const sEl=document.getElementById('pmSearch'),bEl=document.getElementById('pmBoundary'),mEl=document.getElementById('pmModule'),tBody=document.getElementById('pmTbody'),cnt=document.getElementById('pmCount');
   if(!sEl||!tBody)return;
@@ -2345,7 +2348,7 @@ function planMappingRows(mappings,search,mod){
 function renderPlanTasksTab(tasks){
  const mods=[...new Set(tasks.map(t=>t.module).filter(Boolean))];
  return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search ID, source, pattern…"><select id="pmBoundary" class="plan-sel"><option value="">All Migration Types</option><option value="GENERATED">Auto-Migrated</option><option value="HAND_WRITTEN_PROTECTED">Needs Review</option></select><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${tasks.length} of ${tasks.length}</span></div>
- <div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Migration Type</th><th>Tests</th></tr></thead><tbody id="pmTbody">${planTaskRows(tasks,'','','')}</tbody></table></div>`}
+ <div class="plan-tbl-wrap"><table class="plan-tbl plan-tbl-fixed" style="table-layout:fixed"><colgroup><col style="width:85px"><col style="width:320px"><col><col style="width:80px"><col style="width:110px"><col style="width:110px"></colgroup><thead><tr><th>ID</th><th>Source</th><th>Spring Pattern</th><th>Module</th><th>Migration Type</th><th>Tests</th></tr></thead><tbody id="pmTbody">${planTaskRows(tasks,'','','')}</tbody></table></div>`}
 function renderPlanMappingsTab(mappings){
  const mods=[...new Set(mappings.map(m=>m.module).filter(Boolean))];
  return`<div class="plan-tb"><div class="plan-tb-l"><input id="pmSearch" class="plan-search" type="search" placeholder="Search source, ACE construct…"><select id="pmModule" class="plan-sel"><option value="">All Modules</option>${mods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div><span class="plan-count" id="pmCount">${mappings.length} of ${mappings.length}</span></div>
@@ -3096,7 +3099,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
  const totalAgents=_ah.length||15;
  const completedJobs=(d.jobs_by_state||[]).find(x=>x.state==='COMPLETED')?.count??0;
  const kpiData=[
-  {label:'Active Migrations',value:d.jobs,color:'#2558C4',iconBg:'#DDE9F7',icon:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>',trend:'',trendClass:'trend-neutral'},
+  {label:'Migrations',value:d.jobs,color:'#2558C4',iconBg:'#DDE9F7',icon:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>',trend:'',trendClass:'trend-neutral'},
   {label:'Pending Approvals',value:d.approvals,color:'#F59E0B',iconBg:'#FFFBEB',icon:'<path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',trend:d.approvals>0?((d.approvals_actionable??d.approvals)>0?`${d.approvals_actionable??d.approvals} for you`:'None for your roles'):'All clear',trendClass:d.approvals>0?'trend-warn':'trend-neutral'},
   {label:'Agents Running',value:agentsRunning,color:'#22C55E',iconBg:'#F0FDF4',icon:'<rect x="2" y="8" width="20" height="12" rx="2"/><path d="M8 8V5a4 4 0 018 0v3"/><circle cx="12" cy="14" r="2"/>',trend:`of ${totalAgents} total agents`,trendClass:'trend-neutral'},
   {label:'Evidence Items',value:d.evidence,color:'#8B5CF6',iconBg:'#F5F3FF',icon:'<path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>',trend:'',trendClass:'trend-neutral'},
@@ -3161,7 +3164,7 @@ async function render(){const seq=++renderSeq;const soft=renderSoft;renderSoft=f
     :withheldTotal(approvals)>0
     ?`<div class="card withheld-card"><div class="card-head"><div><div class="card-title">${withheldTotal(approvals)} approval${withheldTotal(approvals)>1?'s':''} waiting on other roles</div><div class="card-sub">None are actionable by your account</div></div><button id="dashViewAllApprovals" class="btn-ghost">Details →</button></div>${withheldRows(approvals)}</div>`
     :`<div class="card"><div class="card-head"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:var(--success-bg);display:flex;align-items:center;justify-content:center;color:var(--success-text);flex-shrink:0"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="card-title" style="color:var(--success-text)">All approvals cleared</div><div class="card-sub">No actions required</div></div></div><button id="dashViewAllApprovals" class="btn-ghost">All →</button></div></div>`;
-  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Active Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
+  const jobsCard=`<div class="card"><div class="card-head"><div><div class="card-title">Migration Jobs</div><div class="card-sub">All in-flight migrations and their current lifecycle state. Expand a job to see its pipeline steps, or open the pipeline.</div></div></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Owner</th><th>State</th><th>Progress</th><th>Capabilities</th></tr></thead><tbody>${jobRows||'<tr><td colspan="5" class="empty">No jobs yet</td></tr>'}</tbody></table></div></div></div>`;
   const metaText=`Auto-refreshes every 10 s &middot; Last updated ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${totalJobs} services tracked`;
   const painted=soft&&$('#dashSecJobs');
   if(painted){$('#dashSecJobs').innerHTML=jobsCard;$('#dashSecInbox').innerHTML=inboxCard;const m=$('#dashMeta');if(m)m.innerHTML=metaText}
