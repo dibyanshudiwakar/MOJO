@@ -71,6 +71,21 @@ class CodeGenerationAgent(BaseAgent):
     LAYOUT_PROMPT = 'agent/code-generation/project-layout'
     FILE_PROMPT = 'agent/code-generation/file-synthesis'
 
+    #: Every per-file call is otherwise blind to its siblings (produce_many fixes
+    #: each item's payload before the first call; no answer feeds another), which is
+    #: how a controller came to believe a service exposed no method at all, and how
+    #: six files came to each declare their own copy of the same constant. The layout
+    #: call already decided the whole file list before any file was written, so handing
+    #: that list to every file is free -- no new call, no template change (the whole
+    #: payload is JSON-dumped as the user turn regardless of whether the template names
+    #: a key, confirmed in CvscodeClaudeAdapter._request; this mirrors _precedents/
+    #: _precedents_note in app/agents/artefact.py).
+    PROJECT_FILES_NOTE = (
+        "Every file this project will contain and what each is for, decided before any "
+        "file was written. If your file calls another file's method, or another file's "
+        "purpose says it owns a shared concern (constants, error messages, a config "
+        "class), write against that declared purpose instead of inventing your own.")
+
     def _skill_for_backend(self, context, model):
         """The skill, narrowed to the structure plus this backend's connector."""
         # One reference per backend the service talks to: a service routing to
@@ -140,6 +155,10 @@ class CodeGenerationAgent(BaseAgent):
         # settings.xml is copied from the skill's template, never authored: it names the internal
         # Maven repositories and a retyped copy that drops one breaks every build.
         wanted = [item for item in layout['files'] if item['path'] != maven_settings.NAME]
+        # The layout call already decided every file's path and purpose before any file
+        # was written -- hand that whole list to every file, so each one can write against
+        # a sibling's declared intent instead of inventing its own guess about it.
+        project_files = [{'path': item['path'], 'purpose': item.get('purpose', '')} for item in layout['files']]
         authored, file_provenance = produce_many(
             context, self.FILE_PROMPT,
             [(item['path'], {'path': item['path'], 'purpose': item.get('purpose', ''),
@@ -148,7 +167,8 @@ class CodeGenerationAgent(BaseAgent):
                              'service_name': context.param('service_name'),
                              'package_name': context.param('package_name'),
                              'tasks': tasks,
-                             'semantic_model': model, 'framework_standards': standards})
+                             'semantic_model': model, 'framework_standards': standards,
+                             'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
              for item in wanted],
             skill=skill, effort=AUTHORING_EFFORT)
         # No emptiness filter: 'content' carries minLength 1, so a blank file is
@@ -160,16 +180,18 @@ class CodeGenerationAgent(BaseAgent):
         actions += pom_actions
         files, import_actions = import_grounding.ground(files, import_grounding.m2_root())
         actions += import_actions
-        files, class_actions = self._complete_missing_classes(context, files, tasks, model, standards, skill)
+        files, class_actions = self._complete_missing_classes(
+            context, files, tasks, model, standards, skill, project_files)
         actions += class_actions
         files, breaker_actions = self._complete_circuit_breaker(
-            context, files, tasks, model, standards, skill)
+            context, files, tasks, model, standards, skill, project_files)
         actions += breaker_actions
         # Last, so it sees the files as they will be written, including anything revised above.
         files, contract_actions = contract_reconcile.reconcile(
             context, files, import_grounding.m2_root(), produce_many, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
             {'service_name': context.param('service_name'), 'package_name': context.param('package_name'),
-             'tasks': tasks, 'semantic_model': model, 'framework_standards': standards})
+             'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
+             'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
         actions += contract_actions
         settings = maven_settings.template()
         if settings is not None:
@@ -194,7 +216,7 @@ class CodeGenerationAgent(BaseAgent):
         '"Circuit breaker - the Java-side consumption pattern" and common-patterns-and-gotchas.md section 2 '
         'show. Keep everything else in the file unchanged.')
 
-    def _complete_circuit_breaker(self, context, files, tasks, model, standards, skill):
+    def _complete_circuit_breaker(self, context, files, tasks, model, standards, skill, project_files):
         """Author the missing ``isCircuitBreakerError()`` branch, once, when the properties need it.
 
         The model writes the config-map properties and the service class in separate calls, and often
@@ -217,7 +239,7 @@ class CodeGenerationAgent(BaseAgent):
         if not targets:
             return files, []
         try:
-            authored, _prov = self._revise(context, targets, tasks, model, standards, skill)
+            authored, _prov = self._revise(context, targets, tasks, model, standards, skill, project_files)
         except ArtefactUnavailable as exc:
             # Optional polish on a project that is otherwise complete: it must not fail the agent.
             return files, ['could not add the isCircuitBreakerError() branch (%s); skill gap M18 stays open.' % exc]
@@ -228,7 +250,7 @@ class CodeGenerationAgent(BaseAgent):
         return ([(p, revised.get(p, c)) for p, c in files],
                 ['added the isCircuitBreakerError() branch to %s (skill gap M18)' % ', '.join(sorted(revised))])
 
-    def _complete_missing_classes(self, context, files, tasks, model, standards, skill):
+    def _complete_missing_classes(self, context, files, tasks, model, standards, skill, project_files):
         """Write each project class the generated code imports and nothing defines.
 
         The model imports its own request model and never writes it (the layout left it out), so the build
@@ -254,7 +276,8 @@ class CodeGenerationAgent(BaseAgent):
                                       'consumer_path': consumer,
                                       'service_name': context.param('service_name'),
                                       'package_name': context.param('package_name'),
-                                      'tasks': tasks, 'semantic_model': model, 'framework_standards': standards}))
+                                      'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
+                                      'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE}))
         try:
             authored, _prov = produce_many(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
         except ArtefactUnavailable as exc:
@@ -263,7 +286,7 @@ class CodeGenerationAgent(BaseAgent):
         added = [(path, answer['content']) for path, answer in authored.items() if answer.get('content')]
         return files + added, ['wrote %s, which the project imports and did not define' % path for path, _ in added]
 
-    def _revise(self, context, targets, tasks, model, standards, skill):
+    def _revise(self, context, targets, tasks, model, standards, skill, project_files):
         return produce_many(
             context, self.FILE_PROMPT,
             [(p, {'path': p, 'purpose': 'Revision of this class: ' + self.BREAKER_CHANGE,
@@ -271,7 +294,8 @@ class CodeGenerationAgent(BaseAgent):
                   'skill_reference': 'references/gap-checklist.md [M18]',
                   'service_name': context.param('service_name'),
                   'package_name': context.param('package_name'),
-                  'tasks': tasks, 'semantic_model': model, 'framework_standards': standards})
+                  'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
+                  'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
              for p, c in targets],
             skill=skill, effort=AUTHORING_EFFORT)
 

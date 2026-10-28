@@ -229,6 +229,23 @@ def test_the_layout_is_asked_at_listing_effort_and_the_files_at_authoring_effort
     assert provider.efforts == {'layout': {LISTING_EFFORT}, 'file': {AUTHORING_EFFORT}}
 
 
+def test_every_file_payload_carries_the_full_sibling_list(repo, job, params, gateway, dispatch):
+    """Each file call is otherwise blind to its siblings -- a controller that believed its own
+    service exposed no method at all, and six files each inventing their own copy of the same
+    constant, both trace to this. The layout already knows every file's path and purpose before
+    any file is written, so every file-synthesis payload carries that same list, unchanged."""
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    provider = _provider()
+    dispatch(job['id'], 'code-generation', params, provider=provider)
+    expected = [{'path': p, 'purpose': why} for p, why in WANTED]
+    file_calls = [c['payload'] for c in provider.calls if 'purpose' in c['payload']]
+    assert file_calls, 'at least one file-synthesis call was captured'
+    for payload in file_calls:
+        assert payload['project_files'] == expected
+        assert payload['project_files_note']
+
+
 # ---- an omission is a path and a reason ----------------------------------------------------
 #
 # The schema said omitted was a list of strings; its own description said "each

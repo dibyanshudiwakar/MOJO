@@ -40,6 +40,14 @@ _JAVAP_FIELD = re.compile(r'^\s*public\s+static\s+(?:final\s+)?[\w.$<>\[\], ?]+?
 _JAVAP_HEADER = re.compile(r'\b(class|interface|enum)\s+\w+(.*)\{')
 _NEW = re.compile(r'^new\s+([A-Z]\w*)(?:<[^()]*>)?\s*\(')
 _LITERAL_STRING = re.compile(r'^"')
+#: A method body whose only statement refuses the call outright -- the shape a controller left
+#: unwired to its own service took, having (wrongly) concluded the service exposed no method at all.
+_STUB_BODY = re.compile(r'^\{\s*throw\s+new\s+UnsupportedOperationException\s*\(.*\)\s*;\s*\}$', re.S)
+#: A constant declaration with a literal right-hand side -- the shape that lets one value be compared
+#: across files regardless of what each file happened to name it.
+_CONST_DECL = re.compile(
+    r'(?m)^\s*(?:public|private|protected)?\s*static\s+final\s+(?:String|int|long|char|boolean)\s+'
+    r'([A-Z][A-Z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)\'|-?\d+|true|false)\s*;')
 MAX_REVISIONS = 6
 
 
@@ -386,16 +394,128 @@ def _arg_type(arg, types):
     return None
 
 
+# -- what the file omits -----------------------------------------------------------------------------------
+def _method_bodies(text):
+    """``[(name, body)]`` -- the brace-delimited body of every method in ``text`` that has one."""
+    out = []
+    for m in _METHOD_START.finditer(text):
+        open_pos = m.end() - 1
+        span = _balanced_parens(text, open_pos)
+        if not span:
+            continue
+        after = text[open_pos + len(span):]
+        stripped = after.lstrip()
+        if not stripped.startswith('{'):
+            continue
+        brace_idx = open_pos + len(span) + (len(after) - len(stripped))
+        out.append((m.group(2), text[brace_idx:_block_end(text, brace_idx)]))
+    return out
+
+
+def _is_stub(body):
+    inner = body.strip()
+    return inner in ('{}', '{ }') or bool(_STUB_BODY.match(inner))
+
+
+def _stub_problems(text, contract_map):
+    """A stub method that never calls a sibling field whose real type has a method to call.
+
+    ``problems()`` only flags a claim the real types refute -- an ``@Override`` of a
+    method that does not exist, a call with the wrong arguments. A controller that
+    simply never calls its injected service makes no such claim, so it was never
+    flagged, however wrong the outcome: each file is blind to its siblings while it
+    is written, so one can conclude -- wrongly -- that a type it was never shown has
+    no usable method at all. This is the one case worth naming separately: the field
+    is already declared, its real contract is already known, and the method body
+    never uses it.
+    """
+    text = _code(text)
+    stubs = [name for name, body in _method_bodies(text) if _is_stub(body)]
+    if not stubs:
+        return []
+    called = {obj for obj, _meth in _CALL.findall(text)}
+    out = []
+    for ftype, fname in _FIELD.findall(text):
+        if fname in called:
+            continue
+        simple = _simple(ftype)
+        methods = contract_map.get(simple, {}).get('methods') or {}
+        if not methods:
+            continue
+        real_method = sorted(methods)[0]
+        ret, _params = methods[real_method][0]
+        for stub in stubs:
+            out.append('%s(): stub body never calls %s.%s(...), which exists on %s and returns %s'
+                       % (stub, fname, real_method, simple, ret))
+    return out
+
+
+# -- a value declared more than once ------------------------------------------------------------------------
+def _looks_shared(path):
+    """A file named/placed like the project's own shared-constants class, not a guess at one."""
+    lowered = str(path).replace(chr(92), '/').lower()
+    stem = lowered.rsplit('/', 1)[-1]
+    return '/constant/' in lowered or stem.startswith(('constants', 'errorconstants'))
+
+
+def _class_name(path):
+    return Path(str(path).replace(chr(92), '/')).stem
+
+
+def duplicate_constants(files):
+    """``{path: [problem, ...]}`` for a constant value independently declared in more than one file.
+
+    Each declaration is internally consistent -- the file compiles and does what it
+    says -- so ``problems()`` has nothing to refute. The duplication is only visible
+    across files, which is exactly what one call per file, each blind to the others,
+    cannot see: six files each declaring their own copy of the same error message
+    under six different names, none of them wrong on their own.
+    """
+    declared = []
+    for path, text in files:
+        if not str(path).endswith('.java'):
+            continue
+        for name, value in _CONST_DECL.findall(_code(text)):
+            declared.append((path, name, value))
+    by_value = {}
+    for path, name, value in declared:
+        by_value.setdefault(value, []).append((path, name))
+    out = {}
+    for entries in by_value.values():
+        if len({p for p, _n in entries}) < 2:
+            continue
+        preferred = [e for e in entries if _looks_shared(e[0])]
+        canon_path, canon_name = sorted(preferred or entries)[0]
+        canon_class = _class_name(canon_path)
+        for path, name in entries:
+            if (path, name) == (canon_path, canon_name):
+                continue
+            out.setdefault(path, []).append(
+                '%s is already declared as %s.%s in %s; remove the local declaration and reference %s.%s instead'
+                % (name, canon_class, canon_name, canon_path, canon_class, canon_name))
+    return out
+
+
+def _file_problems(path, text, contract_map, dup_map):
+    """Every problem -- contradiction, omission or duplication -- this one file's content has right now."""
+    if not str(path).endswith('.java'):
+        return []
+    return problems(text, contract_map) + _stub_problems(text, contract_map) + dup_map.get(path, [])
+
+
 # -- the revision -------------------------------------------------------------------------------------------
 def reconcile(context, files, m2_root, produce_many, file_prompt, effort, skill, base_payload):
-    """``(files, actions)``: revise each file the real types refute, keeping a revision only if it is better."""
+    """``(files, actions)``: revise each file that disagrees with, or omits using, a real type it
+    depends on -- including a shared constant another file already declares -- keeping a revision
+    only if it is better."""
     actions = []
     for _attempt in range(MAX_REVISIONS):
         contract_map = contracts(files, m2_root)
-        if not contract_map:
+        dup_map = duplicate_constants(files)
+        if not contract_map and not dup_map:
             break
         by_path = dict(files)
-        broken = {p: problems(t, contract_map) for p, t in files if str(p).endswith('.java')}
+        broken = {p: _file_problems(p, t, contract_map, dup_map) for p, t in files}
         broken = {p: v for p, v in broken.items() if v}
         if not broken:
             break
@@ -415,9 +535,14 @@ def reconcile(context, files, m2_root, produce_many, file_prompt, effort, skill,
         for path, text in files:
             answer = authored.get(path)
             candidate = answer.get('content') if answer else None
-            if candidate and candidate != text and len(problems(candidate, contract_map)) < len(broken.get(path, [])):
-                text = candidate
-                changed.append(path)
+            if candidate and candidate != text:
+                # Whether a duplicate constant is gone depends on every other file, not this one
+                # alone, so it is judged with the candidate substituted into the whole set.
+                substituted = [(p, candidate if p == path else t) for p, t in files]
+                after = _file_problems(path, candidate, contract_map, duplicate_constants(substituted))
+                if len(after) < len(broken.get(path, [])):
+                    text = candidate
+                    changed.append(path)
             new_files.append((path, text))
         if not changed:
             for path in sorted(broken):
