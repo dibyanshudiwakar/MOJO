@@ -95,6 +95,10 @@ def test_create_wires_clone_step_before_repo_consuming_agents(env):
     assert json.loads(intake['params'])['path'] == 'workspace/orders/ace/ace'
 
 
+def _repo_of(pipelines):
+    return pipelines.repo
+
+
 def test_create_adds_delivery_step_only_when_pushing(env):
     _, job, pipelines, _ = env
     selected = ['repository-intake', 'ace-analysis', 'framework-baseline', 'migration-specification', 'planning', 'code-generation']
@@ -109,7 +113,9 @@ def test_create_adds_delivery_step_only_when_pushing(env):
     assert delivery[0]['id'] not in json.loads(codegen['depends_on'])
     assert codegen['id'] in json.loads(delivery[0]['depends_on'])
 
-    p2 = pipelines.create(job['id'], 'workspace/orders2',
+    # A second pipeline for the same job is refused while the first is in flight, so this checks a second job.
+    other = FactoryService(_repo_of(pipelines)).create_job({'service': 'Billing', 'owner': 'Retail', 'sourceRevision': 'abc'}, 'tester')
+    p2 = pipelines.create(other['id'], 'workspace/orders2',
                           {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True}},
                           ['repository-intake'], 'tester@example.com')
     assert not [s for s in p2['steps'] if s['kind'] == 'DELIVERY']
@@ -491,3 +497,44 @@ def test_framework_baseline_runs_straight_after_intake_and_before_the_agents_tha
     assert fw_clone['id'] in json.loads(baseline['depends_on'])
     spec = find_agent_step(p['steps'], 'migration-specification')
     assert baseline['id'] in json.loads(spec['depends_on'])
+
+
+def test_variance_rca_and_remediation_wait_for_feedback_when_it_is_selected(env):
+    """The read-after-repair order is an explicit edge, not whatever order the agent names happen to sort into."""
+    _, job, pipelines, _ = env
+    repos = {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True}}
+    everything = ['repository-intake', 'ace-analysis', 'migration-specification', 'planning', 'code-generation',
+                  'feedback', 'test-engineering', 'variance-analysis', 'rca', 'remediation']
+    p = pipelines.create(job['id'], 'workspace/orders', repos, everything, 'tester@example.com')
+    feedback = find_agent_step(p['steps'], 'feedback')
+    for agent in ('variance-analysis', 'rca', 'remediation'):
+        step = find_agent_step(p['steps'], agent)
+        assert feedback['id'] in json.loads(step['depends_on']), agent
+
+
+def test_feedback_edge_is_not_added_when_feedback_is_not_selected(env):
+    _, job, pipelines, _ = env
+    repos = {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True}}
+    p = pipelines.create(job['id'], 'workspace/orders', repos,
+                         ['repository-intake', 'ace-analysis', 'test-engineering', 'variance-analysis'], 'tester@example.com')
+    assert find_agent_step(p['steps'], 'feedback') is None or find_agent_step(p['steps'], 'feedback')['status'] == 'SKIPPED'
+    variance = find_agent_step(p['steps'], 'variance-analysis')
+    assert all(d in {s['id'] for s in p['steps']} for d in json.loads(variance['depends_on']))
+
+
+def test_a_second_pipeline_for_a_job_with_one_in_flight_is_refused(env):
+    _, job, pipelines, _ = env
+    repos = {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True}}
+    first = pipelines.create(job['id'], 'workspace/orders', repos, ['repository-intake'], 'tester@example.com')
+    with pytest.raises(PipelineError, match='pipeline_already_active:' + first['id']):
+        pipelines.create(job['id'], 'workspace/orders', repos, ['repository-intake'], 'tester@example.com')
+
+
+def test_a_new_pipeline_is_allowed_once_the_earlier_one_is_finished(env):
+    repo, job, pipelines, _ = env
+    repos = {'ACE': {'repo_url': 'https://github.com/org/ace.git', 'branch': 'main', 'enabled': True}}
+    first = pipelines.create(job['id'], 'workspace/orders', repos, ['repository-intake'], 'tester@example.com')
+    with repo.connect() as c:
+        c.execute("update pipelines set status='COMPLETED' where id=?", (first['id'],))
+    second = pipelines.create(job['id'], 'workspace/orders', repos, ['repository-intake'], 'tester@example.com')
+    assert second['id'] != first['id']

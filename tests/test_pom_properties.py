@@ -37,3 +37,34 @@ def test_a_property_in_the_parent_block_is_replaced_by_its_value():
 def test_a_parent_property_with_no_value_is_reported():
     files, notes = P.complete([('p/pom.xml', '<project><parent><version>${nothing.here}</version></parent></project>')])
     assert '${nothing.here}' in files[0][1] and any('no value' in n for n in notes)
+
+
+PARENT_POM = ('<project><groupId>com.cvshealth.eip.microservices</groupId><artifactId>svc-parent</artifactId>'
+              '<version>0.0.1-SNAPSHOT</version><packaging>pom</packaging></project>')
+
+
+def _child(group, rel='../svc-parent/pom.xml'):
+    return ('<project><parent><groupId>%s</groupId><artifactId>svc-parent</artifactId>'
+            '<version>0.0.1-SNAPSHOT</version><relativePath>%s</relativePath></parent>'
+            '<artifactId>svc-web</artifactId></project>' % (group, rel))
+
+
+def test_a_child_whose_parent_coordinates_differ_from_the_parent_pom_takes_the_real_ones():
+    files = [('svc-parent/pom.xml', PARENT_POM), ('svc-web/pom.xml', _child('com.cvs.esl'))]
+    new, actions = P.align_module_parents(files)
+    assert '<groupId>com.cvshealth.eip.microservices</groupId><artifactId>svc-parent' in new[1][1]
+    assert 'com.cvs.esl' not in new[1][1]
+    assert new[0][1] == PARENT_POM, 'the parent pom itself is the truth and is left alone'
+    assert any('svc-web/pom.xml' in a for a in actions)
+
+
+def test_a_child_that_already_agrees_is_left_alone():
+    files = [('svc-parent/pom.xml', PARENT_POM), ('svc-web/pom.xml', _child('com.cvshealth.eip.microservices'))]
+    new, actions = P.align_module_parents(files)
+    assert new == files and actions == []
+
+
+def test_a_relative_path_that_points_at_no_generated_pom_is_left_alone():
+    files = [('svc-web/pom.xml', _child('com.cvs.esl', rel='../missing/pom.xml'))]
+    new, actions = P.align_module_parents(files)
+    assert new == files and actions == []

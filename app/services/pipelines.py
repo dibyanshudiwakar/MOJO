@@ -17,6 +17,7 @@ existing Approval Governance screens, which this module does not reimplement.
 import json
 import logging
 import re as _re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from app.repository import uid, now, digest
@@ -112,6 +113,10 @@ REPO_CONSUMERS = {'repository-intake': 'ACE', 'ace-analysis': 'ACE', 'framework-
 UNUSED_CLASSIFICATIONS = ('DORMANT', 'INACTIVE')
 CONVERSION_AGENTS = ('code-generation', 'feedback', 'test-engineering', 'variance-analysis', 'rca', 'remediation')
 DORMANCY_GATED = {'code-generation': ('dormancy-intelligence',), 'test-engineering': ('dormancy-intelligence',)}
+#: These read the project after feedback has repaired it, so they wait for feedback when it is selected. The
+#: catalogue cannot say so (feedback is optional, and a catalogue edge would prune these agents with it), so the
+#: edge is declared here, next to DORMANCY_GATED, and is added only when the feedback step exists.
+FEEDBACK_GATED = {'variance-analysis': ('feedback',), 'rca': ('feedback',), 'remediation': ('feedback',)}
 #: Recorded on a step skipped for this reason. Unlike a deselected agent it must not
 #: trigger a lifecycle gate: the job stays where dormancy left it.
 DORMANT_SKIP = 'skip_kind:dormant'
@@ -463,8 +468,26 @@ class PipelineService:
                       (local_path, resolved_commit, now(), job_id, role))
 
     # -- pipeline creation ----------------------------------------------------
+    #: A job with a pipeline still in flight may not get a second one: both would write one workspace folder.
+    ACTIVE_PIPELINE_STATUSES = ('DRAFT', 'READY', 'RUNNING', 'PAUSED', HELD)
+    #: Serialises the check and the insert, which a select on its own would not: requests are handled on several
+    #: threads. One server process, so a process lock is enough.
+    _CREATE_LOCK = threading.Lock()
+
     def create(self, job_id, workspace_dir, repos, selected_agent_ids, created_by, name='',
-              service_name='migrated-service', package_name='com.example.migrated'):
+               service_name='migrated-service', package_name='com.example.migrated'):
+        with self._CREATE_LOCK:
+            active = self.repo.one(
+                'select id,status from pipelines where job_id=? and status in (%s) order by created_at desc limit 1'
+                % ','.join('?' * len(self.ACTIVE_PIPELINE_STATUSES)),
+                (job_id, *self.ACTIVE_PIPELINE_STATUSES))
+            if active:
+                raise PipelineError('pipeline_already_active:%s:%s' % (active['id'], active['status']))
+            return self._create(job_id, workspace_dir, repos, selected_agent_ids, created_by, name,
+                                service_name, package_name)
+
+    def _create(self, job_id, workspace_dir, repos, selected_agent_ids, created_by, name,
+                service_name, package_name):
         repo_rows = self.save_repositories(job_id, repos)
         by_role = {r['role']: r for r in repo_rows}
         plan = self.impact(selected_agent_ids)
@@ -509,7 +532,7 @@ class PipelineService:
         # The conversion waits for dormancy's verdict. Added once every step exists, because the
         # plan does not order a step ahead of one that nothing depends on.
         for st in steps:
-            for d in DORMANCY_GATED.get(st['agent_id'], ()):
+            for d in DORMANCY_GATED.get(st['agent_id'], ()) + FEEDBACK_GATED.get(st['agent_id'], ()):
                 dep = step_id_by_key.get('AGENT:' + d)
                 have = json.loads(st['depends_on'])
                 if dep and dep not in have:

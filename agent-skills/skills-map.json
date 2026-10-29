@@ -165,7 +165,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "d7c1f0d72433b0ff2c99f234aff6840fec4a4de76526dc4ef567e82ad44247b5",
+          "sha256": "2778bd75b6d3b7951587a82d725e6fdb984ebaec937218814033a88b28c341ca",
           "kind": "owned",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -279,7 +279,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "d7c1f0d72433b0ff2c99f234aff6840fec4a4de76526dc4ef567e82ad44247b5",
+          "sha256": "2778bd75b6d3b7951587a82d725e6fdb984ebaec937218814033a88b28c341ca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -381,7 +381,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "d7c1f0d72433b0ff2c99f234aff6840fec4a4de76526dc4ef567e82ad44247b5",
+          "sha256": "2778bd75b6d3b7951587a82d725e6fdb984ebaec937218814033a88b28c341ca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
@@ -619,7 +619,7 @@
         },
         {
           "path": "references/structural-conventions.md",
-          "sha256": "d7c1f0d72433b0ff2c99f234aff6840fec4a4de76526dc4ef567e82ad44247b5",
+          "sha256": "2778bd75b6d3b7951587a82d725e6fdb984ebaec937218814033a88b28c341ca",
           "kind": "copy",
           "owner": "iib-to-ms-framework-baseline"
         },
