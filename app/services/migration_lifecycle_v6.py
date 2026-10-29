@@ -109,6 +109,28 @@ def _long(path):
  return Path(prefix+text) if Path(text).is_absolute() else path
 
 
+
+def retire_previous(base,keep):
+ """Remove the files the previous generation of this project recorded that the new one does not keep.
+
+ Only paths listed in the project's own ``generated-manifest.json`` are touched, so nothing a person put in
+ the folder is removed. Directories left empty by that are removed too.
+ """
+ base=Path(base);listing=base/'generated-manifest.json'
+ try:previous=json.loads(listing.read_text(encoding='utf-8'))
+ except (OSError,ValueError):return []
+ gone=[]
+ for item in previous if isinstance(previous,list) else []:
+  rel=str(item.get('path','') if isinstance(item,dict) else '')
+  if not rel or rel in keep:continue
+  target=(base/rel)
+  if base not in target.resolve().parents or not _long(target).is_file():continue
+  _long(target).unlink();gone.append(rel)
+  parent=target.parent
+  while parent!=base and not any(parent.iterdir()):
+   parent.rmdir();parent=parent.parent
+ return gone
+
 class MappingAndPlanningService:
  def __init__(self,repo):
   self.repo=repo;self.generator=SpringProjectGenerator();self.builder=BuildRunner();self.diff=DifferentialEvidenceEngine()
@@ -257,6 +279,9 @@ class MappingAndPlanningService:
    if base not in target.parents and target!=base:refused.append(rel+':path_outside_project');continue
    _long(target.parent).mkdir(parents=True,exist_ok=True);_long(target).write_text(content,encoding='utf-8')
    manifest.append({'path':target.relative_to(base).as_posix(),'hash':digest(content),'plan_id':plan_id})
+  # A regenerated project replaces the last one. Files that run recorded and this one does not contain
+  # (a package renamed between runs, say) are removed, because the gate compiles the whole tree.
+  retire_previous(base,{m['path'] for m in manifest})
   result={'root':str(base),'manifest':manifest,'content_hash':digest(json.dumps(manifest,sort_keys=True))}
   (base/'generated-manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
   self._register_artifacts(job_id,plan_id,result)

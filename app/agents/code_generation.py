@@ -27,12 +27,13 @@ running runtime is ``test.execute`` and ``runtime.invoke``, which this contract
 does not hold.
 """
 import json
+import re
 from pathlib import Path
 from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, ArtefactUnavailable, produce, produce_many
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
-from app.services import contract_reconcile, failure_reports, import_grounding, maven_settings, pom_properties
+from app.services import contract_reconcile, failure_reports, import_grounding, maven_settings, pom_properties, spring_versions
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -60,6 +61,51 @@ def _omission(item):
     if isinstance(item, dict):
         return '%s: %s' % (item.get('path', ''), item.get('reason') or 'no reason given')
     return str(item)
+
+
+#: A TODO, FIXME or XXX marker left in generated code is an open decision that was not made, so the file is refused and
+#: the model is asked again with the reason. The decision belongs in action_items, where a person can act on it.
+OPEN_MARKER = re.compile(r'\b(TODO|FIXME|XXX)\b')
+
+
+def no_open_markers(key, answer):
+    """The correction for a file that carries an open-decision marker, or ``None`` for a clean file."""
+    content = (answer or {}).get('content') or ''
+    if OPEN_MARKER.search(content):
+        return ('the file still contains a TODO/FIXME/XXX marker. Write the complete behaviour instead, using the '
+                'skill and framework standards where the ACE source is silent, and record the assumption in '
+                'action_items rather than in the code.')
+    return None
+
+
+def authored_with_no_markers(context, prompt_name, items, **kwargs):
+    """``produce_many`` for a generated file, with the open-marker check applied to every answer."""
+    return produce_many(context, prompt_name, items, validator=no_open_markers, **kwargs)
+
+
+#: Path fragments of files other files compile against. Anything matching is written in the first wave.
+CONTRACT_PATHS = ('/api/', '/model/', '/dto/', '/constant/', 'Api.java', 'Request.java', 'Response.java', 'Dto.java',
+                  'Constants.java')
+
+
+def is_contract_file(path):
+    """True for a file the rest of the project depends on: every non-Java file, and the Java files that declare types."""
+    text = str(path).replace(chr(92), '/')
+    return (not text.endswith('.java')) or any(h in text for h in CONTRACT_PATHS)
+
+
+def signatures_of(authored):
+    """The real signatures of the Java types in ``{path: {'content': ...}}``, as the contract check reads them."""
+    out = {}
+    for path, answer in authored.items():
+        if not str(path).endswith('.java'):
+            continue
+        text = (answer or {}).get('content') or ''
+        for name, info in contract_reconcile._types_of(contract_reconcile._code(text)).items():
+            out[name] = {'kind': info['kind'], 'supers': info['supers'],
+                         'methods': sorted('%s %s(%s)' % (ret, method, ', '.join(params))
+                                           for method, sigs in info['methods'].items() for ret, params in sigs)}
+    return out
 
 
 class CodeGenerationAgent(BaseAgent):
@@ -104,6 +150,12 @@ class CodeGenerationAgent(BaseAgent):
             return own.focus_many(wanted)
         except (AttributeError, KeyError, SkillIntegrityError):
             return None
+
+    def _framework_root(self, context):
+        """The job's cloned FRAMEWORK repository, whose parent pom sets the Spring line, or ``None`` when none was supplied."""
+        row = self.repo.one("select local_path from job_repositories where job_id=? and role='FRAMEWORK' "
+                            "and enabled=1 and local_path<>''", (context.job_id,))
+        return row['local_path'] if row else None
 
     def _author_project(self, context, service, plan_id):
         """The project, authored by the model from the skill. The only path.
@@ -159,18 +211,38 @@ class CodeGenerationAgent(BaseAgent):
         # was written -- hand that whole list to every file, so each one can write against
         # a sibling's declared intent instead of inventing its own guess about it.
         project_files = [{'path': item['path'], 'purpose': item.get('purpose', '')} for item in layout['files']]
-        authored, file_provenance = produce_many(
-            context, self.FILE_PROMPT,
-            [(item['path'], {'path': item['path'], 'purpose': item.get('purpose', ''),
-                             'source_reference': item.get('source_reference', ''),
-                             'skill_reference': item.get('skill_reference', ''),
-                             'service_name': context.param('service_name'),
-                             'package_name': context.param('package_name'),
-                             'tasks': tasks,
-                             'semantic_model': model, 'framework_standards': standards,
-                             'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
-             for item in wanted],
-            skill=skill, effort=AUTHORING_EFFORT)
+        def request(item, signatures):
+            payload = {'path': item['path'], 'purpose': item.get('purpose', ''),
+                       'source_reference': item.get('source_reference', ''),
+                       'skill_reference': item.get('skill_reference', ''),
+                       'service_name': context.param('service_name'),
+                       'package_name': context.param('package_name'),
+                       'tasks': tasks,
+                       'semantic_model': model, 'framework_standards': standards,
+                       'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE}
+            if signatures:
+                payload['project_contracts'] = signatures
+            return (item['path'], payload)
+
+        # Two parallel waves. The files other files compile against (interfaces, models, DTOs, constants, configuration)
+        # are written first; the consumers are written second, each with the real signatures wave one produced. Both
+        # waves keep their requests in parallel, so the cost is one extra wave boundary, and what it buys is that a
+        # consumer no longer has to guess a method name the contract already fixed.
+        first = [i for i in wanted if is_contract_file(i['path'])]
+        second = [i for i in wanted if not is_contract_file(i['path'])]
+        authored, file_provenance, attempts = {}, {}, 0
+        if first:
+            found, provenance = authored_with_no_markers(context, self.FILE_PROMPT, [request(i, None) for i in first],
+                                             skill=skill, effort=AUTHORING_EFFORT)
+            authored.update(found)
+            file_provenance, attempts = provenance, attempts + int(provenance.get('attempts_total') or 0)
+        if second:
+            found, provenance = authored_with_no_markers(context, self.FILE_PROMPT,
+                                             [request(i, signatures_of(authored)) for i in second],
+                                             skill=skill, effort=AUTHORING_EFFORT)
+            authored.update(found)
+            file_provenance, attempts = provenance, attempts + int(provenance.get('attempts_total') or 0)
+        file_provenance = dict(file_provenance, waves=int(bool(first)) + int(bool(second)), attempts_total=attempts)
         # No emptiness filter: 'content' carries minLength 1, so a blank file is
         # a violation on that one file and is re-asked. Filtering here meant one
         # blank response discarded every other file the model had authored.
@@ -178,6 +250,11 @@ class CodeGenerationAgent(BaseAgent):
         actions = ['omitted by the model: ' + _omission(x) for x in (layout.get('omitted') or [])]
         files, pom_actions = pom_properties.complete(files)
         actions += pom_actions
+        files, version_actions = spring_versions.strip_spring_versions(files)
+        actions += version_actions
+        files, spring_actions = pom_properties.pin_spring_line(
+            files, import_grounding.m2_root(), framework_root=(self._framework_root(context)))
+        actions += spring_actions
         files, import_actions = import_grounding.ground(files, import_grounding.m2_root())
         actions += import_actions
         files, class_actions = self._complete_missing_classes(
@@ -188,7 +265,7 @@ class CodeGenerationAgent(BaseAgent):
         actions += breaker_actions
         # Last, so it sees the files as they will be written, including anything revised above.
         files, contract_actions = contract_reconcile.reconcile(
-            context, files, import_grounding.m2_root(), produce_many, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
+            context, files, import_grounding.m2_root(), authored_with_no_markers, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
             {'service_name': context.param('service_name'), 'package_name': context.param('package_name'),
              'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
              'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
@@ -279,7 +356,7 @@ class CodeGenerationAgent(BaseAgent):
                                       'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
                                       'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE}))
         try:
-            authored, _prov = produce_many(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
+            authored, _prov = authored_with_no_markers(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
         except ArtefactUnavailable as exc:
             return files, ['could not write %d class(es) the project imports (%s); the build will fail on them.'
                            % (len(requests), exc)]
@@ -287,7 +364,7 @@ class CodeGenerationAgent(BaseAgent):
         return files + added, ['wrote %s, which the project imports and did not define' % path for path, _ in added]
 
     def _revise(self, context, targets, tasks, model, standards, skill, project_files):
-        return produce_many(
+        return authored_with_no_markers(
             context, self.FILE_PROMPT,
             [(p, {'path': p, 'purpose': 'Revision of this class: ' + self.BREAKER_CHANGE,
                   'current_content': c, 'required_change': self.BREAKER_CHANGE,

@@ -41,6 +41,60 @@ FOCUS = {'.esql': 'references/construct-mapping.md',
          '.subflow': 'references/construct-mapping.md'}
 
 
+#: Characters of the previous part repeated at the start of the next, so a construct that begins near the end of one
+#: part is seen whole by the part that reports it. Context only: the model is told not to report anything in it.
+TAIL_CHARS = 12_000
+
+
+def tail_of(previous):
+    """The last whole lines of ``previous`` that fit ``TAIL_CHARS`` once JSON-escaped."""
+    lines, size, out = previous.splitlines(keepends=True), 0, []
+    for line in reversed(lines):
+        cost = len(json.dumps(line))
+        if out and size + cost > TAIL_CHARS:
+            break
+        out.append(line)
+        size += cost
+    return ''.join(reversed(out))
+
+
+#: The identifying field of each semantic-model area, so the same construct reported twice can be recognised.
+IDENTITY = {'flows': ('name', 'id', 'path'), 'subflows': ('name', 'id', 'path'), 'esql': ('path',),
+            'maps': ('name', 'id', 'path'), 'schemas': ('name', 'id', 'path'), 'policies': ('name', 'id', 'path'),
+            'interfaces': ('node', 'endpoint', 'protocol'), 'dependencies': ('name', 'id'),
+            'ambiguities': ('id', 'question')}
+
+
+def dedupe_parts(fragments):
+    """Drop a construct a later part of the same file repeats. The first part that reports it is kept.
+
+    ``fragments`` is ``[(key, fragment)]`` in part order. The schema carries no source span, so identity is the
+    file plus the area's identifying field, or the whole item when it has none.
+    """
+    seen, out = set(), []
+    for key, fragment in fragments:
+        base = key.split('#part')[0]
+        if not isinstance(fragment, dict):
+            out.append((key, fragment))
+            continue
+        cleaned = dict(fragment)
+        for area, fields in IDENTITY.items():
+            items = cleaned.get(area)
+            if not isinstance(items, list):
+                continue
+            kept = []
+            for item in items:
+                ident = next((item.get(f) for f in fields if isinstance(item, dict) and item.get(f)), None)
+                token = (base, area, str(ident) if ident is not None else json.dumps(item, sort_keys=True))
+                if token in seen:
+                    continue
+                seen.add(token)
+                kept.append(item)
+            cleaned[area] = kept
+        out.append((key, cleaned))
+    return out
+
+
 class ACEAnalysisAgent(BaseAgent):
     AGENT_ID = 'ace-analysis'
     SKILL = 'iib-to-ms-ace-analysis'
@@ -96,6 +150,11 @@ class ACEAnalysisAgent(BaseAgent):
                     payload.update({'part': n, 'of_parts': len(pieces),
                                     'note': 'This is one line-aligned part of a larger file; '
                                             'report only the constructs that begin in this part.'})
+                    if n > 1:
+                        payload['context_before'] = tail_of(pieces[n - 2])
+                        payload['context_note'] = ('context_before is the end of the previous part, given so that a '
+                                                   'construct which begins there is understood in full. Report nothing '
+                                                   'that begins inside it.')
                 items.append((key, payload))
                 order.append(key)
         fragments, provenance = produce_many(context, self.PROMPT, items, skill=skill)
@@ -107,7 +166,8 @@ class ACEAnalysisAgent(BaseAgent):
         # reordering a construct the per-file answers established.
         for fragment in fragments.values():
             self._literals_as_text(fragment)
-        model = parser.merge([fragments[k] for k in order if k in fragments])
+        kept = dedupe_parts([(k, fragments[k]) for k in order if k in fragments])
+        model = parser.merge([fragment for _key, fragment in kept])
         for rel, text, ext in properties:
             parser.fold(model, rel, text, ext)
         # Folded deterministically, not asked of the model, but still real
@@ -131,12 +191,13 @@ class ACEAnalysisAgent(BaseAgent):
         measures. A file that fits stays one part, so the common case is
         unchanged; only an oversized file is split.
         """
+        budget = cls.CHUNK_CHARS - TAIL_CHARS      # room left for the tail each part carries
         if len(json.dumps(text)) <= cls.CHUNK_CHARS:
             return [text]
         parts, current, size = [], [], 0
-        step = cls.CHUNK_CHARS // 6
+        step = budget // 6
         for line in text.splitlines(keepends=True):
-            while len(json.dumps(line)) > cls.CHUNK_CHARS:
+            while len(json.dumps(line)) > budget:
                 # One line larger than a whole request: cut it, there is no
                 # line boundary to honour.
                 if current:
@@ -145,7 +206,7 @@ class ACEAnalysisAgent(BaseAgent):
                 parts.append(line[:step])
                 line = line[step:]
             cost = len(json.dumps(line))
-            if current and size + cost > cls.CHUNK_CHARS:
+            if current and size + cost > budget:
                 parts.append(''.join(current))
                 current, size = [], 0
             current.append(line)

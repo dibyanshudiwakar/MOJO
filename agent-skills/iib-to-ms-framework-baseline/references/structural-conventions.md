@@ -209,7 +209,7 @@ Beyond the `<parent>`/`framework.version` block already covered in the connector
     <java.version>21</java.version>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <camel.version><!-- pin to what sibling repos in this family use, not a guessed "latest" --></camel.version>
-    <springdoc.version><!-- same --></springdoc.version>
+    <springdoc.version><!-- newest on the framework parent's Spring Boot line, see the note below --></springdoc.version>
     <framework.version>3.2.2</framework.version>
 </properties>
 
@@ -220,7 +220,7 @@ Beyond the `<parent>`/`framework.version` block already covered in the connector
 </scm>
 ```
 
-⚠️ **`camel.version`/`springdoc.version` are pinned per-repo, not globally uniform** — sibling repos in the same family can differ (e.g. one uses camel `4.20.0` + springdoc `2.8.4`, another uses `4.22.1`/`3.1.0`). Rule 7 (framework version) covers `framework.version` — for `camel.version`/`springdoc.version`, prefer copying the value from the **closest sibling repo for the same service family** if one exists, over inferring "the highest available."
+⚠️ **Spring versions come from the framework parent only.** `framework-starter` (the `framework.version` parent) imports Spring Boot through `org-springframework-boot.version`; every Spring Boot starter and plugin inherits that line, so no pom pins a Boot version of its own. `springdoc.version` is not managed by the framework, so it must be the newest springdoc release on the same Spring line as that Boot version: springdoc 3.x for Boot 4.x, 2.x for Boot 3.x. Do not copy a springdoc or camel value from a sibling repo or an example in this document: those pins are older and belong to older Spring lines.
 
 ### Web pom.xml — explicit version tags
 

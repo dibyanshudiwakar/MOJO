@@ -483,3 +483,38 @@ def test_a_class_the_project_imports_and_never_wrote_is_written(repo, job, param
     # The path is past Windows' 260-character limit, so it is read through the same prefix the writer uses.
     assert _long(written).is_file(), 'the imported class is written in the package the project declares'
     assert _long(written).read_text().startswith('package ')
+
+
+def test_contracts_are_written_in_the_first_wave_and_consumers_get_their_real_signatures(repo, job, params, gateway, dispatch):
+    """The Api interface is written first; the controller that implements it is written second with the Api's signatures."""
+    api = WANTED[3][0].replace('ValidateBridgeSupplyController.java', 'ValidateBridgeApi.java')
+    controller = WANTED[3][0]
+    layout = {'root': ROOT, 'omitted': [], 'files': [
+        {'path': p, 'purpose': why, 'skill_reference': 'references/structural-conventions.md'}
+        for p, why in WANTED + [(api, 'the interface the controller implements')]]}
+    seen = []
+
+    def answer(payload):
+        if 'purpose' not in payload:
+            return layout
+        seen.append((payload['path'], payload))
+        if payload['path'] == api:
+            return {'path': api, 'content': ('package com.cvshealth.eip.microservices.controller;\n'
+                                              'public interface ValidateBridgeApi {\n'
+                                              '    String getBridge(String id);\n}\n')}
+        if payload['path'] == controller:
+            return {'path': controller, 'content': ('package com.cvshealth.eip.microservices.controller;\n'
+                                                     'public class ValidateBridgeSupplyController implements ValidateBridgeApi {\n'
+                                                     '    public String getBridge(String id) { return id; }\n}\n')}
+        return {'path': payload['path'], 'content': _content(payload['path'])}
+
+    gateway(LAYOUT, model_name=ALIAS)
+    gateway(FILE, model_name=ALIAS)
+    from tests.agents.conftest import ArtefactProvider as _P
+    outcome = dispatch(job['id'], 'code-generation', params, provider=_P(answer))
+    assert outcome['status'] == 'COMPLETED'
+    paths = [p for p, _ in seen]
+    assert paths.index(api) < paths.index(controller), 'the contract is written before the class that implements it'
+    consumer = dict(seen)[controller]
+    assert consumer['project_contracts']['ValidateBridgeApi']['methods'] == ['String getBridge(String)']
+    assert 'project_contracts' not in dict(seen)[api], 'the first wave is written without signatures to read'
