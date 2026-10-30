@@ -45,6 +45,12 @@ class DormancyIntelligenceAgent(BaseAgent):
         metrics = {'confidence': assessment['confidence'],
                    'known_signals': sum(v is not None for v in supplied.values()),
                    'computed_classification': computed['classification'],
+                   # What the model actually answered, kept distinct from
+                   # assessment['classification'] now that record() can
+                   # override it: with zero known signals the model's guess
+                   # is not used for gating, but it must stay visible rather
+                   # than vanish silently -- see DormancyService.record.
+                   'model_classification': verdict.get('classification'),
                    # Whether the model reached the same verdict the rules do.
                    # Recorded either way: a disagreement is the signal worth
                    # having, and the rules are not silently right.

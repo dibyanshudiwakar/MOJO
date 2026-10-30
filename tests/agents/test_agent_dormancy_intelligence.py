@@ -77,6 +77,40 @@ class _Refusing:
         raise RuntimeError('provider_error:AuthenticationError:Error code: 401')
 
 
+def test_a_zero_evidence_guess_does_not_gate_code_generation(repo, job, gateway, provider):
+    """The real bug: no pipeline ever supplies these signals, so the model is
+    asked to classify with nothing to go on -- and answered DORMANT anyway,
+    which gated code-generation off for every job. With zero known signals
+    the rules' own UNKNOWN is what gets recorded and gated on, not a guess
+    made from no evidence; the model's guess still shows up in the metrics.
+    """
+    gateway(DormancyIntelligenceAgent.PROMPT)
+    provider.answers['default'] = {'classification': 'DORMANT', 'rationale': 'assumed inactive'}
+    result = DormancyIntelligenceAgent(repo).run(job['id'], params={}, provider=provider)
+    assert result.metrics['known_signals'] == 0
+    assert result.outputs['classification'] == 'UNKNOWN'
+    assert result.outputs['confidence'] == 0.0
+    row = repo.one('select classification,rationale from dormancy_assessments where id=?',
+                   (result.outputs['evidence'],))
+    assert row['classification'] == 'UNKNOWN'
+    assert 'DORMANT' in row['rationale']                 # the model's guess stays visible
+    # Still visible and distinct from what was actually recorded/gated on.
+    assert result.metrics['model_classification'] == 'DORMANT'
+    assert result.metrics['agrees_with_rules'] is True    # both are UNKNOWN once the guess is set aside
+
+
+def test_a_real_signal_still_lets_the_models_classification_stand(repo, job, gateway, provider):
+    """The override is specifically for zero evidence -- any real signal and the
+    model's verdict is used exactly as before, including a genuine DORMANT."""
+    gateway(DormancyIntelligenceAgent.PROMPT)
+    provider.answers['default'] = {'classification': 'DORMANT', 'rationale': 'no traffic in 120 days'}
+    result = DormancyIntelligenceAgent(repo).run(
+        job['id'], params={'traffic_count': 0, 'last_seen_days': 120, 'deployed': True,
+                           'already_migrated': False}, provider=provider)
+    assert result.outputs['classification'] == 'DORMANT'
+    assert result.metrics['model_classification'] == 'DORMANT'
+
+
 def test_the_model_classifies_and_a_disagreement_is_recorded_not_hidden(
         repo, job, gateway, provider):
     """The model's classification is the record; the rules' one is kept beside it.
