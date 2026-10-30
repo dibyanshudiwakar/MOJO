@@ -1,0 +1,14 @@
+flowchart LR
+    A[approvals rows for gate] --> D{decision allowed?}
+    D -- no --> X[discard]
+    D -- yes --> I{iteration == job.iteration?}
+    I -- no --> X
+    I -- yes --> TO{within timeout?}
+    TO -- no --> X
+    TO -- yes --> EV{all evidence immutable<br/>& hash matches binding?}
+    EV -- no --> X
+    EV -- yes --> OK[valid approval]
+    OK --> Q
+    QN[distinct identities] --> Q{count ≥ quorum?}
+    Q -- no --> REJ[required_gate_approval_missing]
+    Q -- yes --> ALLOW[ALLOW transition]

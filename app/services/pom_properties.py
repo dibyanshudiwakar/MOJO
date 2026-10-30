@@ -321,3 +321,47 @@ def pin_spring_line(files, m2_root, framework_root=None):
                                % (path, found.group(1), boot.group(1), line))
         out.append((path, text))
     return out, actions
+
+
+# -- artifacts nothing manages ----------------------------------------------------------------------------------------
+#: group:artifact pairs that the framework BOM and the Spring Boot BOM do not manage but the skill's standard poms use.
+#: Without a version Maven stops reading the project ("'dependencies.dependency.version' ... is missing").
+UNMANAGED_ARTIFACTS = ('org.openapitools:jackson-databind-nullable',)
+_UNMANAGED_FALLBACK = {'org.openapitools:jackson-databind-nullable': '0.2.6'}
+
+
+def pin_unmanaged_versions(files, m2_root):
+    """``(files, action_items)`` with a version added to each unmanaged dependency that has none.
+
+    The version is the newest one in the local Maven repository, which is the one the build can resolve offline; the
+    table's value is used only when the repository has none. Dependencies that already carry a version, and every
+    artifact a BOM manages, are left alone.
+    """
+    from pathlib import Path
+    actions, out = [], []
+    for path, content in files:
+        if not str(path).replace(chr(92), '/').endswith('pom.xml'):
+            out.append((path, content))
+            continue
+        text = content
+        for match in re.finditer(r'<dependency>(?:(?!</dependency>).)*</dependency>', content, re.S):
+            block = match.group(0)
+            group = re.search(r'<groupId>\s*([^<>]+?)\s*</groupId>', block)
+            artifact = re.search(r'<artifactId>\s*([^<>]+?)\s*</artifactId>', block)
+            if not (group and artifact) or '<version>' in block:
+                continue
+            coordinate = '%s:%s' % (group.group(1), artifact.group(1))
+            if coordinate not in UNMANAGED_ARTIFACTS:
+                continue
+            folder = Path(m2_root).joinpath(*group.group(1).split('.'), artifact.group(1))
+            cached = [d.name for d in folder.iterdir() if d.is_dir()] if folder.is_dir() else []
+            version = max(cached, key=_version_key) if cached else _UNMANAGED_FALLBACK.get(coordinate, '')
+            if not version:
+                continue
+            closing = '</artifactId>'
+            fixed = block.replace(closing, closing + '\n            <version>%s</version>' % version, 1)
+            text = text.replace(block, fixed, 1)
+            actions.append('%s: %s has no managed version; set to %s (the newest in the local Maven repository).'
+                           % (path, coordinate, version))
+        out.append((path, text))
+    return out, actions

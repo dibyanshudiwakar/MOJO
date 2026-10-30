@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant C as Caller (API/Orchestrator/Worker)
+    participant R as AgentRegistry.dispatch
+    participant Reg as agent_registry (DB)
+    participant Impl as Agent impl (execute)
+    participant GW as ReasoningGateway / produce
+    participant Ev as EvidenceService
+    participant L as audit_ledger
+
+    C->>R: dispatch(job, agent_id, roles, identity, params)
+    R->>Reg: contract(agent_id, version) — APPROVED?
+    R->>R: conformance() — no tool/output drift
+    R->>R: dependency_status() — prereqs COMPLETED
+    R->>R: resolve LLM alias (fail-closed vs model_registry)
+    R->>Reg: start() → agent_runs row (RUNNING, owner)
+    R->>Impl: execute(context)
+    Impl->>GW: produce(prompt, payload)
+    alt provider available
+        GW-->>Impl: model artefact + provenance
+    else no provider / refused
+        GW-->>Impl: ArtefactUnavailable → FAIL
+    end
+    Impl-->>R: AgentResult(outputs, evidence, clarifications)
+    R->>R: verify outputs ⊆ contract; tool caps for evidence/clarification
+    R->>Ev: register evidence (hash = artefact content_hash)
+    R->>Reg: complete() → run COMPLETED/FAILED/CANCELLED
+    R->>L: audit + learning records
+    R-->>C: {run_id, status, outputs, evidence}

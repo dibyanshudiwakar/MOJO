@@ -1,0 +1,52 @@
+erDiagram
+    JOBS ||--o{ WORKFLOW_EVENTS : emits
+    JOBS ||--o{ APPROVALS : has
+    JOBS ||--o{ EVIDENCE : produces
+    JOBS ||--o{ AGENT_RUNS : runs
+    JOBS ||--o{ CLARIFICATIONS : raises
+    JOBS ||--o{ VERSIONS : snapshots
+    JOBS ||--o{ DIFFERENTIAL_PACKAGES : tests
+    DIFFERENTIAL_PACKAGES ||--o{ DIFFERENTIAL_EVIDENCE : cases
+    JOBS ||--o{ QUALITY_RUNS : validates
+    JOBS ||--o{ SECURITY_FINDINGS : scans
+    APPROVALS }o--|| GATE_CONTROLS : governed_by
+    AGENT_RUNS }o--|| AGENT_REGISTRY : contract
+    EVIDENCE }o--|| AGENT_RUNS : from
+    AGENT_REGISTRY ||--o{ SKILL_AGENT_BINDINGS : uses
+    AUDIT_LEDGER }o--|| JOBS : chains
+
+    JOBS {
+        text id PK
+        text service
+        text state
+        int iteration
+        text rollback_pointer
+        text environment
+    }
+    APPROVALS {
+        text id PK
+        text gate
+        text decision
+        text approver_identity
+        text evidence_ids
+        text artifact_bindings
+        int iteration
+    }
+    EVIDENCE {
+        text id PK
+        text content_hash
+        int immutable
+        text producer
+    }
+    AGENT_RUNS {
+        text id PK
+        text agent_id
+        text status
+        text operator_identity
+        text effective_model_alias
+    }
+    AUDIT_LEDGER {
+        int sequence PK
+        text previous_hash
+        text entry_hash
+    }

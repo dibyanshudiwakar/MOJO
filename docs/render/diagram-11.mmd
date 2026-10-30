@@ -1,0 +1,11 @@
+graph TB
+    subgraph Host["Single process (container or start.ps1)"]
+        SRV[app.server — ThreadingHTTPServer :8080]
+        WKR[WorkerLoop daemon thread]
+        SRV --- WKR
+    end
+    SRV --> FILE[(factory-v2.db + WAL)]
+    WKR --> FILE
+    SRV -.AI_PROVIDER=gateway.-> LMS[CVS LMS Gateway → Bedrock → Claude]
+    SRV -.-> GH[GitHub API]
+    note["FACTORY_DB_DRIVER=postgres swaps store<br/>without code change"]

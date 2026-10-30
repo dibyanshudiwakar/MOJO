@@ -1,0 +1,18 @@
+flowchart TD
+    S([Start run]) --> J[Read job state + iteration]
+    J --> T{Terminal / halted?}
+    T -- yes --> STOP[Stop with reason]
+    T -- no --> TGT[Compute target state]
+    TGT --> GOVR[Dispatch governance agent]
+    GOVR --> GF{GATE_FIRST state<br/>& approval missing?}
+    GF -- yes --> STOP
+    GF -- no --> PEND{Pending pipeline<br/>agents for state?}
+    PEND -- yes --> RUN[Dispatch each agent<br/>via AgentRegistry]
+    RUN --> ERR{Failed / missing input / role?}
+    ERR -- yes --> CLAR[Raise clarification / stop]
+    ERR -- no --> KE[Dispatch knowledge-evidence]
+    KE --> J
+    PEND -- no --> ALLOW{Gate allows transition?}
+    ALLOW -- no --> STOP
+    ALLOW -- yes --> TR[FactoryService.transition]
+    TR --> J
