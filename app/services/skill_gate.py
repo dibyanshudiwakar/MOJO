@@ -53,6 +53,13 @@ SPEC_URIS = re.compile(
     r'|maven\.apache\.org|json-schema\.org|javax\.xml|www\.opengis\.net)')
 URL = re.compile(r'https?://\S+')
 
+#: A bare OS-environment-variable-style reference: ``${SOME_NAME}``, no default. Deliberately does not
+#: match ``${CONTEXT_ROOT:/path}``/``${PORT:8080}`` (Spring's own default-value syntax, a literal baked
+#: in) -- the colon puts something other than ``[A-Z_][A-Z0-9_]*`` before the closing brace, so this
+#: pattern simply does not match those. What is left is exactly the shape Rule 15 forbids: a value that
+#: silently depends on something being set outside the repository, with no visible fallback.
+ENV_VAR_REF = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)\}')
+
 BLOCKING, HIGH, MEDIUM = 'BLOCKING', 'HIGH', 'MEDIUM'
 
 
@@ -453,6 +460,39 @@ def m27_settings_xml(p):
     return []
 
 
+def m28_no_env_var_placeholders(p):
+    """[M28][Rule 15] No packaged or config-map properties file defers a value to an OS environment variable.
+
+    Confirmed live on a real RxClaim SBO generation (Pharmacies): five of ten per-environment config-maps
+    carried the real host (``mandatory-migration-rules.md`` Rule 12's formula), the other five
+    ``application.http.restclient.rxclaim.uri=${RXCLAIM_URI}`` -- same skill, same rule, same run, since
+    each config-map is authored by its own independent per-file model call with no visibility into its
+    siblings'. Rule 15 asking the model not to do this was already in the skill; this is the mechanical
+    backstop that actually fails the gate when it happens anyway, the way M27 already does for
+    ``settings.xml`` -- documentation alone caught nothing until a person read the files by hand.
+
+    ``${CONTEXT_ROOT:/path}``/``${PORT:8080}`` -- Spring's own default-value syntax, a literal baked right
+    in -- is not what this flags, nor is a property genuinely pointing at another key already defined in
+    the same file (``ENV_VAR_REF`` cannot match either shape). Only a bare, undefaulted, undefined
+    reference counts: exactly the one that depends on something nobody generating this file can confirm
+    will ever be set.
+    """
+    found = []
+    files = p.config_maps + [f for name in ('application.properties', 'application-local.properties')
+                             for f in p.packaged(name)]
+    for f in files:
+        text = p.read(f)
+        defined = keys(text)
+        for i, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith('#'):
+                continue
+            for name in ENV_VAR_REF.findall(line):
+                if name not in defined:
+                    found.append('%s:%d references ${%s}, which nothing in this file defines and which '
+                                 'carries no default' % (p.rel(f), i, name))
+    return found
+
+
 #: (id, severity, skill reference, applies-to backend or None, function, remediation)
 CHECKS = [
     ('B4', BLOCKING, 'gap-checklist.md [B4]', None, b4_framework_restclient,
@@ -501,6 +541,10 @@ CHECKS = [
      'rm -rf <service>-oci-parent/target (not the web module\'s).'),
     ('M27', MEDIUM, 'gap-checklist.md [M27]; Rule 14', None, m27_settings_xml,
      'Copy references/templates/maven-settings.xml to the repo root as settings.xml.'),
+    ('M28', MEDIUM, 'gap-checklist.md [M28]; Rule 15', None, m28_no_env_var_placeholders,
+     'Replace ${...} with the real value if a rule already gives it (e.g. Rule 12), or a literal, '
+     'clearly-marked placeholder (e.g. <VALUE_TBD_BY_TEAM>) if it genuinely is not known -- never an '
+     'OS environment-variable reference.'),
 ]
 
 
