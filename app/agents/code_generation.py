@@ -33,7 +33,7 @@ from app.agents.artefact import AUTHORING_EFFORT, LISTING_EFFORT, ArtefactUnavai
 from app.agents.base import AgentResult, BaseAgent, EvidenceRef
 from app.agents.reasoning import NOT_CONSULTED, ReasoningGateway
 from app.agents.skills import SkillIntegrityError
-from app.services import contract_reconcile, failure_reports, import_grounding, maven_settings, pom_properties, spring_versions
+from app.services import skill_gate, contract_reconcile, failure_reports, import_grounding, maven_settings, pom_properties, spring_versions
 from app.services.migration_lifecycle_v6 import MappingAndPlanningService
 
 #: The connector reference the detected backend type names, loaded alongside
@@ -78,9 +78,30 @@ def no_open_markers(key, answer):
     return None
 
 
-def authored_with_no_markers(context, prompt_name, items, **kwargs):
-    """``produce_many`` for a generated file, with the open-marker check applied to every answer."""
-    return produce_many(context, prompt_name, items, validator=no_open_markers, **kwargs)
+def no_endpoint_literals(key, answer):
+    """The correction for a Java file that hard-codes a service URL, or ``None``.
+
+    The scanner (HARDCODED_ENDPOINT_SCAN) counts an absolute http(s) URL in Java unless it names a spec, a namespace or
+    a parser feature. Such a URL belongs in the properties file under a key, and the code injects it with @Value.
+    """
+    if not str(key).endswith('.java'):
+        return None
+    content = (answer or {}).get('content') or ''
+    for match in skill_gate.URL.finditer(skill_gate.strip_java_comments(content)):
+        if not skill_gate.SPEC_URIS.match(match.group(0)):
+            return ('the file hard-codes the service URL %s. Move its value to the configuration files under a property '
+                    'key, and inject the key with @Value("${...}") into an instance field. A URL must not appear in Java '
+                    'source, including as a static constant.' % match.group(0)[:120])
+    return None
+
+
+def authored_with_no_endpoints(context, prompt_name, items, **kwargs):
+    """``produce_many`` for a generated file, refusing a hard-coded service URL in Java as well as an open marker."""
+    def check(key, answer):
+        return no_open_markers(key, answer) or no_endpoint_literals(key, answer)
+    return produce_many(context, prompt_name, items, validator=check, **kwargs)
+
+
 
 
 #: Path fragments of files other files compile against. Anything matching is written in the first wave.
@@ -232,12 +253,12 @@ class CodeGenerationAgent(BaseAgent):
         second = [i for i in wanted if not is_contract_file(i['path'])]
         authored, file_provenance, attempts = {}, {}, 0
         if first:
-            found, provenance = authored_with_no_markers(context, self.FILE_PROMPT, [request(i, None) for i in first],
+            found, provenance = authored_with_no_endpoints(context, self.FILE_PROMPT, [request(i, None) for i in first],
                                              skill=skill, effort=AUTHORING_EFFORT)
             authored.update(found)
             file_provenance, attempts = provenance, attempts + int(provenance.get('attempts_total') or 0)
         if second:
-            found, provenance = authored_with_no_markers(context, self.FILE_PROMPT,
+            found, provenance = authored_with_no_endpoints(context, self.FILE_PROMPT,
                                              [request(i, signatures_of(authored)) for i in second],
                                              skill=skill, effort=AUTHORING_EFFORT)
             authored.update(found)
@@ -255,6 +276,8 @@ class CodeGenerationAgent(BaseAgent):
         files, spring_actions = pom_properties.pin_spring_line(
             files, import_grounding.m2_root(), framework_root=(self._framework_root(context)))
         actions += spring_actions
+        files, unmanaged_actions = pom_properties.pin_unmanaged_versions(files, import_grounding.m2_root())
+        actions += unmanaged_actions
         files, import_actions = import_grounding.ground(files, import_grounding.m2_root())
         actions += import_actions
         files, class_actions = self._complete_missing_classes(
@@ -265,7 +288,7 @@ class CodeGenerationAgent(BaseAgent):
         actions += breaker_actions
         # Last, so it sees the files as they will be written, including anything revised above.
         files, contract_actions = contract_reconcile.reconcile(
-            context, files, import_grounding.m2_root(), authored_with_no_markers, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
+            context, files, import_grounding.m2_root(), authored_with_no_endpoints, self.FILE_PROMPT, AUTHORING_EFFORT, skill,
             {'service_name': context.param('service_name'), 'package_name': context.param('package_name'),
              'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
              'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE})
@@ -356,7 +379,7 @@ class CodeGenerationAgent(BaseAgent):
                                       'tasks': tasks, 'semantic_model': model, 'framework_standards': standards,
                                       'project_files': project_files, 'project_files_note': self.PROJECT_FILES_NOTE}))
         try:
-            authored, _prov = authored_with_no_markers(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
+            authored, _prov = authored_with_no_endpoints(context, self.FILE_PROMPT, requests, skill=skill, effort=AUTHORING_EFFORT)
         except ArtefactUnavailable as exc:
             return files, ['could not write %d class(es) the project imports (%s); the build will fail on them.'
                            % (len(requests), exc)]
@@ -364,7 +387,7 @@ class CodeGenerationAgent(BaseAgent):
         return files + added, ['wrote %s, which the project imports and did not define' % path for path, _ in added]
 
     def _revise(self, context, targets, tasks, model, standards, skill, project_files):
-        return authored_with_no_markers(
+        return authored_with_no_endpoints(
             context, self.FILE_PROMPT,
             [(p, {'path': p, 'purpose': 'Revision of this class: ' + self.BREAKER_CHANGE,
                   'current_content': c, 'required_change': self.BREAKER_CHANGE,

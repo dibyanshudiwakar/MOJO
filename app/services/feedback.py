@@ -528,9 +528,12 @@ class CodeFeedbackService:
         return changed
 
     def _fix_endpoints(self, root):
+        # Configuration only. A URL in Java is a value the code uses (a constant, an XML namespace), and swapping it for a
+        # ${...} text makes that constant the literal string "${EXTERNAL_ENDPOINT}" at run time. Java is fixed at generation,
+        # where the URL moves to a property and is injected with @Value.
         changed = []
         for f in _files(root):
-            if is_externalized_config(f):
+            if is_externalized_config(f) or f.suffix.lower() == '.java':
                 continue
             text = lp(f).read_text(errors='ignore')
             new = _URL.sub('${EXTERNAL_ENDPOINT}', text)

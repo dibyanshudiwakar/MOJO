@@ -88,3 +88,65 @@ def test_the_boot_line_is_read_from_the_supplied_framework_clone_first(tmp_path)
     parent = '<project><properties><framework.version>3.2.2</framework.version><springdoc.version>3.0.3</springdoc.version></properties></project>'
     files, actions = P.pin_spring_line([('parent/pom.xml', parent)], str(m2), framework_root=str(clone))
     assert '<springdoc.version>2.8.9</springdoc.version>' in files[0][1], 'Boot 3.5 in the clone means springdoc 2.x'
+
+
+# -- a service URL belongs in the properties files, not in Java -------------------------------------------------------
+def test_a_service_url_in_java_is_refused_with_the_property_instructions():
+    answer = {'content': 'class A { private static final String HOST = "https://orders.internal.example.org/api"; }'}
+    problem = CG.no_endpoint_literals('A.java', answer)
+    assert problem is not None and '@Value' in problem and 'orders.internal.example.org' in problem
+
+
+def test_a_namespace_url_is_refused_too_because_the_gate_counts_it():
+    assert CG.no_endpoint_literals('A.java', {'content': 'String ns = "http://service.ecs.caremark.com";'}) is not None
+
+
+def test_a_specification_url_a_comment_and_a_properties_file_are_accepted():
+    assert CG.no_endpoint_literals('A.java', {'content': 'String s = "http://www.w3.org/2001/XMLSchema";'}) is None
+    assert CG.no_endpoint_literals('A.java', {'content': '// docs: https://x.example.org/y\nclass A {}'}) is None
+    assert CG.no_endpoint_literals('app.properties', {'content': 'url=https://x.example.org'}) is None
+
+
+def test_a_value_injected_from_a_property_is_accepted():
+    code = 'class A { @Value("${ecs.namespace}") private String namespace; }'
+    assert CG.no_endpoint_literals('A.java', {'content': code}) is None
+
+
+def test_a_file_that_trips_either_check_is_refused_by_the_combined_validator():
+    seen = []
+
+    def fake_produce_many(context, prompt, items, validator=None, **kwargs):
+        seen.append(validator)
+        return {}, {}
+
+    original = CG.produce_many
+    CG.produce_many = fake_produce_many
+    try:
+        CG.authored_with_no_endpoints(None, 'p', [])
+    finally:
+        CG.produce_many = original
+    check = seen[0]
+    assert check('A.java', {'content': '// TODO later'}) is not None
+    assert check('A.java', {'content': 'String u = "https://a.example.org/x";'}) is not None
+    assert check('A.java', {'content': 'class A {}'}) is None
+
+
+# -- unmanaged dependencies --------------------------------------------------------------------------------------------
+def test_an_unmanaged_dependency_without_a_version_gets_the_newest_cached_one(tmp_path):
+    folder = tmp_path / 'm2' / 'org' / 'openapitools' / 'jackson-databind-nullable'
+    for v in ('0.2.5', '0.2.6'):
+        (folder / v).mkdir(parents=True)
+    pom = ('<project><dependencies><dependency><groupId>org.openapitools</groupId>'
+           '<artifactId>jackson-databind-nullable</artifactId></dependency></dependencies></project>')
+    files, actions = P.pin_unmanaged_versions([('web/pom.xml', pom)], str(tmp_path / 'm2'))
+    assert '<version>0.2.6</version>' in files[0][1]
+    assert any('jackson-databind-nullable' in a for a in actions)
+
+
+def test_a_dependency_that_already_has_a_version_or_is_managed_is_left_alone(tmp_path):
+    versioned = ('<project><dependencies><dependency><groupId>org.openapitools</groupId>'
+                 '<artifactId>jackson-databind-nullable</artifactId><version>0.2.4</version></dependency>'
+                 '<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId>'
+                 '</dependency></dependencies></project>')
+    files, actions = P.pin_unmanaged_versions([('web/pom.xml', versioned)], str(tmp_path))
+    assert files[0][1] == versioned and actions == []
