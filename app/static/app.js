@@ -2176,6 +2176,8 @@ function renderArtefact(art){
   const row=(tab,ico,name,meta)=>`<div class="plan-si" data-fbk-tab="${tab}"><div class="plan-si-l"><svg class="plan-si-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">${ico}</svg><div><div class="plan-si-name">${name}</div><div class="plan-si-meta">${meta}</div></div></div><span class="plan-si-caret">›</span></div>`;
   html+=`<div class="plan-stats-row"><div class="plan-stat-chip"><span class="plan-stat-n">${fixes.length}</span><span class="plan-stat-l">Fixes Applied</span></div><div class="plan-stat-chip ${unresolved.length?'plan-stat-warn':'plan-stat-ok'}"><span class="plan-stat-n">${unresolved.length}</span><span class="plan-stat-l">Unresolved</span></div><div class="plan-stat-chip ${qs==='PASS'?'plan-stat-ok':qs?'plan-stat-warn':''}"><span class="plan-stat-n">${esc(qs||'—')}</span><span class="plan-stat-l">Quality Gate</span></div><div class="plan-stat-chip"><span class="plan-stat-n">${passes.length}</span><span class="plan-stat-l">Repair Passes</span></div></div>`;
   let fSecs='';
+  const changedFiles=art.changed_files||[];
+  if(changedFiles.length)fSecs+=row('files','<path d="M5 3h7l3 3v11H5z"/><line x1="7.5" y1="10" x2="12.5" y2="10"/><line x1="7.5" y1="13" x2="12.5" y2="13"/>','Changed Files',`${changedFiles.length} file${changedFiles.length!==1?'s':''} changed by the repair · each with its changes and content`);
   if(fixes.length)fSecs+=row('fixes','<path d="M4 4l12 12M16 4L4 16"/>','Applied Fixes',`${fixes.length} change${fixes.length!==1?'s':''} made to the generated project`);
   if(passes.length)fSecs+=row('passes','<polyline points="4 10 8 14 16 6"/>','Repair Passes',`${passes.length} pass${passes.length!==1?'es':''} run against the quality gate`);
   if(unresolved.length)fSecs+=row('unresolved','<path d="M10 3L17 16H3L10 3Z"/><line x1="10" y1="9" x2="10" y2="12.5"/>','Unresolved',`${unresolved.length} item${unresolved.length!==1?'s':''} handed to the remediation agent`);
@@ -2692,6 +2694,33 @@ function renderRemTab(art,tab){
   return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Item</th><th>Why it is still open</th></tr></thead><tbody>${rows.map(({c,ref,why})=>`<tr><td style="font-size:12px">${esc(label(c))}</td><td style="font-size:12px;word-break:break-word">${esc(ref||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(why||'—')}</td></tr>`).join('')}</tbody></table></div>`}
  if(tab==='causes')return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Root cause</th><th>Confidence</th><th>Outcome</th><th>Fixes</th><th>Tests</th></tr></thead><tbody>${causes.map(c=>`<tr><td style="font-size:12px;min-width:240px"><b>${esc(label(c))}</b><br>${esc(c.hypothesis||'')}</td><td>${_pctBar(c.confidence)}</td><td>${_statusBadge(String(c.outcome||'').toUpperCase())}</td><td>${(c.applied||[]).length}</td><td style="font-size:11px">${esc((c.tests||[]).join(', '))}</td></tr>`).join('')}</tbody></table></div>`;
  if(tab==='raw')return _rawTab('JSON · full remediation output','remmCopyJson',window._remOutputs||art);
+ return ''}
+
+// ==== Feedback (Code Quality) Output Modal ================================
+function openFbkModal(tab){
+ const art=window._fbkArt;if(!art)return;
+ const fixes=art.applied_fixes||[],files=art.changed_files||[],unresolved=art.unresolved||[];
+ const tabs=[
+  files.length&&{key:'files',label:'Changed Files',count:files.length},
+  fixes.length&&{key:'fixes',label:'Applied Fixes',count:fixes.length},
+  unresolved.length&&{key:'unresolved',label:'Unresolved',count:unresolved.length},
+  {key:'raw',label:'Raw Output',count:null}].filter(Boolean);
+ _openOutputModal('fbkModal','fbkClose','Code Quality Feedback',`${fixes.length} fix${fixes.length!==1?'es':''} applied · ${files.length} file${files.length!==1?'s':''} changed`,tabs,renderFbkTab,(t,a)=>{if(t==='raw')_wireCopy('fbkCopyJson',a)},tab,art)}
+function renderFbkTab(art,tab){
+ const chev=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+ if(tab==='files'){
+  const files=art.changed_files||[];
+  if(!files.length)return '<p class="authhint">No files were changed.</p>';
+  return `<div style="display:flex;flex-direction:column;gap:8px">${files.map(f=>`<details class="op-raw-section" style="margin:0"><summary style="display:flex;align-items:center;gap:6px">${chev}<span style="font-family:monospace;font-size:12px;word-break:break-all">${esc(f.path)}</span><span class="plan-tab-badge" style="margin-left:auto">${f.changes.length}</span></summary><div style="margin:6px 0"><table class="plan-tbl"><thead><tr><th>Check</th><th>What changed</th></tr></thead><tbody>${f.changes.map(c=>`<tr><td>${_statusBadge(c.check)}</td><td style="font-size:12px;word-break:break-word">${esc(c.action||'—')}</td></tr>`).join('')}</tbody></table></div>${f.content?`<pre class="artefact-pre artefact-code" style="margin-top:6px">${esc(f.content)}</pre>`:'<p class="authhint">The file is larger than the viewer shows, or could not be read.</p>'}</details>`).join('')}</div>`}
+ if(tab==='fixes'){
+  const fixes=art.applied_fixes||[];
+  if(!fixes.length)return '<p class="authhint">No fixes were applied.</p>';
+  return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Check</th><th>File</th><th>What changed</th></tr></thead><tbody>${fixes.map(f=>`<tr><td>${_statusBadge(f.check)}</td><td style="font-family:monospace;font-size:11px;word-break:break-all">${esc(f.path||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(f.action||'—')}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='unresolved'){
+  const rows=art.unresolved||[];
+  if(!rows.length)return '<p class="authhint">Nothing is unresolved.</p>';
+  return `<div class="plan-tbl-wrap"><table class="plan-tbl"><thead><tr><th>Kind</th><th>Detail</th></tr></thead><tbody>${rows.map(u=>`<tr><td style="font-size:12px">${esc(u.kind||'—')}</td><td style="font-size:12px;word-break:break-word">${esc(u.reason||u.detail||JSON.stringify(u))}</td></tr>`).join('')}</tbody></table></div>`}
+ if(tab==='raw')return _rawTab('JSON · full feedback output · copy to clipboard','fbkCopyJson',art);
  return ''}
 
 // ==== Code Generation Output Modal ========================================
