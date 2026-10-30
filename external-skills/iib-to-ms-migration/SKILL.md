@@ -59,7 +59,7 @@ A 2026-09-29 survey found 22 real, buildable MS repos actually sitting in the sa
 
 ## 3. Mandatory rules — load before generating any code
 
-> ⚠️ **Load and apply `references/mandatory-migration-rules.md` in full before INTAKE.** These 13 rules override any pattern shown elsewhere in this skill.
+> ⚠️ **Load and apply `references/mandatory-migration-rules.md` in full before INTAKE.** These 15 rules override any pattern shown elsewhere in this skill.
 
 | # | Rule | Quick summary |
 |---|---|---|
@@ -76,6 +76,8 @@ A 2026-09-29 survey found 22 real, buildable MS repos actually sitting in the sa
 | 11 | JUnit tests — ask the user, then generate accordingly | Always ask at INTAKE: full test cases with real content, or structure-only empty skeletons? Honor the answer — generate real `@Test` methods/assertions if they want full content, empty classes if not |
 | 12 | Internal-CVS-backend host is always plain `pbm-oci` (no `az`/`ri`); `application-local.properties` → always QA | Every internal-CVS-backend connector (`ql`, `rxclaim`, `qlhc`, `ecshc`, `refdata`) shares one host family, `<env>eippbm-oci.cvshealth.com` — never `pbmaz`/`pbmri`, in any environment including prod. Separately, `application-local.properties` always points that host at the `qa`/`qa2` tier, never `dev`/`prod`. External-vendor connectors use that vendor's own non-prod endpoint instead — no CVS "QA"/`pbm-oci` equivalent exists for those |
 | 13 | Target directory — same location as the IIB source by default | New MS repo defaults to being created as a sibling of the IIB source repo, not a separate output location picked ad hoc — state the default, let the user override it |
+| 14 | Every generated repository carries `settings.xml` | Verbatim copy of `references/templates/maven-settings.xml` at the repo root; every `mvn` command for the repository passes `-s <repo-root>/settings.xml` — the org's artifacts resolve nowhere else |
+| 15 | No properties file defers a value to an OS environment variable | Never `${SOME_ENV_VAR}` to stand in for a value this skill doesn't have — a literal, clearly-marked placeholder instead (same pattern as Rule 6's credential/secret-path placeholders), flagged as an action item; generate the key immediately either way |
 
 ---
 
@@ -191,6 +193,8 @@ First action on any re-invocation: look for `<target>/.iib2spring/state.json` pe
 - [ ] Every generated JUnit test class is an empty skeleton — no `@Test` methods, assertions, or mocks; `mvn test -q` passes with 0 tests run (Rule 11)
 - [ ] Every internal-CVS-backend connector URI, in every environment file (not just the local profile), uses the plain `<env>eippbm-oci.cvshealth.com` host — never an `az`/`ri` suffix (Rule 12)
 - [ ] `application-local.properties`'s internal-CVS-backend connector URI(s) point at the `qa`/`qa2` tier, never `dev`/`prod`; external-vendor connectors use that vendor's own non-prod endpoint instead (Rule 12)
+- [ ] `settings.xml` is at the repo root, byte-identical to `references/templates/maven-settings.xml`, and every `mvn` command for the repository passes `-s <repo-root>/settings.xml` (Rule 14)
+- [ ] No generated properties file (packaged or any config-map) carries a `${SOME_ENV_VAR}` reference with no corresponding `key=` in that file — an unknown value is a literal, clearly-marked placeholder instead, flagged as an action item (Rule 15)
 
 ### 7.2 Gap checklist (`references/gap-checklist.md`)
 
@@ -211,6 +215,8 @@ Run every BLOCKING + HIGH item, plus MEDIUM once deployment artifacts exist, plu
 - A leftover `target/` folder under the parent module at HANDOFF **[M24]**
 - HANDOFF-C's smoke test left at `"pending"` instead of `"passed"`/`"failed_blocking"` **[M25]**
 - A `NEW:<name>` (frameworks-repo fallback) run that doesn't cite the module, branch, and commit it actually read, or that uses `framework-adapter` **[M26]**
+- `settings.xml` missing from the repo root, or differing from `references/templates/maven-settings.xml` **[M27]**
+- Any packaged or config-map properties file carrying a `${SOME_ENV_VAR}` reference with no corresponding `key=` in that file **[M28]**
 
 ### 7.3 Structural-conventions checklist (`references/structural-conventions.md` §12)
 

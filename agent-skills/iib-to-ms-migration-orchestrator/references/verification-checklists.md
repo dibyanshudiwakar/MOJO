@@ -1,6 +1,8 @@
 <!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- SKILL.md lines 175–217. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
 
 
+---
+
 ## 7. Verification — run before every checkpoint
 
 ### 7.1 Mandatory-rules checklist (`references/mandatory-migration-rules.md`)
@@ -19,6 +21,8 @@
 - [ ] Every generated JUnit test class is an empty skeleton — no `@Test` methods, assertions, or mocks; `mvn test -q` passes with 0 tests run (Rule 11)
 - [ ] Every internal-CVS-backend connector URI, in every environment file (not just the local profile), uses the plain `<env>eippbm-oci.cvshealth.com` host — never an `az`/`ri` suffix (Rule 12)
 - [ ] `application-local.properties`'s internal-CVS-backend connector URI(s) point at the `qa`/`qa2` tier, never `dev`/`prod`; external-vendor connectors use that vendor's own non-prod endpoint instead (Rule 12)
+- [ ] `settings.xml` is at the repo root, byte-identical to `references/templates/maven-settings.xml`, and every `mvn` command for the repository passes `-s <repo-root>/settings.xml` (Rule 14)
+- [ ] No generated properties file (packaged or any config-map) carries a `${SOME_ENV_VAR}` reference with no corresponding `key=` in that file — an unknown value is a literal, clearly-marked placeholder instead, flagged as an action item (Rule 15)
 
 ### 7.2 Gap checklist (`references/gap-checklist.md`)
 
@@ -39,7 +43,3 @@ Run every BLOCKING + HIGH item, plus MEDIUM once deployment artifacts exist, plu
 - A leftover `target/` folder under the parent module at HANDOFF **[M24]**
 - HANDOFF-C's smoke test left at `"pending"` instead of `"passed"`/`"failed_blocking"` **[M25]**
 - A `NEW:<name>` (frameworks-repo fallback) run that doesn't cite the module, branch, and commit it actually read, or that uses `framework-adapter` **[M26]**
-
-### 7.3 Structural-conventions checklist (`references/structural-conventions.md` §12)
-
-`.github/` workflows; Helm chart; full environment property list; **config-map self-containment (every packaged-`application.properties` key present in all ten config-maps — [M15])**; **baseline block present byte-for-byte in the packaged file AND all ten config-maps, checked against the physical `references/templates/config-map-baseline.properties`, not from memory (HANDOFF-A0)**; concern-split constants; dedicated validator/utility classes (or, for RxClaim SBO, the thin-`Service`-plus-`*ServiceUtil`-under-`util/` pattern — see `rxclaim-sbo-xml-jaxb.md` §8); records with full annotations (where records are the convention — not RxClaim SBO, see `rxclaim-sbo-xml-jaxb.md` §0); framework `ErrorStatus`; `@EIPMicroserviceOperation` + concrete return types; `@Validated`; `@Data`-only Bindy models; contiguous wire segments as one Bindy class; controller delegates to the service only, no inline error-response calls or request/response mapping logic.

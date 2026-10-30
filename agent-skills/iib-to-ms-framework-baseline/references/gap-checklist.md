@@ -191,6 +191,12 @@ This checklist absorbs both the original 21-item list from the sibling migration
   ```
   Any hit is a GAP — copy the template to the repo root. Every Maven command for the repository must also pass `-s <repo-root>/settings.xml` (`mandatory-migration-rules.md` Rule 14); the internal artifacts resolve nowhere else.
 
+- **[M28]** **[Rule 15]** **No generated properties file defers a value to an OS environment variable.** Mechanical check, every packaged and config-map properties file:
+  ```bash
+  grep -nE '\$\{[A-Z_][A-Z0-9_]*\}' application.properties application-local.properties config/config-map/*.properties
+  ```
+  Spring's own `${...}` property-reference syntax (one property pointing at another already defined in the same file, or at `spring.config.import`) is not what this flags — only a reference with no corresponding `key=` anywhere in the file, which means it is silently expecting an OS/container environment variable to supply it. Any hit is a GAP — replace it with a literal, clearly-marked placeholder (`<VALUE_TBD_BY_TEAM>` or similarly named) and list it as an action item.
+
 ---
 
 ## Applying this checklist

@@ -497,3 +497,16 @@ The org's artifacts (the `framework-starter` parent, `framework-restclient` and 
 - **Every** `mvn` command for this repository — compile, test, `clean verify`, `spring-boot:run`, and the ones in `.github/workflows/` — passes it: `mvn -s <repo-root>/settings.xml ...`. A build that omits `-s` is not a valid build of this repository, whatever it reports.
 - Mechanical check: `gap-checklist.md` [M27].
 
+---
+
+## Rule 15 — A properties file never reads a value from an OS environment variable; an unknown value is a placeholder, not `${...}`
+
+> **Standing instruction, 2026-10-30.** This generalises the placeholder pattern Rule 6 already uses for a credential and an Akeyless secret path to every value in every generated properties file: never emit something that depends on an environment variable being set outside the repository, in any case, for any property. A value this skill does not actually have evidence for is a placeholder, full stop — never a deferred environment-variable lookup.
+
+- **Never write `${SOME_ENV_VAR}`-style OS-environment substitution into a generated properties file** (`application.properties`, `application-local.properties`, or any `config/config-map/application.<env>-<cluster>.properties`) as a way to defer a value this skill does not actually have — not for a host, not for a queue name, not for a timeout, not for anything. That syntax silently depends on something being set in whatever environment the file is deployed into, and nobody reviewing the generated repository can tell whether it ever will be.
+  - This is distinct from Spring's own config layering (`spring.config.import`, profile-specific files, `SPRING_CONFIG_LOCATION`) and from the Akeyless-injected `application-akeyless.properties` (Rule 6) — those are the framework's real, confirmed mechanisms for a value that genuinely comes from outside the repository at deploy time, not a stand-in for one this skill hasn't determined.
+- **If the real value is not known at migration time, write a clearly-marked literal placeholder string instead** — the same pattern as `<REPLACE_WITH_ENCRYPTED_VALUE>` (Rule 6, a credential) and `<AKEYLESS_SECRET_PATH_TBD_BY_TEAM>` (Rule 6, a secret path): e.g. `<HOST_TBD_BY_TEAM>`, `<QUEUE_NAME_TBD_BY_TEAM>`, `<VALUE_TBD_BY_TEAM>`. Flag it as an action item in the final output. Never fabricate a plausible-looking value and never leave an environment-variable reference standing in for one.
+- **Generate the key immediately either way** — same as Rule 6's "generate everything else immediately; never pause to ask" — the placeholder is what lets the rest of the file, and the rest of the migration, proceed without waiting on the real value.
+- A value this skill *does* have real evidence for (Rule 12's `pbm-oci` host, a value read from the IIB source, a value the user gave at INTAKE) is written literally, exactly as the rule that covers it already says — this rule only changes what happens when there is no such evidence.
+- Mechanical check: `gap-checklist.md` [M28].
+

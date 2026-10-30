@@ -23,7 +23,7 @@
         },
         {
           "path": "references/handoff-and-action-items.md",
-          "sha256": "2a6d95ccb63845e9295a85879f1b179087d7968df8c770e1d169ad1f197d5ac3",
+          "sha256": "90780224e71de7510ea38d026098453492ea81f39f25c0a432f3396cd2bffba1",
           "kind": "owned",
           "owner": "iib-to-ms-migration-orchestrator"
         },
@@ -47,7 +47,7 @@
         },
         {
           "path": "references/verification-checklists.md",
-          "sha256": "e90451b886e6f559809e57181ee0b92e74f720a531bc3d63030cf8b9ff30195e",
+          "sha256": "4f5c864a5e0fe71aac5e8adba25b951dda2a9da2fb026f44fd6c130940ba096f",
           "kind": "copy",
           "owner": "iib-to-ms-governance"
         }
@@ -75,7 +75,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -117,13 +117,13 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }
@@ -153,13 +153,13 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -201,7 +201,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -237,7 +237,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -321,13 +321,13 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
         {
           "path": "references/handoff-and-action-items.md",
-          "sha256": "2a6d95ccb63845e9295a85879f1b179087d7968df8c770e1d169ad1f197d5ac3",
+          "sha256": "90780224e71de7510ea38d026098453492ea81f39f25c0a432f3396cd2bffba1",
           "kind": "copy",
           "owner": "iib-to-ms-migration-orchestrator"
         },
@@ -345,7 +345,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "owned",
           "owner": "iib-to-ms-code-generation"
         },
@@ -423,7 +423,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -471,7 +471,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -525,7 +525,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -537,7 +537,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }
@@ -567,7 +567,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -595,7 +595,7 @@
       "references": [
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -607,7 +607,7 @@
         },
         {
           "path": "references/mandatory-migration-rules.md",
-          "sha256": "e70336621e07c2403f21c14f74fad64812c7219d1d402fa24056a65ff77c03a7",
+          "sha256": "76e1964425d1c71f005dadc224cb398a9fca3b8db9fe69405dca7302ba547af2",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         },
@@ -625,7 +625,7 @@
         },
         {
           "path": "references/verification-checklists.md",
-          "sha256": "e90451b886e6f559809e57181ee0b92e74f720a531bc3d63030cf8b9ff30195e",
+          "sha256": "4f5c864a5e0fe71aac5e8adba25b951dda2a9da2fb026f44fd6c130940ba096f",
           "kind": "owned",
           "owner": "iib-to-ms-governance"
         }
@@ -659,7 +659,7 @@
         },
         {
           "path": "references/gap-checklist.md",
-          "sha256": "575f74562de0003f74c1ed94396327f52ec6446c8d022d8c88762be141dd8de7",
+          "sha256": "dbab56124de7e4d2b0802bd0d46a94151795f94fd2ba1bfccaf772a0c842c81e",
           "kind": "copy",
           "owner": "iib-to-ms-code-generation"
         }

@@ -1,5 +1,7 @@
 <!-- Extracted verbatim from external-skills/iib-to-ms-migration/ -- SKILL.md lines 135–165. File names mentioned inside (for example `references/gap-checklist.md`) are the ORIGINAL names; every file mentioned there that this skill uses sits in its own references/ folder. -->
 
+   - **Content depends on the INTAKE answer (Rule 11):** if the user asked for full test cases, write real `@Test` methods with real assertions and mocked behavior covering the happy path, validation errors, and backend/generic-exception paths; otherwise every file is an empty skeleton — no `@Test` methods, assertions, or mocked behavior.
+   - `mvn -s <repo-root>/settings.xml test -q` must pass either way (0 tests run is only fine in structure-only mode). **[CHECKPOINT]**
 
 ### Step 4 — HANDOFF: full build & hand-off
 
@@ -28,5 +30,3 @@ State at the top:
 - **Framework version selected:** `x.y.z` (reason: user-specified / highest found in workspace repo `<name>`)
 - **CVS programme phase:** 1 or 2 (determines credential handling approach)
 - **Backend type:** determined in INTAKE
-
-Then present files in this order: `.github/` workflows → parent pom → web pom → Dockerfile → config-map properties + Helm chart → controller/API interface → service → connector → buffer builders/XML converters/request mappers → buffer parsers/response mappers → Bindy/JAXB models → error/validator classes → constants.

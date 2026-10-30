@@ -176,9 +176,23 @@ class DormancyService:
   ``confidence`` is always the evidence-coverage figure from ``classify``: a
   model's own confidence is advisory and recorded in the run's metrics, never
   substituted for the measured one a gate reads.
+
+  With zero known signals ``classify`` itself has nothing to go on and
+  answers UNKNOWN -- but the model, asked the identical question, answered
+  DORMANT anyway (confidence 0, disagreeing with the rules), and pipelines.py
+  gates code-generation on exactly that classification. A guess made from no
+  evidence at all is not evidence either, so with no known signal the stored
+  classification is the deterministic UNKNOWN rather than the model's, which
+  does not gate the conversion. The model's own guess still travels in the
+  rationale rather than being silently dropped; with any real signal supplied
+  the model's classification is used exactly as before.
   """
-  i=uid();measured=self.classify(e)['confidence']
-  with self.repo.connect() as c:c.execute('insert into dormancy_assessments values(?,?,?,?,?,?,?)',(i,job_id,verdict.get('classification') or 'UNKNOWN',measured,json.dumps(e),verdict.get('rationale') or '',now()))
+  i=uid();computed=self.classify(e);measured=computed['confidence'];model_cls=verdict.get('classification') or 'UNKNOWN'
+  cls=model_cls if measured>0 else computed['classification']
+  rationale=verdict.get('rationale') or ''
+  if measured==0 and model_cls!=cls:
+   rationale=(rationale+' ' if rationale else '')+'[no known signals; model suggested %s, not used]'%model_cls
+  with self.repo.connect() as c:c.execute('insert into dormancy_assessments values(?,?,?,?,?,?,?)',(i,job_id,cls,measured,json.dumps(e),rationale,now()))
   return self.repo.one('select * from dormancy_assessments where id=?',(i,))
  def assess(self,job_id,traffic_count=None,last_seen_days=None,deployed=None,already_migrated=None):
   """Deterministic end to end, for callers with no agent context to reason with."""
