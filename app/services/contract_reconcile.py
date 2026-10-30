@@ -48,6 +48,8 @@ _STUB_BODY = re.compile(r'^\{\s*throw\s+new\s+UnsupportedOperationException\s*\(
 _CONST_DECL = re.compile(
     r'(?m)^\s*(?:public|private|protected)?\s*static\s+final\s+(?:String|int|long|char|boolean)\s+'
     r'([A-Z][A-Z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)\'|-?\d+|true|false)\s*;')
+#: A private static constant. Read from another file it fails with "has private access", so it is widened.
+_PRIVATE_CONST = re.compile(r'(?m)^\s*private\s+((?:static\s+final|final\s+static)\s+[\w.<>\[\]]+\s+([A-Z][A-Z0-9_]*)\s*=)')
 MAX_REVISIONS = 6
 
 
@@ -183,15 +185,17 @@ def _innermost(decls, pos):
     return best
 
 
-def _framework_contracts(poms, m2_root, wanted):
-    """``{simple: {...}}`` for jar classes named by fully qualified name in ``wanted``, read with javap."""
+def _framework_contracts(poms, m2_root, wanted, packages=(), used=()):
+    """``{simple: {...}}`` for jar classes named in ``wanted`` (fully qualified) or imported by wildcard from
+    ``packages`` and named in the source as ``used``, read with javap."""
     javap = shutil.which('javap')
-    if not javap or not wanted:
+    if not javap or not (wanted or packages):
         return {}
     out = {}
     for jar in dependency_jars.project_jars(poms, m2_root):
         present = {fqn for fqns in dependency_jars.classes_in_jar(jar).values() for fqn in fqns}
-        for fqn in sorted(wanted & present):
+        wildcard = {f for f in present if f.rsplit('.', 1)[0] in packages and f.rsplit('.', 1)[-1] in used}
+        for fqn in sorted((wanted & present) | wildcard):
             simple = fqn.rsplit('.', 1)[-1]
             if simple in out:
                 continue
@@ -238,13 +242,15 @@ def contracts(files, m2_root):
                 info.setdefault('fields', set())
                 local.setdefault(name, info)
     poms = [text for path, text in files if str(path).replace(chr(92), '/').rsplit('/', 1)[-1] == 'pom.xml']
-    wanted = set()
+    wanted, packages, used = set(), set(), set()
     for path, text in files:
         if str(path).endswith('.java'):
             for fqn in re.findall(r'^import\s+([\w.]+)\s*;', text, re.M):
                 if fqn.rsplit('.', 1)[-1] not in local:
                     wanted.add(fqn)
-    framework = _framework_contracts(poms, m2_root, wanted) if poms else {}
+            packages |= set(re.findall(r'^import\s+([\w.]+)\.\*\s*;', text, re.M))
+            used |= set(re.findall(r'\b([A-Z]\w*)\b', _code(text)))
+    framework = _framework_contracts(poms, m2_root, wanted, packages, used - set(local)) if poms else {}
     return {**framework, **local}
 
 
@@ -496,6 +502,43 @@ def duplicate_constants(files):
     return out
 
 
+# -- a private constant read from another file -----------------------------------------------------------------
+def widen_private_constants(files):
+    """``(files, action_items)`` with each private static constant that another file reads made ``public``.
+
+    Java refuses ``NAME has private access`` when a class outside the declaring one reads it, and the reader
+    cannot fix that by itself: it has no other way to reach the value. The declaring file is the one to change,
+    and only its declaration line. A name declared private in two files is ambiguous and left alone.
+    """
+    owners = {}
+    for path, text in files:
+        if str(path).endswith('.java'):
+            for _decl, name in _PRIVATE_CONST.findall(_code(text)):
+                owners.setdefault(name, set()).add(path)
+    widen, actions = {}, []
+    for name, paths in sorted(owners.items()):
+        if len(paths) != 1:
+            continue
+        owner = next(iter(paths))
+        readers = [p for p, t in files if p != owner and str(p).endswith('.java')
+                   and re.search(r'(?<![\w.])(?:\w+\.)?%s\b' % re.escape(name), _code(t))
+                   and not re.search(r'\b(?:static\s+final|final\s+static)\s+[\w.<>\[\]]+\s+%s\s*=' % re.escape(name), _code(t))]
+        if readers:
+            widen[name] = owner
+            actions.append('%s is private in %s but read from %s; made it public so the reader compiles.'
+                           % (name, owner, ', '.join(readers)))
+    if not widen:
+        return files, []
+    out = []
+    for path, text in files:
+        for name, owner in widen.items():
+            if path == owner:
+                text = re.sub(r'(?m)^(\s*)private(\s+(?:static\s+final|final\s+static)\s+[\w.<>\[\]]+\s+%s\s*=)'
+                              % re.escape(name), lambda m: m.group(1) + 'public' + m.group(2), text, count=1)
+        out.append((path, text))
+    return out, actions
+
+
 def _file_problems(path, text, contract_map, dup_map):
     """Every problem -- contradiction, omission or duplication -- this one file's content has right now."""
     if not str(path).endswith('.java'):
@@ -508,7 +551,7 @@ def reconcile(context, files, m2_root, produce_many, file_prompt, effort, skill,
     """``(files, actions)``: revise each file that disagrees with, or omits using, a real type it
     depends on -- including a shared constant another file already declares -- keeping a revision
     only if it is better."""
-    actions = []
+    files, actions = widen_private_constants(files)
     for _attempt in range(MAX_REVISIONS):
         contract_map = contracts(files, m2_root)
         dup_map = duplicate_constants(files)

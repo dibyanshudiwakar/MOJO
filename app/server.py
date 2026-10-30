@@ -96,6 +96,31 @@ def _language(path):
     return _LANGUAGES.get('.' + name.rsplit('.', 1)[-1] if '.' in name else '', 'text')
 
 
+def _changed_files(fixes):
+    """The files the feedback repair changed, each with its current content and the changes made to it.
+
+    Code generation lists its files with their content; feedback changes files on disk, so the same view is read
+    back from there, grouped by path. A file that cannot be read, or is larger than the viewer shows, keeps its
+    change list with empty content.
+    """
+    from app.services.feedback import lp
+    by_path = {}
+    for fix in fixes or []:
+        path = str(fix.get('path') or '')
+        if path:
+            by_path.setdefault(path, []).append({'check': fix.get('check', ''), 'action': fix.get('action', '')})
+    out = []
+    for path, changes in sorted(by_path.items())[:200]:
+        content = ''
+        try:
+            if os.path.getsize(lp(path)) <= 512 * 1024:
+                content = lp(path).read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            content = ''
+        out.append({'path': path, 'content': content, 'language': _language(path), 'changes': changes})
+    return out
+
+
 def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
     """Resolve an agent's output IDs to displayable content from service tables.
 
@@ -274,6 +299,7 @@ def _resolve_agent_artefacts(r, agent_id, outputs, job_id):
                  'report_url': (failure_reports.latest_for_job(r, job_id) or {}).get('html_url', ''),
                  'quality_status': outputs.get('quality_status', ''),
                  'applied_fixes': outputs.get('applied_fixes', []),
+                 'changed_files': _changed_files(outputs.get('applied_fixes', [])),
                  'unresolved': outputs.get('unresolved', [])}
         elif agent_id == 'test-engineering':
             pkg_id = outputs.get('test_suites', '')
