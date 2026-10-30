@@ -1441,9 +1441,16 @@ body.auth-mode #ghIndicator,body.auth-mode #userChip,body.auth-mode #new{display
 .access-table td{white-space:normal;vertical-align:top;overflow-wrap:anywhere}
 .access-table th:nth-child(1){width:26%}
 .access-table .rsel-chip{display:inline-flex;margin:2px 6px 2px 0;max-width:100%}
-.access-table select{max-width:100%;width:58%}
-.access-table td button{margin-top:2px}
+.grant-cell{display:flex;gap:8px;align-items:center}
+.grant-cell select{flex:1;min-width:0;background-color:#EEF4FF;color:#2558C4;font-weight:600;border-color:#2558C4}
+.grant-cell select:hover{border-color:#1A4AAE}
+.grant-cell select:focus{background-color:#EEF4FF;color:#2558C4}
+.grant-cell button{flex-shrink:0}
 @media(max-width:900px){.access-table table,.access-table thead,.access-table tbody,.access-table tr,.access-table td{display:block;width:100%}.access-table thead{display:none}.access-table tr{padding:10px 0;border-bottom:1px solid var(--border-2)}}
+select option{background:#EEF4FF;color:#1e293b}
+select option:checked{background:#2558C4;color:#fff}
+#profileRole{background-color:#EEF4FF;color:#2558C4;font-weight:600;border-color:#2558C4}
+#profileRole:focus{background-color:#EEF4FF;color:#2558C4}
 
 /* Access: section header with its action. */
 .access-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
