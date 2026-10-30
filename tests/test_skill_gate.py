@@ -208,6 +208,9 @@ MUTATIONS = [
         r, 'cvs-v1-orders-oci-web/src/main/resources/application-local.properties',
         _baseline_text() + 'application.http.restclient.q.uri=https://deveippbm-oci.cvshealth.com/q\n' + 'x=1\n' * 8)),
     ('SKILL_M24', 'leftover parent target', lambda r: (r / 'cvs-v1-orders-oci-parent' / 'target').mkdir()),
+    ('SKILL_M28', 'env-var reference in the packaged file', lambda r: _write(
+        r, 'cvs-v1-orders-oci-web/src/main/resources/application-local.properties',
+        _baseline_text() + 'application.http.restclient.q.uri=${Q_URI}\n' + 'x=1\n' * 8)),
     ('SKILL_M12', 'wrong top-level name', None),
     ('SKILL_M18', 'circuit breaker with no branch', None),
 ]
@@ -234,6 +237,44 @@ def test_circuit_breaker_properties_with_no_branch_are_a_gap(project):
     _write(project, 'cvs-v1-orders-oci-web/src/main/java/x/OrdersService.java',
            'package x; public class OrdersService {}')
     assert _status(project, 'SKILL_M18') == 'GAP'
+
+
+# ---- [M28][Rule 15]: no properties file defers a value to an OS environment variable -----------
+
+def test_a_spring_default_value_reference_is_not_a_gap(project):
+    """${PORT:8080} -- the baseline block's own server.port -- has a literal default; not what M28 flags."""
+    assert _status(project, 'SKILL_M28') == 'PASS'
+    assert 'server.port=${PORT:8080}' in _baseline_text()
+
+
+def test_a_config_map_env_var_reference_is_caught_too(project):
+    _write(project, 'config/config-map/application.dev-pbmaz.properties',
+          _baseline_text() + 'application.http.restclient.q.uri=${Q_URI}\n')
+    result = _results(project)['SKILL_M28']
+    assert result['status'] == 'GAP'
+    assert any('Q_URI' in e for e in result['evidence'])
+
+
+def test_a_literal_placeholder_is_not_a_gap(project):
+    """Rule 15's own remedy -- a clearly-marked literal string -- must not itself trip the check."""
+    _write(project, 'cvs-v1-orders-oci-web/src/main/resources/application-local.properties',
+          _baseline_text() + 'application.http.restclient.q.uri=<Q_URI_TBD_BY_TEAM>\n' + 'x=1\n' * 8)
+    assert _status(project, 'SKILL_M28') == 'PASS'
+
+
+def test_a_reference_to_a_key_defined_in_the_same_file_is_not_a_gap(project):
+    """A genuine property-to-property reference, not a dangling OS-environment lookup."""
+    _write(project, 'cvs-v1-orders-oci-web/src/main/resources/application-local.properties',
+          _baseline_text() + 'MY_BASE=https://x\napplication.http.restclient.q.uri=${MY_BASE}/q\n' + 'x=1\n' * 8)
+    assert _status(project, 'SKILL_M28') == 'PASS'
+
+
+def test_the_violating_line_and_file_are_named_in_the_evidence(project):
+    _write(project, 'cvs-v1-orders-oci-web/src/main/resources/application-local.properties',
+          _baseline_text() + 'application.http.restclient.q.uri=${Q_URI}\n' + 'x=1\n' * 8)
+    evidence = _results(project)['SKILL_M28']['evidence']
+    assert len(evidence) == 1
+    assert 'application-local.properties' in evidence[0] and 'Q_URI' in evidence[0]
 
 
 def test_gaps_do_not_fail_the_gate(project):
